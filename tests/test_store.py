@@ -573,3 +573,27 @@ async def test_migration_10_defaults_the_player_cap_to_20(tmp_path):
     await s.connect()
     assert (await s.get_mashup(1)).max_players == 20
     await s.close()
+
+
+async def test_a_failing_migration_changes_nothing_and_can_be_retried(tmp_path, monkeypatch):
+    import sqlite3
+
+    import aiosqlite
+
+    from src.db import store as store_module
+
+    path = tmp_path / "t.db"
+    s = Store(path)
+    await s.connect()
+    await s.close()
+    version = len(store_module.MIGRATIONS)
+    broken = "ALTER TABLE reminder ADD COLUMN extra INTEGER; SELECT * FROM no_such_table;"
+    monkeypatch.setattr(store_module, "MIGRATIONS", [*store_module.MIGRATIONS, broken])
+    again = Store(path)
+    with pytest.raises(sqlite3.OperationalError):
+        await again.connect()
+    await again.close()
+    async with aiosqlite.connect(path) as db:
+        assert (await (await db.execute("PRAGMA user_version")).fetchone())[0] == version
+        columns = [r[1] for r in await (await db.execute("PRAGMA table_info(reminder)")).fetchall()]
+    assert "extra" not in columns  # the first statement was rolled back too

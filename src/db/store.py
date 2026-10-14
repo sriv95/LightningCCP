@@ -463,8 +463,15 @@ class Store:
         row = await self._one("PRAGMA user_version")
         version = row[0]
         for number, script in enumerate(MIGRATIONS[version:], start=version + 1):
-            await self._db.executescript(f"{script}\nPRAGMA user_version = {number};")
-        await self._db.commit()
+            # One transaction per migration: a failure leaves neither half of it nor the version.
+            try:
+                await self._db.executescript(
+                    f"BEGIN;\n{script}\nPRAGMA user_version = {number};\nCOMMIT;"
+                )
+            except BaseException:
+                if self._db.in_transaction:
+                    await self._db.rollback()
+                raise
 
     @asynccontextmanager
     async def _tx(self) -> AsyncIterator[aiosqlite.Connection]:
