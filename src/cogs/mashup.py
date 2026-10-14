@@ -24,6 +24,7 @@ from src.ui.embeds import (
     log_board_embed,
     log_message,
     mashup_embed,
+    start_message,
 )
 
 log = logging.getLogger(__name__)
@@ -376,6 +377,18 @@ class MashupCog(commands.Cog, name="Mashup"):
         await self.edit_message(view)
         await self._log(view)
 
+    async def log_started(self, view: MashupView) -> None:
+        """Pings every player in the thread when the host starts the contest."""
+        m = view.mashup
+        if m.thread_id is None:
+            return
+        try:
+            await self.bot.get_partial_messageable(
+                m.thread_id, guild_id=m.guild_id, type=discord.ChannelType.public_thread
+            ).send(start_message(view), allowed_mentions=discord.AllowedMentions(users=True))
+        except Exception:  # a side channel, like the solve log
+            log.warning("Could not log the start of mashup %s", m.id, exc_info=True)
+
     async def log_gave_up(self, view: MashupView, user_id: int) -> None:
         """Tells the thread that a player left the running contest."""
         m = view.mashup
@@ -461,6 +474,8 @@ class MashupCog(commands.Cog, name="Mashup"):
         await self._log(view)
         if action == "giveup":
             await self.log_gave_up(view, interaction.user.id)
+        elif action == "start":
+            await self.log_started(view)
 
     @tasks.loop(seconds=60)
     async def tick_loop(self) -> None:

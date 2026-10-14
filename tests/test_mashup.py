@@ -844,3 +844,28 @@ async def test_give_up_is_logged_to_the_thread(env):
         SimpleNamespace(mashup=SimpleNamespace(thread_id=None)), 2
     )  # no thread: nothing happens
     assert len(sent) == 1
+
+
+async def test_start_pings_every_player_in_the_thread(env):
+    from types import SimpleNamespace
+
+    from src.cogs.mashup import MashupCog
+    from src.ui.embeds import start_message
+
+    svc, store, cf, clock = env
+    view = await started(svc, 2, 3)
+    text = start_message(view)
+    assert text.startswith("<@1> <@2> <@3>\nThe contest has started and ends ")
+    assert f"<t:{view.mashup.ends_at}:R>" in text
+    sent = []
+
+    class Thread:
+        async def send(self, text, **kw):
+            sent.append((text, kw["allowed_mentions"].users))
+
+    cog = MashupCog(SimpleNamespace(get_partial_messageable=lambda *a, **kw: Thread()))
+    await cog.log_started(view)  # no thread yet
+    assert sent == []
+    await svc.set_thread(view.mashup.id, 9)
+    await cog.log_started(await svc.view(view.mashup.id))
+    assert sent == [(text, True)]

@@ -450,6 +450,17 @@ def _log_who(view: MashupView, team: int, user: int) -> str:
     return f"<@{user}>" if view.mashup.team_size == 1 else f"Team {team} (<@{user}>)"
 
 
+def start_message(view: MashupView) -> str:
+    """The thread post that tells every player the contest began."""
+    m = view.mashup
+    kind = "bingo" if m.mode != "contest" else "contest"
+    who = " ".join(f"<@{p.user_id}>" for p in view.players)
+    return (
+        f"{who}\nThe {kind} has started and ends <t:{m.ends_at}:R>. "
+        "Solve the problems on Codeforces; the bot reads your submissions, and Check reads you at once."
+    )
+
+
 def give_up_message(view: MashupView, user: int) -> str:
     team = next(p.team for p in view.players if p.user_id == user)
     return f"{_log_who(view, team, user)} gave up."
