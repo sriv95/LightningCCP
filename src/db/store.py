@@ -290,6 +290,16 @@ MIGRATIONS = [
         PRIMARY KEY (mashup_id, problem_key)
     );
     """,
+    # A bingo has a thread for its solve log; mashup_logged remembers the claims already posted
+    # there (at most once each).
+    """
+    ALTER TABLE mashups ADD COLUMN thread_id INTEGER;
+    CREATE TABLE mashup_logged (
+        mashup_id INTEGER NOT NULL REFERENCES mashups (id),
+        problem_key TEXT NOT NULL,
+        PRIMARY KEY (mashup_id, problem_key)
+    );
+    """,
 ]
 
 
@@ -379,6 +389,7 @@ class MashupRow:
     mode: str = "contest"  # contest, or bingo: classic or replace
     size: int = 0  # side of a bingo board
     win: str = "line"  # classic bingo: "line" (first full line) or "continuous" (play to the end)
+    thread_id: int | None = None  # the thread of a bingo's solve log
 
 
 @dataclass(frozen=True)
@@ -1197,6 +1208,17 @@ class Store:
                 [(mashup_id, key) for key in set(excluded)],
             )
             return True
+
+    async def set_mashup_thread(self, mashup_id: int, thread_id: int) -> None:
+        await self._write("UPDATE mashups SET thread_id = ? WHERE id = ?", (thread_id, mashup_id))
+
+    async def mark_logged(self, mashup_id: int, problem_key: str) -> bool:
+        """True only the first time, so a claim is posted to the thread at most once."""
+        n = await self._write(
+            "INSERT OR IGNORE INTO mashup_logged (mashup_id, problem_key) VALUES (?, ?)",
+            (mashup_id, problem_key),
+        )
+        return n > 0
 
     async def mashup_excluded(self, mashup_id: int) -> frozenset[str]:
         rows = await self._all(

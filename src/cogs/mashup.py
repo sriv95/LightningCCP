@@ -18,7 +18,7 @@ from src.logic import (
     tag_suggestions,
 )
 from src.mashup import MashupView
-from src.ui.embeds import mashup_embed
+from src.ui.embeds import bingo_claim_message, mashup_embed
 
 log = logging.getLogger(__name__)
 
@@ -343,6 +343,44 @@ class MashupCog(commands.Cog, name="Mashup"):
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view), wait=True
         )
         await self.svc.set_message(view.mashup.id, interaction.channel_id, message.id)
+        if view.mashup.mode != "contest":
+            await self._open_thread(interaction, view, message)
+
+    async def _open_thread(
+        self, interaction: discord.Interaction, view: MashupView, message: discord.Message
+    ) -> None:
+        """A bingo gets a thread on its message where every claim is logged."""
+        try:
+            thread = await interaction.channel.get_partial_message(message.id).create_thread(
+                name=f"Bingo {view.mashup.id} solve log"
+            )
+        except (discord.HTTPException, AttributeError, ValueError):
+            log.warning("Could not create the thread of mashup %s", view.mashup.id, exc_info=True)
+            await interaction.followup.send(
+                "I could not open the solve log thread here. "
+                "Give me the Create Public Threads and Send Messages in Threads permissions.",
+                ephemeral=True,
+            )
+            return
+        await self.svc.set_thread(view.mashup.id, thread.id)
+
+    async def _log(self, view: MashupView) -> None:
+        """Posts the claims of a bingo that the thread does not have yet."""
+        m = view.mashup
+        if m.thread_id is None:
+            return
+        try:
+            thread = self.bot.get_partial_messageable(
+                m.thread_id, guild_id=m.guild_id, type=discord.ChannelType.public_thread
+            )
+            for entry in await self.svc.claims_to_log(view):
+                await thread.send(
+                    bingo_claim_message(view, entry, self._by_key()),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    suppress_embeds=True,
+                )
+        except Exception:  # the log is a side channel: it must not break the button or the loop
+            log.warning("Could not log to the thread of mashup %s", m.id, exc_info=True)
 
     async def on_button(
         self, interaction: discord.Interaction, action: str, mashup_id: int
@@ -373,6 +411,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         await interaction.edit_original_response(
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view)
         )
+        await self._log(view)
 
     @tasks.loop(seconds=60)
     async def tick_loop(self) -> None:
@@ -384,16 +423,18 @@ class MashupCog(commands.Cog, name="Mashup"):
         self.tick_loop.change_interval(seconds=self.svc.interval)
         for view in views:
             m = view.mashup
-            if m.message_id is None:
-                continue
-            try:
-                await (
-                    self.bot.get_partial_messageable(m.channel_id)
-                    .get_partial_message(m.message_id)
-                    .edit(embed=mashup_embed(view, self._by_key()), view=mashup_components(view))
-                )
-            except discord.HTTPException:
-                log.warning("Could not edit mashup message %s", m.message_id, exc_info=True)
+            if m.message_id is not None:
+                try:
+                    await (
+                        self.bot.get_partial_messageable(m.channel_id)
+                        .get_partial_message(m.message_id)
+                        .edit(
+                            embed=mashup_embed(view, self._by_key()), view=mashup_components(view)
+                        )
+                    )
+                except discord.HTTPException:
+                    log.warning("Could not edit mashup message %s", m.message_id, exc_info=True)
+            await self._log(view)
 
     @tick_loop.before_loop
     async def _before_tick_loop(self) -> None:

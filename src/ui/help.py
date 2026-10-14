@@ -51,7 +51,7 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "lines. `mode: classic` (default) keeps a claimed square for good. `mode: replace` gives "
         "a claimed square a new problem rated 100 higher (never above `max_rating`), and another team that solves it takes "
         "the square over. It also has `min_rating`, `max_rating`, `hour`, `minute`, `teams`, "
-        "`players`, `tags`, `exclude_tags` and `rated`. The message lists who solved each square.",
+        "`players`, `tags`, `exclude_tags` and `rated`. The message lists who solved each square, and a thread on it logs every claim.",
     ),
     "ratings": (
         "Ratings and stats",

@@ -372,3 +372,38 @@ def test_a_full_size_bingo_embed_fits_discords_limit():
     by_key = {c.key: Problem(1000 + i, "B2", "x" * 40, 3500, ()) for i, c in enumerate(cells)}
     assert len(mashup_embed(view, by_key)) <= 6000
     assert len(mashup_embed(view, by_key).description) <= 4096
+
+
+async def test_claims_are_logged_to_the_thread_once(env):
+    from types import SimpleNamespace
+
+    from src.cogs.mashup import MashupCog
+
+    svc, store, cf, clock = env
+    view = await bingo(svc, 2, mode="replace")
+    mid = view.mashup.id
+    assert await svc.claims_to_log(await svc.view(mid)) == []  # no thread yet
+    await svc.set_thread(mid, 777)
+    first = next(c for c in view.cells if c.rating == 800)
+    sub(cf, "h2", first.key, 1010)
+    clock.t = 1020
+    after = await svc.check(mid, 2)
+    assert after.mashup.thread_id == 777
+
+    sent = []
+
+    class Thread:
+        async def send(self, text, **kw):
+            sent.append(text)
+
+    bot = SimpleNamespace(
+        get_partial_messageable=lambda *a, **kw: Thread(),
+        services=SimpleNamespace(mashups=svc, problems=SimpleNamespace(problems=BINGO_PROBLEMS)),
+    )
+    cog = MashupCog(bot)
+    await cog._log(after)
+    await cog._log(await svc.view(mid))  # nothing new the second time
+    assert len(sent) == 1
+    assert sent[0].startswith("<t:1010:T> <@2> claimed [")
+    assert f"({first.rating})" in sent[0] and "New problem there:" in sent[0]
+    assert f"({first.rating + 100})" in sent[0]

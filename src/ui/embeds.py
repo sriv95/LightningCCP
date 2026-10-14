@@ -440,13 +440,31 @@ def _mashup_setup(view: MashupView) -> str:
     )
 
 
+def _bingo_who(view: MashupView, team: int, user: int) -> str:
+    return f"<@{user}>" if view.mashup.team_size == 1 else f"Team {team} (<@{user}>)"
+
+
+def bingo_claim_message(view: MashupView, entry: tuple, by_key: dict[str, Problem]) -> str:
+    """One claim for the solve log thread; a replace bingo adds the cell's new problem."""
+    at, team, key, rating, user = entry
+    problem = by_key.get(key)
+    text = f"<t:{at}:T> {_bingo_who(view, team, user)} claimed "
+    text += (f"[{key}]({problem.url})" if problem else key) + f" ({rating})"
+    cell = next(c for c in view.cells if c.key == key)
+    new = next((c for c in view.cells if c.cell == cell.cell and c.idx > cell.idx), None)
+    if new is not None:
+        other = by_key.get(new.key)
+        text += f". New problem there: {f'[{new.key}]({other.url})' if other else new.key}"
+        text += f" ({new.rating})"
+    return text
+
+
 def _bingo_log(view: MashupView) -> str:
     """The newest claims, newest first, that fit a field: when, problem, team and who solved."""
     out: list[str] = []
     size = 0
     for at, team, key, rating, user in reversed(view.log):
-        who = f"<@{user}>" if view.mashup.team_size == 1 else f"Team {team} (<@{user}>)"
-        line = f"<t:{at}:T> {key} ({rating}) - {who}"
+        line = f"<t:{at}:T> {key} ({rating}) - {_bingo_who(view, team, user)}"
         if len(out) == 12 or size + len(line) + 1 > 1000:
             break
         out.append(line)

@@ -148,6 +148,15 @@ class MashupService:
             )
         return records
 
+    async def claims_to_log(self, view: MashupView) -> list[tuple[int, int, str, int, int]]:
+        """The claims of a bingo not yet posted to its thread (each is returned once)."""
+        if view.mashup.thread_id is None:
+            return []
+        return [e for e in view.log if await self._store.mark_logged(view.mashup.id, e[2])]
+
+    async def set_thread(self, mashup_id: int, thread_id: int) -> None:
+        await self._store.set_mashup_thread(mashup_id, thread_id)
+
     async def set_message(self, mashup_id: int, channel_id: int, message_id: int) -> None:
         await self._store.set_mashup_message(mashup_id, channel_id, message_id)
 
