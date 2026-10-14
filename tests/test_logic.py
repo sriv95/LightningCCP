@@ -4,11 +4,15 @@ from src.cf.models import Contest, Problem, Submission
 from src.errors import BotError
 from src.logic import (
     chunked,
+    earliest_solve,
     filter_problems,
-    gitgud_points,
     has_compile_error,
+    match_rating,
     parse_minutes,
     parse_tags,
+    placement_deltas,
+    problem_points,
+    rank_groups,
     refresh_minutes,
     reminders_due,
     round_rating,
@@ -84,10 +88,10 @@ def test_round_rating():
     assert round_rating(9999) == 3500
 
 
-def test_gitgud_points():
-    assert gitgud_points(800) == 3
-    assert gitgud_points(1400) == 9
-    assert gitgud_points(0) == 1
+def test_problem_points():
+    assert problem_points(800) == 3
+    assert problem_points(1400) == 9
+    assert problem_points(0) == 1
 
 
 def test_has_compile_error_in_window():
@@ -165,3 +169,72 @@ def test_reminders_due_never_after_start_or_for_non_upcoming():
 def test_chunked():
     assert chunked([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]]
     assert chunked([], 3) == []
+
+
+def test_earliest_solve():
+    subs = [
+        S("1A", "OK", 700),
+        S("1A", "OK", 500),
+        S("1A", "WRONG_ANSWER", 450),
+        S("1B", "OK", 400),
+    ]
+    assert earliest_solve(subs, "1A", since=500) == 500
+    assert earliest_solve(subs, "1A", since=501) == 700
+    assert earliest_solve(subs, "1A", since=701) is None
+    assert earliest_solve(subs, "1C", since=0) is None
+
+
+def test_match_rating():
+    assert match_rating(1400, [800, 3000]) == 1400
+    assert match_rating(None, [1000]) == 1000
+    assert match_rating(None, [1000, 1900]) == 1500  # average 1450 rounds up to the nearest 100
+    assert match_rating(None, [None, 1000]) == 900  # unrated counts as 800
+    assert match_rating(None, [None]) == 800
+    assert match_rating(None, [3500, 3500, 3500]) == 3500
+
+
+def test_rank_groups_orders_by_solve_time_then_ties_non_solvers():
+    entries = [(1, None), (2, 300), (3, 200), (4, None)]
+    assert rank_groups(entries) == [[3], [2], [1, 4]]
+    assert rank_groups([(1, 5), (2, 5)]) == [[1], [2]]  # equal times: join order
+    assert rank_groups([(1, None), (2, None)]) == [[1, 2]]
+
+
+def test_placement_deltas_duel():
+    assert placement_deltas([[1], [2]], 9) == {1: 9, 2: -9}
+
+
+def test_placement_deltas_four_players_round_half_away_from_zero():
+    assert placement_deltas([[1], [2], [3], [4]], 9) == {1: 9, 2: 5, 3: -5, 4: -9}
+
+
+def test_placement_deltas_odd_count_middle_gets_zero():
+    assert placement_deltas([[1], [2], [3]], 9) == {1: 9, 2: 0, 3: -9}
+    assert placement_deltas([[1], [2], [3], [4], [5]], 9) == {1: 9, 2: 5, 3: 0, 4: -5, 5: -9}
+
+
+def test_placement_deltas_ties_share_average():
+    # Review Focus 4
+    assert placement_deltas([[1], [2, 3, 4]], 9) == {1: 9, 2: -3, 3: -3, 4: -3}
+    assert placement_deltas([[1], [2, 3]], 9) == {1: 9, 2: -5, 3: -5}  # (0 + -9) / 2 = -4.5
+
+
+def test_placement_deltas_sum_to_zero():
+    # Review Focus 4: without ties the top and bottom halves mirror exactly, so rounding keeps the sum at 0.
+    for n in range(2, 11):
+        groups = [[i] for i in range(n)]
+        for points in (1, 5, 9, 30):
+            deltas = placement_deltas(groups, points)
+            assert len(deltas) == n
+            assert sum(deltas.values()) == 0
+            assert deltas[0] == points and deltas[n - 1] == -points
+
+
+def test_placement_deltas_ten_players_exact():
+    deltas = placement_deltas([[i] for i in range(10)], 10)
+    assert [deltas[i] for i in range(10)] == [10, 8, 6, 4, 2, -2, -4, -6, -8, -10]
+
+
+def test_placement_deltas_needs_two_players():
+    with pytest.raises(ValueError):
+        placement_deltas([[1]], 5)

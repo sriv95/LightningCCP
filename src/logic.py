@@ -1,3 +1,4 @@
+import math
 from collections.abc import Iterable, Sequence
 
 from src.cf.models import Contest, Problem, Submission
@@ -9,6 +10,9 @@ RUNNING_PHASES = frozenset({"CODING", "PENDING_SYSTEM_TEST", "SYSTEM_TEST"})
 MAX_REMINDER_MINUTES = 10080
 MAX_REMINDER_COUNT = 5
 CHOICE_MAX_LEN = 100
+LOBBY_TTL_SECONDS = 600
+MATCH_TTL_SECONDS = 7200
+MATCH_MAX_PLAYERS = 10
 
 
 def parse_tags(raw: str | None) -> frozenset[str]:
@@ -70,8 +74,65 @@ def round_rating(rating: int | None) -> int:
     return max(800, min(3500, (rating + 50) // 100 * 100))
 
 
-def gitgud_points(rating: int) -> int:
+def problem_points(rating: int) -> int:
     return max(1, (rating - 500) // 100)
+
+
+def earliest_solve(subs: Iterable[Submission], problem_key: str, since: int) -> int | None:
+    times = [
+        s.created
+        for s in subs
+        if s.problem_key == problem_key and s.verdict == "OK" and s.created >= since
+    ]
+    return min(times) if times else None
+
+
+def match_rating(rating_arg: int | None, ratings: Sequence[int | None]) -> int:
+    if rating_arg is not None:
+        return rating_arg
+    known = [800 if r is None else r for r in ratings]
+    return round_rating(sum(known) // len(known))
+
+
+def rank_groups(entries: Sequence[tuple[int, int | None]]) -> list[list[int]]:
+    """Order players by solve time; players who never solved form one tied group at the end."""
+    solvers = sorted((t, i, uid) for i, (uid, t) in enumerate(entries) if t is not None)
+    groups = [[uid] for _, _, uid in solvers]
+    rest = [uid for uid, t in entries if t is None]
+    if rest:
+        groups.append(rest)
+    return groups
+
+
+def _round_away(x: float) -> int:
+    return int(math.copysign(math.floor(abs(x) + 0.5), x))
+
+
+def placement_deltas(groups: Sequence[Sequence[int]], points: int) -> dict[int, int]:
+    """Top half gains points (1st gets all), bottom half loses (last loses all), middle gets 0.
+
+    Players in the same group share the average of the positions they occupy.
+    """
+    n = sum(len(g) for g in groups)
+    if n < 2:
+        raise ValueError("a placement needs at least 2 players")
+    h = n // 2
+
+    def at(k: int) -> float:  # k is the 1-based position
+        if k <= h:
+            return points * (h - k + 1) / h
+        if k > n - h:
+            return -points * (k - (n - h)) / h
+        return 0.0
+
+    out: dict[int, int] = {}
+    pos = 1
+    for group in groups:
+        avg = sum(at(k) for k in range(pos, pos + len(group))) / len(group)
+        for uid in group:
+            out[uid] = _round_away(avg)
+        pos += len(group)
+    return out
 
 
 def has_compile_error(
