@@ -388,14 +388,6 @@ class MashupCog(commands.Cog, name="Mashup"):
         except Exception:  # a side channel, like the solve log
             log.warning("Could not log a give-up of mashup %s", m.id, exc_info=True)
 
-    async def _archive(self, thread_id: int) -> None:
-        """Closes the thread of a contest that is over (posting again reopens it)."""
-        try:
-            thread = await self.bot.fetch_channel(thread_id)
-            await thread.edit(archived=True)
-        except discord.HTTPException:
-            log.info("Could not archive thread %s", thread_id, exc_info=True)
-
     async def _log(self, view: MashupView) -> None:
         """Posts the solves that the thread does not have yet."""
         m = view.mashup
@@ -434,8 +426,6 @@ class MashupCog(commands.Cog, name="Mashup"):
                     await thread.get_partial_message(old).edit(embeds=[])
                 except discord.HTTPException:
                     log.info("Could not clear the board of message %s", old, exc_info=True)
-            if final:
-                await self._archive(m.thread_id)
         except Exception:  # the log is a side channel: it must not break the button or the loop
             log.warning("Could not log to the thread of mashup %s", m.id, exc_info=True)
 

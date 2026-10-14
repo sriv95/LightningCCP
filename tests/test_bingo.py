@@ -431,7 +431,7 @@ async def test_claims_are_logged_to_the_thread_once_and_only_the_newest_shows_th
     assert (await store.get_mashup(mid)).log_board_id == 102
 
 
-async def test_a_finished_bingo_closes_its_thread_once(env):
+async def test_a_finished_bingo_posts_its_closing_message_once(env):
     from types import SimpleNamespace
 
     import discord
@@ -450,7 +450,7 @@ async def test_a_finished_bingo_closes_its_thread_once(env):
     done = await svc.view(mid)
     assert done.mashup.status == "finished"
 
-    sent, edits, archived = [], [], []
+    sent, edits = [], []
 
     class Thread:
         async def send(self, text, embed=discord.utils.MISSING, **kw):
@@ -463,15 +463,8 @@ async def test_a_finished_bingo_closes_its_thread_once(env):
 
             return SimpleNamespace(edit=edit)
 
-    async def fetch_channel(thread_id):
-        async def edit(**kw):
-            archived.append((thread_id, kw))
-
-        return SimpleNamespace(edit=edit)
-
     bot = SimpleNamespace(
         get_partial_messageable=lambda *a, **kw: Thread(),
-        fetch_channel=fetch_channel,
         services=SimpleNamespace(
             mashups=svc, db=store, problems=SimpleNamespace(problems=BINGO_PROBLEMS)
         ),
@@ -484,5 +477,4 @@ async def test_a_finished_bingo_closes_its_thread_once(env):
     text, embed = sent[3]
     assert text == "The bingo is over. Winner: <@1>. Ratings changed."
     assert "1. [1]" in embed.description and "rating +" in embed.description
-    assert archived == [(777, {"archived": True})]
     assert edits == [] and (await store.get_mashup(mid)).log_board_id == 104
