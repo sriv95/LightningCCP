@@ -154,9 +154,13 @@ def test_plot_group_commands():
 def test_rating_plot_renders_png():
     from src.ui.plots import CF_BANDS, rating_plot
 
-    png = rating_plot("T", [(1_700_000_000, 1500), (1_700_100_000, 1450)], CF_BANDS)
+    png = rating_plot("T", [("a", [(1_700_000_000, 1500), (1_700_100_000, 1450)])], CF_BANDS)
     assert png.read(8) == b"\x89PNG\r\n\x1a\n"
-    assert rating_plot("T", [(1_700_000_000, 800)]).read(4) == b"\x89PNG"  # one point works
+    two = [("a", [(1_700_000_000, 800), (1_700_100_000, 900)]), ("b", [(1_700_050_000, 750)])]
+    assert rating_plot("T", two).read(4) == b"\x89PNG"  # several lines get a legend
+    assert (
+        rating_plot("T", [("a", [(1_700_000_000, 800)])]).read(4) == b"\x89PNG"
+    )  # one point works
 
 
 def test_mashup_group_commands_and_button_template():

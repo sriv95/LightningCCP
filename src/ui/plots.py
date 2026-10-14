@@ -21,26 +21,31 @@ CF_BANDS = (
 
 def rating_plot(
     title: str,
-    points: Sequence[tuple[int, int]],
+    lines: Sequence[tuple[str, Sequence[tuple[int, int]]]],
     bands: Sequence[tuple[int, int, str]] = (),
 ) -> io.BytesIO:
-    """PNG line chart of (unix time, rating) points, optionally over coloured rating bands.
+    """PNG line chart of one or more (label, [(unix time, rating)]) lines, optionally over
+    coloured rating bands. A legend shows when there is more than one line.
 
     Uses Figure directly, not pyplot, so it is safe to run in a worker thread."""
     fig = Figure(figsize=(9, 5), dpi=100)
     ax = fig.subplots()
-    ratings = [r for _, r in points]
+    ratings = [r for _, points in lines for _, r in points]
     low, high = min(ratings) - 100, max(ratings) + 100
     for band_low, band_high, colour in bands:
         ax.axhspan(band_low, band_high, color=colour, alpha=0.45, linewidth=0)
-    ax.plot(
-        [datetime.fromtimestamp(t, UTC) for t, _ in points],
-        ratings,
-        marker="o",
-        markersize=4,
-        linewidth=1.5,
-        color="black",
-    )
+    for label, points in lines:
+        ax.plot(
+            [datetime.fromtimestamp(t, UTC) for t, _ in points],
+            [r for _, r in points],
+            marker="o",
+            markersize=4,
+            linewidth=1.5,
+            label=label,
+            **({} if len(lines) > 1 else {"color": "black"}),
+        )
+    if len(lines) > 1:
+        ax.legend(loc="best")
     ax.set_ylim(low, high)
     ax.set_title(title)
     ax.grid(alpha=0.3)
