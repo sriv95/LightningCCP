@@ -8,6 +8,8 @@ from src.errors import BotError, NotLinked
 from src.logic import rating_series
 from src.ui.plots import CF_BANDS, rating_plot
 
+MAX_LINES = 5
+
 
 class PlotCog(commands.Cog, name="Plot"):
     plot = app_commands.Group(name="plot", description="Rating graphs", guild_only=True)
@@ -23,6 +25,14 @@ class PlotCog(commands.Cog, name="Plot"):
     def _check_args(member: discord.Member | None, handle: str | None) -> None:
         if member is not None and handle is not None:
             raise BotError("Give a member or a handle, not both.")
+
+    async def _linked_handle(
+        self, interaction: discord.Interaction, target: discord.abc.User
+    ) -> str:
+        linked = await self.s.db.get_handle(interaction.guild_id, target.id)
+        if linked is None:
+            raise NotLinked(f"{target.display_name} has no linked handle.")
+        return linked.handle
 
     async def _send(
         self,
@@ -97,6 +107,10 @@ class PlotCog(commands.Cog, name="Plot"):
         handle3="Compare with another handle",
         handle4="Compare with another handle",
         handle5="Compare with another handle",
+        member2="Compare with another member's linked handle",
+        member3="Compare with another member's linked handle",
+        member4="Compare with another member's linked handle",
+        member5="Compare with another member's linked handle",
     )
     async def codeforces(
         self,
@@ -107,17 +121,22 @@ class PlotCog(commands.Cog, name="Plot"):
         handle3: str | None = None,
         handle4: str | None = None,
         handle5: str | None = None,
+        member2: discord.Member | None = None,
+        member3: discord.Member | None = None,
+        member4: discord.Member | None = None,
+        member5: discord.Member | None = None,
     ) -> None:
         self._check_args(member, handle)
         await interaction.response.defer(ephemeral=True)
         s = self.s
         if handle is None:
-            target = member or interaction.user
-            linked = await s.db.get_handle(interaction.guild_id, target.id)
-            if linked is None:
-                raise NotLinked(f"{target.display_name} has no linked handle.")
-            handle = linked.handle
+            handle = await self._linked_handle(interaction, member or interaction.user)
         names = [handle, *(h for h in (handle2, handle3, handle4, handle5) if h)]
+        for other in (member2, member3, member4, member5):
+            if other is not None:
+                names.append(await self._linked_handle(interaction, other))
+        if len(names) > MAX_LINES:
+            raise BotError(f"Compare at most {MAX_LINES} at once.")
         lines, missing, seen = [], [], set()
         for name in names:
             name = (await s.cf.user_info(name)).handle  # validates and fixes the casing
