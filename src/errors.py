@@ -1,3 +1,4 @@
+import contextlib
 import logging
 
 import discord
@@ -59,6 +60,10 @@ async def report_error(interaction: discord.Interaction, error: Exception) -> No
         message = "Something went wrong. Try again later."
     try:
         if interaction.response.is_done():
+            if interaction.type is discord.InteractionType.application_command:
+                # a public defer() makes the first followup public; drop the placeholder so ours is ephemeral
+                with contextlib.suppress(discord.HTTPException):
+                    await interaction.delete_original_response()
             await interaction.followup.send(message, ephemeral=True)
         else:
             await interaction.response.send_message(message, ephemeral=True)
