@@ -1,6 +1,7 @@
 from src.cf.models import Contest, Problem, User
 from src.cogs.contests import ContestsCog
 from src.cogs.handles import HandlesCog, VerifyButton
+from src.cogs.mashup import MashupButton, MashupCog
 from src.cogs.match import MatchButton, MatchCog
 from src.cogs.plot import PlotCog
 from src.cogs.problems import ProblemsCog
@@ -128,3 +129,11 @@ def test_rating_plot_renders_png():
     png = rating_plot("T", [(1_700_000_000, 1500), (1_700_100_000, 1450)], CF_BANDS)
     assert png.read(8) == b"\x89PNG\r\n\x1a\n"
     assert rating_plot("T", [(1_700_000_000, 800)]).read(4) == b"\x89PNG"  # one point works
+
+
+def test_mashup_group_commands_and_button_template():
+    assert {c.name for c in MashupCog.mashup.commands} == {"contest"}
+    assert MashupCog.mashup.guild_only
+    template = MashupButton.__discord_ui_compiled_template__
+    assert template.fullmatch("mashup:join:7") and template.fullmatch("mashup:check:7")
+    assert not template.fullmatch("mashup:other:7")

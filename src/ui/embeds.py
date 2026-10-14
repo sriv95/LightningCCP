@@ -4,7 +4,15 @@ import discord
 
 from src.cf.models import Contest, Problem, User
 from src.db.store import MatchPlayer, MatchRow
-from src.logic import LOBBY_TTL_SECONDS, chunked, ordinal, placement
+from src.logic import (
+    LOBBY_TTL_SECONDS,
+    MASHUP_MAX_PLAYERS,
+    chunked,
+    format_hm,
+    ordinal,
+    placement,
+)
+from src.mashup import MashupView
 from src.matches import MatchView
 
 
@@ -262,3 +270,33 @@ def number_pages(pages: list[discord.Embed]) -> list[discord.Embed]:
     for i, page in enumerate(pages, start=1):
         page.set_footer(text=f"Page {i}/{len(pages)}")
     return pages
+
+
+def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
+    m = view.mashup
+    letters = {key: chr(ord("A") + i) for i, (key, _) in enumerate(view.problems)}
+    when = f"Ended <t:{m.ends_at}:f>" if m.status == "finished" else f"Ends <t:{m.ends_at}:R>"
+    lines = [
+        f"Started by <@{m.host_id}> | {len(view.players)}/{MASHUP_MAX_PLAYERS} players | {when}",
+        "",
+        "**Problems**",
+    ]
+    for key, rating in view.problems:
+        problem = by_key.get(key)
+        name = f"[{key} {problem.name}]({problem.url})" if problem else key
+        lines.append(f"{letters[key]}. {name} ({rating})")
+    lines += ["", "**Standings**"]
+    for r in view.standings:
+        solved = ", ".join(
+            f"{letters[k]} {t // 60}m" for k, t in sorted(r.times.items(), key=lambda kt: kt[1])
+        )
+        detail = f" ({solved})" if solved else ""
+        lines.append(
+            f"{r.rank}. {r.handle} - {r.solved} solved, {format_hm(r.total_seconds)}{detail}"
+        )
+    finished = m.status == "finished"
+    return discord.Embed(
+        title="Mashup contest - final standings" if finished else "Mashup contest",
+        description="\n".join(lines),
+        colour=discord.Colour.green() if finished else discord.Colour.gold(),
+    )

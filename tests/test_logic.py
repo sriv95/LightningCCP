@@ -7,12 +7,15 @@ from src.logic import (
     duel_gain,
     earliest_solve,
     filter_problems,
+    format_hm,
     has_compile_error,
+    mashup_standings,
     match_deltas,
     match_rating,
     ordinal,
     parse_minutes,
     parse_tags,
+    pick_mashup,
     placement,
     rank_groups,
     rating_series,
@@ -287,3 +290,71 @@ def test_placement_by_rating_change():
     assert [placement(deltas, d) for d in deltas] == [1, 2, 3, 4]
     assert placement([-25, 49, -25], -25) == 2  # ties share a place
     assert placement([0, 0], 0) is None  # nobody solved
+
+
+def test_earliest_solve_until_ignores_later_submissions():
+    subs = [S("1A", "OK", 500), S("1A", "OK", 900)]
+    assert earliest_solve(subs, "1A", since=600, until=800) is None
+    assert earliest_solve(subs, "1A", since=600, until=900) == 900
+    assert earliest_solve(subs, "1A", since=0) == 500
+
+
+def test_format_hm():
+    assert [format_hm(s) for s in (0, 59, 60, 3599, 3600, 7260)] == [
+        "0:00",
+        "0:00",
+        "0:01",
+        "0:59",
+        "1:00",
+        "2:01",
+    ]
+
+
+def mashup_pool():
+    return [P(i, "A", r) for i, r in enumerate(range(800, 3600, 100), start=1)] + [
+        P(99, "A", 800),
+        P(97, "A", None),
+    ]
+
+
+def test_pick_mashup_spreads_ratings_easy_to_hard():
+    picked = pick_mashup(mashup_pool(), 800, 1400, 4)  # targets 800, 1000, 1200, 1400
+    assert [p.rating for p in picked] == [800, 1000, 1200, 1400]
+    assert len({p.key for p in picked}) == 4
+
+
+def test_pick_mashup_repeated_rating_picks_distinct_problems():
+    picked = pick_mashup(mashup_pool(), 800, 800, 2)  # two problems rated 800 exist
+    assert {p.key for p in picked} == {"1A", "99A"}
+
+
+def test_pick_mashup_single_problem_aims_at_the_middle_and_skips_solved():
+    assert pick_mashup(mashup_pool(), 800, 1200, 1)[0].rating == 1000
+    solved = frozenset({"3A"})  # the only 1000 problem
+    assert pick_mashup(mashup_pool(), 800, 1200, 1, solved)[0].rating in (900, 1100)
+
+
+def test_pick_mashup_fails_when_the_range_is_too_small():
+    pool = [P(1, "A", 800), P(2, "A", 900)]
+    assert pick_mashup(pool, 800, 900, 3) is None
+    assert pick_mashup(pool, 800, 900, 2, frozenset({"1A"})) is None
+    assert pick_mashup(pool, 1000, 1100, 1) is None
+
+
+def test_mashup_standings_rank_solved_then_time_with_shared_ranks():
+    players = [(1, "a", 0), (2, "b", 1), (3, "c", 2), (4, "d", 3), (5, "e", 4)]
+    solves = {
+        1: {"A": 160, "B": 400},
+        2: {"A": 150, "B": 410},  # same total as player 1, so the same rank
+        3: {"A": 100},
+        4: {"A": 100, "B": 1000, "C": 1100},
+    }
+    rows = mashup_standings(players, solves, started_at=100)
+    assert [(r.user_id, r.rank, r.solved, r.total_seconds) for r in rows] == [
+        (4, 1, 3, 1900),
+        (1, 2, 2, 360),
+        (2, 2, 2, 360),
+        (3, 4, 1, 0),
+        (5, 5, 0, 0),
+    ]
+    assert rows[1].times == {"A": 60, "B": 300}

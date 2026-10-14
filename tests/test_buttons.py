@@ -5,6 +5,7 @@ import discord
 import pytest
 
 from src.cogs.handles import VerifyButton
+from src.cogs.mashup import MashupButton
 from src.cogs.match import MatchButton, MatchCog, match_components
 from src.errors import BotError
 from src.matches import MatchView
@@ -32,7 +33,10 @@ class Boom:
         raise self.exc
 
 
-@pytest.mark.parametrize("make", [lambda: MatchButton("start", 1), lambda: VerifyButton(5)])
+@pytest.mark.parametrize(
+    "make",
+    [lambda: MatchButton("start", 1), lambda: MashupButton("join", 1), lambda: VerifyButton(5)],
+)
 @pytest.mark.parametrize(
     ("exc", "message"),
     [(BotError("boom"), "boom"), (RuntimeError("x"), "Something went wrong. Try again later.")],

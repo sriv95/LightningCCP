@@ -6,6 +6,7 @@ from src.cache.contests import ContestCache
 from src.cache.problems import ProblemCache
 from src.cf.client import CodeforcesClient
 from src.db.store import Store
+from src.mashup import MashupService
 from src.matches import MatchService
 
 
@@ -16,4 +17,5 @@ class Services:
     problems: ProblemCache
     contests: ContestCache
     matches: MatchService
+    mashups: MashupService
     session: aiohttp.ClientSession

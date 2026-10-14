@@ -31,6 +31,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/match duel [opponent] [rating]` | 1v1 duel; name an opponent or let anyone join |
 | `/match custom players [rating]` | Match for 2-10 players; ranked by solve time |
 | `/match history [member]` | Your last 100 finished matches; with a member, also your record and matches against them (private) |
+| `/mashup contest [min_rating] [max_rating] [count] [hour] [minute]` | Timed contest of several problems (default 5 problems, 800-1500, 2h) with a live scoreboard; anyone can Join and Check |
 | `/stats` | Top 10 by match rating, plus your own rank (private) |
 | `/plot rating [member] [handle]` | Graph of a member's match rating in this server (private; default: you) |
 | `/plot codeforces [member] [handle]` | Graph of a Codeforces rating history, any handle works (private; default: you) |
@@ -40,6 +41,8 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/remind set\|show\|clear` | Contest reminders (needs Manage Server) |
 
 A match is a public message. The lobby has Join, Start and Leave buttons; once the host presses Start, the problem appears with Check and Give Up buttons. A finished duel shows a Rematch button: either player can press it to open a new duel lobby against the same opponent, who then presses Join (the old rating argument is reused). Everyone starts at a match rating of 800. With no `rating` argument, `/gimme` and `/match` pick a problem at your match rating (rounded to 100; the players' average for duel and custom). After a match, ratings change. Solo only counts solving, so giving up or running out of time never lowers your rating: you gain +1 when the problem is 400 or more below your rating, +10 when equal and +33 when 400 or more above (linear in between). Duel and custom compare every pair of players by solve order, and the winner gains a fixed step by how far the loser is rated from them: +16 when the loser is 400 or more below, +33 from 200 below, +49 within 200 of each other, +67 from 200 above, +95 from 400 above. The loser loses the same, and a tie moves nothing. Custom matches average these results over the other players.
+
+A mashup contest picks `count` unsolved problems spread evenly (easy to hard) across the rating range, excluding what the host already solved. Players press Join (up to 20) and solve on Codeforces; the bot reads submissions made between the start and the end every minute (and on Check), and the posted scoreboard ranks by problems solved, then total solve time (sum of minutes from the start). There is no penalty for wrong attempts. The message turns into the final standings when time runs out.
 
 ## Development
 

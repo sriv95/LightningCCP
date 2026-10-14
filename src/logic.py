@@ -1,5 +1,7 @@
 import math
+import random
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 
 from src.cf.models import Contest, Problem, Submission
 from src.errors import BotError
@@ -13,6 +15,8 @@ CHOICE_MAX_LEN = 100
 LOBBY_TTL_SECONDS = 600
 MATCH_TTL_SECONDS = 7200
 MATCH_MAX_PLAYERS = 10
+MASHUP_MAX_PLAYERS = 20
+MASHUP_MAX_PROBLEMS = 10
 START_RATING = 800
 SOLO_MIN = 1
 SOLO_EQUAL = 10
@@ -73,6 +77,10 @@ def solved_keys(subs: Iterable[Submission]) -> frozenset[str]:
     return frozenset(s.problem_key for s in subs if s.verdict == "OK")
 
 
+def format_hm(seconds: int) -> str:
+    return f"{seconds // 3600}:{seconds % 3600 // 60:02d}"
+
+
 def ordinal(n: int) -> str:
     suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
     return f"{n}{suffix}"
@@ -108,11 +116,16 @@ def round_rating(rating: int | None) -> int:
     return max(800, min(3500, (rating + 50) // 100 * 100))
 
 
-def earliest_solve(subs: Iterable[Submission], problem_key: str, since: int) -> int | None:
+def earliest_solve(
+    subs: Iterable[Submission], problem_key: str, since: int, until: int | None = None
+) -> int | None:
     times = [
         s.created
         for s in subs
-        if s.problem_key == problem_key and s.verdict == "OK" and s.created >= since
+        if s.problem_key == problem_key
+        and s.verdict == "OK"
+        and s.created >= since
+        and (until is None or s.created <= until)
     ]
     return min(times) if times else None
 
@@ -245,3 +258,65 @@ def reminders_due(
 
 def chunked[T](seq: Sequence[T], size: int) -> list[list[T]]:
     return [list(seq[i : i + size]) for i in range(0, len(seq), size)]
+
+
+def pick_mashup(
+    problems: Sequence[Problem],
+    min_rating: int,
+    max_rating: int,
+    count: int,
+    solved: frozenset[str] = frozenset(),
+    rng: random.Random | None = None,
+) -> list[Problem] | None:
+    """`count` distinct unsolved problems, easy to hard, as close as possible to ratings spread
+    evenly over min_rating..max_rating. None when the range cannot supply that many."""
+    rng = rng or random.Random()
+    if count == 1:
+        targets = [(min_rating + max_rating) / 2]
+    else:
+        targets = [min_rating + (max_rating - min_rating) * i / (count - 1) for i in range(count)]
+    chosen: list[Problem] = []
+    taken = set(solved)
+    for target in targets:
+        pool = filter_problems(
+            problems, min_rating=min_rating, max_rating=max_rating, solved=frozenset(taken)
+        )
+        if not pool:
+            return None
+        nearest = min(abs(p.rating - target) for p in pool)
+        pick = rng.choice([p for p in pool if abs(p.rating - target) == nearest])
+        chosen.append(pick)
+        taken.add(pick.key)
+    return chosen
+
+
+@dataclass(frozen=True)
+class MashupRank:
+    rank: int
+    user_id: int
+    handle: str
+    solved: int
+    total_seconds: int
+    times: dict[str, int]  # problem key -> seconds after the start, for solved problems
+
+
+def mashup_standings(
+    players: Iterable[tuple[int, str, int]],
+    solves: dict[int, dict[str, int]],
+    started_at: int,
+) -> list[MashupRank]:
+    """Most problems solved first, then the lowest total solve time; equal scores share a rank.
+
+    players are (user_id, handle, joined_at); solves maps user id to {problem key: solve time}."""
+    rows = []
+    for user_id, handle, joined_at in players:
+        times = {k: max(0, t - started_at) for k, t in solves.get(user_id, {}).items()}
+        rows.append((-len(times), sum(times.values()), joined_at, user_id, handle, times))
+    rows.sort(key=lambda r: r[:3])
+    ranked: list[MashupRank] = []
+    for i, (neg, total, _, user_id, handle, times) in enumerate(rows):
+        same = ranked and (ranked[-1].solved, ranked[-1].total_seconds) == (-neg, total)
+        ranked.append(
+            MashupRank(ranked[-1].rank if same else i + 1, user_id, handle, -neg, total, times)
+        )
+    return ranked
