@@ -280,7 +280,10 @@ class MatchCog(commands.Cog, name="Match"):
         elif (contest := await s.mashups.current(guild_id, user_id)) is not None:
             lobby = contest.mashup.status == "lobby"
             act = s.mashups.leave if lobby else s.mashups.give_up
-            await self.bot.get_cog("Mashup").edit_message(await act(contest.mashup.id, user_id))
+            view = await act(contest.mashup.id, user_id)
+            await (cog := self.bot.get_cog("Mashup")).refresh(view)
+            if not lobby:
+                await cog.log_gave_up(view, user_id)
             kind = "contest"
         else:
             raise BotError("You are not in an unfinished match or contest.")

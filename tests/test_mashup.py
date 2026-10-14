@@ -747,8 +747,11 @@ async def test_ff_leaves_a_lobby_gives_up_a_running_contest_or_match(env):
     edited, said = [], []
 
     class Mashups:
-        async def edit_message(self, view):
+        async def refresh(self, view):
             edited.append(view.mashup.status)
+
+        async def log_gave_up(self, view, user_id):
+            edited.append(f"gave up {user_id}")
 
     bot = SimpleNamespace(
         services=SimpleNamespace(matches=svc.matches, mashups=svc, db=store),
@@ -782,7 +785,7 @@ async def test_ff_leaves_a_lobby_gives_up_a_running_contest_or_match(env):
     await svc.join(view.mashup.id, 3)
     await svc.start(view.mashup.id, 1)
     await ff(3)  # gives up the running contest
-    assert said[-1] == "You gave up the contest." and edited[-1] == "active"
+    assert said[-1] == "You gave up the contest." and edited[-2:] == ["active", "gave up 3"]
     assert await store.active_mashup_for(GUILD, 3) is None
     await ff(1)
     await svc.tick()
@@ -812,3 +815,32 @@ async def test_final_message_names_the_winner_a_tie_or_nobody(env):
     lobby_ = await lobby(svc, host=4)
     await svc.leave(lobby_.mashup.id, 4)
     assert final_message(await svc.view(lobby_.mashup.id)) == "This contest was cancelled."
+
+
+async def test_give_up_is_logged_to_the_thread(env):
+    from types import SimpleNamespace
+
+    from src.cogs.mashup import MashupCog
+    from src.ui.embeds import give_up_message
+
+    svc, store, cf, clock = env
+    view = await started(svc, 2)
+    await svc.set_thread(view.mashup.id, 9)
+    view = await svc.give_up(view.mashup.id, 2)
+    assert give_up_message(view, 2) == "<@2> gave up."
+    sent = []
+
+    class Thread:
+        async def send(self, text, **kw):
+            sent.append(text)
+
+    cog = MashupCog(SimpleNamespace(get_partial_messageable=lambda *a, **kw: Thread()))
+    await cog.log_gave_up(view, 2)
+    assert sent == ["<@2> gave up."]
+    team = await team_lobby(svc, host=3)  # teams show the team too
+    await svc.join(team.mashup.id, 4, 2)
+    assert give_up_message(await svc.view(team.mashup.id), 4) == "Team 2 (<@4>) gave up."
+    await cog.log_gave_up(
+        SimpleNamespace(mashup=SimpleNamespace(thread_id=None)), 2
+    )  # no thread: nothing happens
+    assert len(sent) == 1

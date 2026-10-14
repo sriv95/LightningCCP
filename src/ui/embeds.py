@@ -444,6 +444,11 @@ def _log_who(view: MashupView, team: int, user: int) -> str:
     return f"<@{user}>" if view.mashup.team_size == 1 else f"Team {team} (<@{user}>)"
 
 
+def give_up_message(view: MashupView, user: int) -> str:
+    team = next(p.team for p in view.players if p.user_id == user)
+    return f"{_log_who(view, team, user)} gave up."
+
+
 def log_message(view: MashupView, entry: LogEntry, by_key: dict[str, Problem]) -> str:
     """One solve for the thread log; a replace bingo adds the cell's new problem."""
     m = view.mashup

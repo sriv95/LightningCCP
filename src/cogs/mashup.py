@@ -18,7 +18,13 @@ from src.logic import (
     tag_suggestions,
 )
 from src.mashup import MashupView
-from src.ui.embeds import final_message, log_board_embed, log_message, mashup_embed
+from src.ui.embeds import (
+    final_message,
+    give_up_message,
+    log_board_embed,
+    log_message,
+    mashup_embed,
+)
 
 log = logging.getLogger(__name__)
 
@@ -365,6 +371,23 @@ class MashupCog(commands.Cog, name="Mashup"):
             return
         await self.svc.set_thread(view.mashup.id, thread.id)
 
+    async def refresh(self, view: MashupView) -> None:
+        """Brings the stored message and the thread up to date."""
+        await self.edit_message(view)
+        await self._log(view)
+
+    async def log_gave_up(self, view: MashupView, user_id: int) -> None:
+        """Tells the thread that a player left the running contest."""
+        m = view.mashup
+        if m.thread_id is None:
+            return
+        try:
+            await self.bot.get_partial_messageable(
+                m.thread_id, guild_id=m.guild_id, type=discord.ChannelType.public_thread
+            ).send(give_up_message(view, user_id), allowed_mentions=discord.AllowedMentions.none())
+        except Exception:  # a side channel, like the solve log
+            log.warning("Could not log a give-up of mashup %s", m.id, exc_info=True)
+
     async def _archive(self, thread_id: int) -> None:
         """Closes the thread of a contest that is over (posting again reopens it)."""
         try:
@@ -446,6 +469,8 @@ class MashupCog(commands.Cog, name="Mashup"):
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view)
         )
         await self._log(view)
+        if action == "giveup":
+            await self.log_gave_up(view, interaction.user.id)
 
     @tasks.loop(seconds=60)
     async def tick_loop(self) -> None:
