@@ -27,7 +27,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/handle link <handle>` | Link a Codeforces handle; prove it by submitting a compile error |
 | `/handle show [member] [handle]` | Profile of a member (default: you) or of whoever linked a handle |
 | `/handle unlink` | Remove your link |
-| `/gimme [rating] [min_rating] [max_rating] [tags] [exclude_tags] [contest_id]` | Random problem, hides ones you solved; `contest_id` limits it to one contest; with no rating arguments and no contest it aims at your match rating |
+| `/gimme [rating] [min_rating] [max_rating] [tags] [exclude_tags] [contest_id]` | Random problem, hides ones you solved; `contest_id` limits it to one contest (it autocompletes the newest finished contests by id or name); with no rating arguments and no contest it aims at your match rating |
 | `/match solo [rating] [tags] [exclude_tags]` | Practice alone; solving raises your match rating |
 | `/match duel [opponent] [rating] [tags] [exclude_tags]` | 1v1 duel; name an opponent or let anyone join |
 | `/match custom players [rating] [tags] [exclude_tags]` | Match for 2-10 players; the first to solve wins and everyone else loses, with no placing among them |

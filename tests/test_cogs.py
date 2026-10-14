@@ -254,3 +254,27 @@ def test_names_from_codeforces_cannot_break_the_embeds():
     ranks = ranklist_pages([(1, 1, "a_b_c", 5.0, 0)], "T")[0].description
     assert "(a\\_b\\_c)" in ranks
     assert "(x\\_y)" in stats_pages([(1, "x_y", 800, 1)], 1)[0].description
+
+
+async def test_gimme_contest_autocomplete_matches_name_and_id():
+    from types import SimpleNamespace
+
+    cs = [
+        Contest(1700, "Round 800 (Div. 2)", "CF", "FINISHED", 1000, 7200),
+        Contest(1701, "Educational 5", "ICPC", "FINISHED", 2000, 7200),
+        Contest(1702, "Unknown problems", "CF", "FINISHED", 3000, 7200),
+    ]
+    services = SimpleNamespace(
+        problems=SimpleNamespace(
+            problems=[Problem(1700, "A", "x", 800, ()), Problem(1701, "A", "y", 900, ())]
+        ),
+        contests=SimpleNamespace(contests=cs),
+    )
+    cog = ProblemsCog(SimpleNamespace(services=services))
+    both = await cog.contest_autocomplete(None, "")
+    assert [(c.name, c.value) for c in both] == [
+        (("1701 - Educational 5"), 1701),
+        ("1700 - Round 800 (Div. 2)", 1700),
+    ]  # newest first; the contest with no known problems is left out
+    assert [c.value for c in await cog.contest_autocomplete(None, "round")] == [1700]
+    assert [c.value for c in await cog.contest_autocomplete(None, "1701")] == [1701]

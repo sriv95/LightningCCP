@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from src.errors import BotError, NotLinked
 from src.logic import (
+    contest_suggestions,
     filter_problems,
     parse_tags,
     round_rating,
@@ -35,7 +36,7 @@ class ProblemsCog(commands.Cog, name="Problems"):
         max_rating="Maximum rating",
         tags="Comma-separated tags; the problem must have all of them",
         exclude_tags="Comma-separated tags to avoid",
-        contest_id="Only problems from this Codeforces contest",
+        contest_id="Only problems from this Codeforces contest (type a name or id)",
     )
     async def gimme(
         self,
@@ -83,6 +84,16 @@ class ProblemsCog(commands.Cog, name="Problems"):
         return [
             app_commands.Choice(name=value, value=value)
             for value in tag_suggestions(current, self.s.problems.tags)
+        ]
+
+    @gimme.autocomplete("contest_id")
+    async def contest_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[int]]:
+        known = {p.contest_id for p in self.s.problems.problems if p.rating}
+        return [
+            app_commands.Choice(name=label, value=contest_id)
+            for label, contest_id in contest_suggestions(self.s.contests.contests, known, current)
         ]
 
     @app_commands.command(
