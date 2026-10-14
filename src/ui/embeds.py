@@ -3,7 +3,9 @@ from collections.abc import Sequence
 import discord
 
 from src.cf.models import Contest, Problem, User
-from src.logic import chunked
+from src.db.store import MatchPlayer
+from src.logic import LOBBY_TTL_SECONDS, chunked
+from src.matches import MatchView
 
 
 def problem_embed(problem: Problem, *, footer: str | None = None) -> discord.Embed:
@@ -50,3 +52,63 @@ def contest_pages(
         embed.set_footer(text=f"Page {i}/{len(groups)}")
         pages.append(embed)
     return pages
+
+
+_MODE_LABEL = {"solo": "Solo", "duel": "Duel"}
+
+
+def _mode_label(view: MatchView) -> str:
+    m = view.match
+    if m.mode == "custom":
+        return f"Custom ({m.max_players} players max)"
+    return _MODE_LABEL[m.mode]
+
+
+def _player_status(p: MatchPlayer) -> str:
+    if p.solved_at is not None:
+        return f"solved <t:{p.solved_at}:R>"
+    return "gave up" if p.gave_up else "solving"
+
+
+def match_embed(view: MatchView) -> discord.Embed:
+    m, players = view.match, view.players
+    if m.status == "cancelled":
+        return discord.Embed(
+            title="Match cancelled",
+            description=view.note or "The match was cancelled.",
+            colour=discord.Colour.red(),
+        )
+    if m.status == "lobby":
+        lines = "\n".join(f"<@{p.user_id}> ({p.handle})" for p in players)
+        desc = f"Host: <@{m.host_id}>\nPlayers {len(players)}/{m.max_players}:\n{lines}"
+        if m.invited_id is not None:
+            desc += f"\nInvited: <@{m.invited_id}>"
+        desc += f"\nExpires <t:{m.created_at + LOBBY_TTL_SECONDS}:R>. The host presses Start."
+        return discord.Embed(
+            title=f"Match lobby - {_mode_label(view)}",
+            description=desc,
+            colour=discord.Colour.blurple(),
+        )
+    if view.problem is not None:
+        embed = problem_embed(view.problem)
+    else:
+        embed = discord.Embed(title=f"Problem {m.problem_key}", colour=discord.Colour.blue())
+    embed.set_author(name=f"{_mode_label(view)} match")
+    if m.status == "active":
+        status = "\n".join(f"<@{p.user_id}>: {_player_status(p)}" for p in players)
+        embed.add_field(name="Players", value=status, inline=False)
+        embed.add_field(name="Ends", value=f"<t:{m.expires_at}:R>", inline=False)
+        return embed
+    totals = view.totals or {}
+    if all(p.solved_at is None for p in players) and all(not p.delta for p in players):
+        results = "Nobody solved it. No points changed."
+    else:
+        ordered = sorted(players, key=lambda p: -(p.delta or 0))
+        results = "\n".join(
+            f"<@{p.user_id}> {p.delta or 0:+d} (total {totals.get(p.user_id, 0)})" for p in ordered
+        )
+    embed.colour = discord.Colour.green()
+    embed.add_field(name="Results", value=results, inline=False)
+    if view.note:
+        embed.set_footer(text=view.note)
+    return embed

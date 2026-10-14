@@ -1,6 +1,7 @@
 from src.cf.models import Contest, Problem, User
 from src.cogs.contests import ContestsCog
 from src.cogs.handles import HandlesCog, VerifyButton
+from src.cogs.match import MatchButton, MatchCog
 from src.cogs.problems import ProblemsCog
 from src.ui.embeds import contest_pages, problem_embed, profile_embed
 
@@ -64,3 +65,15 @@ def test_problems_commands_registered():
 def test_contests_groups():
     assert {c.name for c in ContestsCog.contests.commands} == {"upcoming", "running", "recent"}
     assert {c.name for c in ContestsCog.remind.commands} == {"set", "show", "clear"}
+
+
+def test_match_group_commands():
+    assert {c.name for c in MatchCog.match.commands} == {"solo", "duel", "custom"}
+    assert MatchCog.match.guild_only
+
+
+def test_match_button_template_matches_all_actions():
+    template = MatchButton.__discord_ui_compiled_template__
+    for action in ("join", "start", "leave", "check", "giveup"):
+        assert template.fullmatch(f"match:{action}:42")
+    assert not template.fullmatch("match:other:42")

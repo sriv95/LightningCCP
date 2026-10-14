@@ -11,11 +11,12 @@ from src.cf.client import CodeforcesClient
 from src.config import Config
 from src.db.store import Store
 from src.errors import report_error
+from src.matches import MatchService
 from src.services import Services
 
 log = logging.getLogger(__name__)
 
-COGS = ("src.cogs.handles", "src.cogs.problems", "src.cogs.contests")
+COGS = ("src.cogs.handles", "src.cogs.problems", "src.cogs.contests", "src.cogs.match")
 
 
 class LightningBot(commands.Bot):
@@ -34,11 +35,13 @@ class LightningBot(commands.Bot):
         await store.connect()
         session = aiohttp.ClientSession(headers={"User-Agent": "LightningCCP"})
         cf = CodeforcesClient(session)
+        problems = ProblemCache(cf, store)
         self.services = Services(
             db=store,
             cf=cf,
-            problems=ProblemCache(cf, store),
+            problems=problems,
             contests=ContestCache(cf, store),
+            matches=MatchService(store, cf, problems),
             session=session,
         )
         await self.services.problems.start()
