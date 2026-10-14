@@ -385,3 +385,10 @@ async def test_stats_orders_and_counts_finished_only(store):
     await make_match(store, host=3)  # lobby: not counted
     assert await store.stats(1) == [(1, "h1", 3, 2), (2, "linked2", -3, 2)]
     assert await store.stats(9) == []
+
+
+async def test_linked_handles_lists_one_guild(store):
+    await store.link_handle(1, 2, "b", None)
+    await store.link_handle(1, 1, "a", None)
+    await store.link_handle(2, 3, "c", None)
+    assert sorted(await store.linked_handles(1)) == [(1, "a"), (2, "b")]

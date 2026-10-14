@@ -144,3 +144,26 @@ def stats_embed(rows: Sequence[tuple[int, str, int, int]], me_id: int) -> discor
     if footer and lines:
         embed.set_footer(text=footer)
     return embed
+
+
+def ranklist_pages(
+    entries: Sequence[tuple[int, int, str, float, int]], title: str, per_page: int = 10
+) -> list[discord.Embed]:
+    """entries: (rank, user_id, handle, points, penalty), best first."""
+
+    def line(e: tuple[int, int, str, float, int]) -> str:
+        rank, user_id, handle, points, penalty = e
+        extra = f", penalty {penalty}" if penalty else ""
+        return f"{rank}. <@{user_id}> ({handle}) {points:g}{extra}"
+
+    groups = chunked(entries, per_page)
+    pages = []
+    for i, group in enumerate(groups, start=1):
+        embed = discord.Embed(
+            title=title,
+            description="\n".join(line(e) for e in group),
+            colour=discord.Colour.teal(),
+        )
+        embed.set_footer(text=f"Page {i}/{len(groups)}")
+        pages.append(embed)
+    return pages

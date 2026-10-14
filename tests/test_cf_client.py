@@ -158,3 +158,44 @@ async def test_user_info_semicolon_handle_is_not_found():
     client, *_ = make_client(ok([{"handle": "a"}, {"handle": "b"}]))
     with pytest.raises(HandleNotFound):
         await client.user_info("a;b")
+
+
+def standing_row(rank, *handles, points=1500.0, penalty=0):
+    members = [{"handle": h} for h in handles]
+    return {"party": {"members": members}, "rank": rank, "points": points, "penalty": penalty}
+
+
+async def test_standings_parses_and_sends_filter():
+    client, session, _ = make_client(ok({"rows": [standing_row(3, "a", "b", points=7.0)]}))
+    rows = await client.standings(1700, ["a", "c"])
+    assert [(r.rank, r.handles, r.points, r.penalty) for r in rows] == [(3, ("a", "b"), 7.0, 0)]
+    assert session.calls[0][1]["handles"] == "a;c" and session.calls[0][1]["contestId"] == 1700
+    assert session.calls[0][1]["showUnofficial"] == "false"
+
+
+async def test_standings_chunks_handles():
+    client, session, _ = make_client(
+        ok({"rows": [standing_row(1, "a")]}), ok({"rows": [standing_row(2, "c")]})
+    )
+    rows = await client.standings(1, ["a", "b", "c"], chunk=2)
+    assert [r.rank for r in rows] == [1, 2]
+    assert [c[1]["handles"] for c in session.calls] == ["a;b", "c"]
+
+
+async def test_standings_splits_to_drop_unknown_handle():
+    not_found = "handles: User with handle b not found"
+    client, session, _ = make_client(
+        failed(not_found),  # a;b
+        ok({"rows": [standing_row(1, "a")]}),  # a
+        failed(not_found),  # b
+    )
+    rows = await client.standings(1, ["a", "b"])
+    assert [r.handles for r in rows] == [("a",)]
+    assert [c[1]["handles"] for c in session.calls] == ["a;b", "a", "b"]
+
+
+async def test_unknown_contest_is_not_a_handle_error():
+    client, *_ = make_client(failed("contestId: Contest with id 5 not found"))
+    with pytest.raises(CodeforcesError) as info:
+        await client.standings(5, ["a"])
+    assert not isinstance(info.value, HandleNotFound)

@@ -7,7 +7,7 @@ from discord.ext import commands, tasks
 
 from src.errors import BotError, CacheNotReady
 from src.logic import parse_minutes, reminders_due, select_contests
-from src.ui.embeds import contest_pages
+from src.ui.embeds import contest_pages, ranklist_pages
 from src.ui.paginator import send_pages
 
 log = logging.getLogger(__name__)
@@ -64,6 +64,32 @@ class ContestsCog(commands.Cog, name="Contests"):
     @contests.command(name="recent", description="List recently finished contests")
     async def recent(self, interaction: discord.Interaction) -> None:
         await self._list(interaction, "recent")
+
+    @app_commands.command(name="ranklist", description="Standings of linked members in a contest")
+    @app_commands.describe(contest_id="Codeforces contest id")
+    @app_commands.guild_only()
+    async def ranklist(self, interaction: discord.Interaction, contest_id: int) -> None:
+        await interaction.response.defer(ephemeral=True)
+        s = self.s
+        contest = next((c for c in s.contests.contests if c.id == contest_id), None)
+        if contest is not None and contest.phase == "BEFORE":
+            raise BotError("That contest has not started yet.")
+        linked = await s.db.linked_handles(interaction.guild_id)
+        if not linked:
+            raise BotError("No handles are linked in this server.")
+        owners = {handle.lower(): user_id for user_id, handle in linked}
+        entries = []
+        for row in await s.cf.standings(contest_id, [handle for _, handle in linked]):
+            # A team row counts for the first member who is linked here.
+            handle = next((h for h in row.handles if h.lower() in owners), None)
+            if handle is not None:
+                entries.append((row.rank, owners[handle.lower()], handle, row.points, row.penalty))
+        entries.sort()  # chunked Codeforces calls arrive in separate rank order
+        title = f"Ranklist - {contest.name}" if contest else f"Ranklist - contest {contest_id}"
+        pages = ranklist_pages(entries, title)
+        if not pages:
+            raise BotError("No linked member took part in that contest.")
+        await send_pages(interaction, pages)
 
     @remind.command(name="set", description="Post contest reminders in a channel")
     @app_commands.describe(

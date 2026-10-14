@@ -41,6 +41,14 @@ class Contest:
 
 
 @dataclass(frozen=True, slots=True)
+class Standing:
+    rank: int
+    handles: tuple[str, ...]
+    points: float
+    penalty: int
+
+
+@dataclass(frozen=True, slots=True)
 class Submission:
     id: int
     created: int

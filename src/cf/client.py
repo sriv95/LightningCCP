@@ -1,11 +1,11 @@
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 import aiohttp
 
-from src.cf.models import Contest, Problem, Submission, User
+from src.cf.models import Contest, Problem, Standing, Submission, User
 from src.errors import CodeforcesError, HandleNotFound
 
 BASE_URL = "https://codeforces.com/api/"
@@ -56,7 +56,7 @@ class CodeforcesClient:
                 if attempt + 1 < self._retries:
                     await self._sleep(self._retry_delay)
                 continue
-            if "not found" in lowered:
+            if "not found" in lowered and lowered.startswith("handle"):
                 raise HandleNotFound()
             raise CodeforcesError(f"Codeforces error: {comment or 'unknown'}")
         raise CodeforcesError("Codeforces rate limit hit. Try again shortly.")
@@ -113,4 +113,41 @@ class CodeforcesClient:
                 verdict=s.get("verdict"),
             )
             for s in data
+        ]
+
+    async def standings(
+        self, contest_id: int, handles: Sequence[str], chunk: int = 100
+    ) -> list[Standing]:
+        """Official standing rows of the given handles; handles Codeforces does not know are skipped."""
+        rows: list[Standing] = []
+        for i in range(0, len(handles), chunk):
+            rows += await self._standings(contest_id, list(handles[i : i + chunk]))
+        return rows
+
+    async def _standings(self, contest_id: int, handles: list[str]) -> list[Standing]:
+        params = {
+            "contestId": contest_id,
+            "handles": ";".join(handles),
+            "from": 1,
+            "count": len(handles),
+            "showUnofficial": "false",
+        }
+        try:
+            data = await self._call("contest.standings", params)
+        except HandleNotFound:
+            # One renamed or deleted handle fails the whole call: split to find and drop it.
+            if len(handles) == 1:
+                return []
+            mid = len(handles) // 2
+            return await self._standings(contest_id, handles[:mid]) + await self._standings(
+                contest_id, handles[mid:]
+            )
+        return [
+            Standing(
+                rank=r["rank"],
+                handles=tuple(m["handle"] for m in r["party"]["members"]),
+                points=r["points"],
+                penalty=r["penalty"],
+            )
+            for r in data["rows"]
         ]

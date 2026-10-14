@@ -31,6 +31,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/match custom players [rating]` | Match for 2-10 players; ranked by solve time |
 | `/stats` | Top 10 by match points, plus your own rank (private) |
 | `/contests upcoming\|running\|recent` | Paginated contest lists |
+| `/ranklist contest_id` | Official standings of this server's linked members in a contest (private) |
 | `/remind set\|show\|clear` | Contest reminders (needs Manage Server) |
 
 A match is a public message. The lobby has Join, Start and Leave buttons; once the host presses Start, the problem appears with Check and Give Up buttons. Points are placement based and zero-sum for duels and custom matches.

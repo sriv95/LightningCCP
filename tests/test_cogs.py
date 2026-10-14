@@ -3,7 +3,7 @@ from src.cogs.contests import ContestsCog
 from src.cogs.handles import HandlesCog, VerifyButton
 from src.cogs.match import MatchButton, MatchCog
 from src.cogs.problems import ProblemsCog
-from src.ui.embeds import contest_pages, problem_embed, profile_embed, stats_embed
+from src.ui.embeds import contest_pages, problem_embed, profile_embed, ranklist_pages, stats_embed
 
 
 class FakeMember:
@@ -63,6 +63,7 @@ def test_problems_commands_registered():
 
 def test_contests_groups():
     assert {c.name for c in ContestsCog.contests.commands} == {"upcoming", "running", "recent"}
+    assert "ranklist" in {c.name for c in ContestsCog.__cog_app_commands__}
     assert {c.name for c in ContestsCog.remind.commands} == {"set", "show", "clear"}
 
 
@@ -87,3 +88,13 @@ def test_stats_embed_shows_caller_below_top_ten():
     assert "..." not in in_top.description and "**2. <@2>" in in_top.description
     assert stats_embed(rows, 99).footer.text == "You have no finished matches yet."
     assert stats_embed([], 1).description == "No finished matches yet."
+
+
+def test_ranklist_pages_lines_and_paging():
+    entries = [(i, i, f"h{i}", 100.0 - i, 0) for i in range(1, 13)]
+    entries[1] = (2, 2, "h2", 90.0, 45)
+    pages = ranklist_pages(entries, "T")
+    assert [p.footer.text for p in pages] == ["Page 1/2", "Page 2/2"]
+    assert pages[0].description.splitlines()[0] == "1. <@1> (h1) 99"
+    assert pages[0].description.splitlines()[1] == "2. <@2> (h2) 90, penalty 45"
+    assert ranklist_pages([], "T") == []

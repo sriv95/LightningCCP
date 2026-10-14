@@ -246,6 +246,12 @@ class Store:
         )
         return LinkedHandle(row["handle"], row["rating"]) if row else None
 
+    async def linked_handles(self, guild_id: int) -> list[tuple[int, str]]:
+        rows = await self._all(
+            "SELECT user_id, handle FROM user_handle WHERE guild_id = ?", (guild_id,)
+        )
+        return [(r["user_id"], r["handle"]) for r in rows]
+
     async def user_for_handle(self, guild_id: int, handle: str) -> int | None:
         row = await self._one(
             "SELECT user_id FROM user_handle WHERE guild_id = ? AND handle = ?", (guild_id, handle)
