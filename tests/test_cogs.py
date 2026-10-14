@@ -1,4 +1,5 @@
 from src.cf.models import Contest, Problem, User
+from src.cogs.contests import ContestsCog
 from src.cogs.handles import HandlesCog, VerifyButton
 from src.cogs.problems import ProblemsCog
 from src.ui.embeds import contest_pages, problem_embed, profile_embed
@@ -58,3 +59,8 @@ def test_verify_button_template_matches_custom_id():
 def test_problems_commands_registered():
     names = {c.name for c in ProblemsCog.__cog_app_commands__}
     assert names == {"gimme", "gitgud", "gotgud", "nogud"}
+
+
+def test_contests_groups():
+    assert {c.name for c in ContestsCog.contests.commands} == {"upcoming", "running", "recent"}
+    assert {c.name for c in ContestsCog.remind.commands} == {"set", "show", "clear"}
