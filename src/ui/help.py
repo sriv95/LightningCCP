@@ -1,0 +1,82 @@
+import discord
+
+HELP_TOPICS: dict[str, tuple[str, str]] = {
+    "start": (
+        "Getting started",
+        "1. Run `/handle link <handle>`. The bot gives you a Codeforces problem; submit a "
+        "compile error to it within 5 minutes, then press Verify. This proves the handle is yours.\n"
+        "2. Everyone starts at a match rating of 800 in each server. Matches and contests move it.\n"
+        "3. Try `/gimme` for a problem, `/daily` for double rating once a day, or "
+        "`/match solo` to practice.\n"
+        "4. `/handle show` shows a profile and `/handle unlink` removes your link.",
+    ),
+    "problems": (
+        "Problems",
+        "`/gimme [rating] [min_rating] [max_rating] [tags] [exclude_tags] [contest_id]` gives a "
+        "random problem you have not solved. With no rating it aims at your match rating.\n"
+        "`/daily [rating]` gives one problem a day (new at 00:00 UTC). Solve it on Codeforces, "
+        "then run `/daily` again to claim double rating and raise your daily streak. "
+        "Missing one day keeps the streak; two days in a row reset it.\n"
+        "`/stalk [handle] [member]` lists problems someone tried but never solved.",
+    ),
+    "matches": (
+        "Matches",
+        "`/match solo` practice alone: solving raises your rating, giving up never lowers it.\n"
+        "`/match duel [opponent]` 1v1: the faster solver wins rating from the other. "
+        "A finished duel has a Rematch button.\n"
+        "`/match custom <players>` 2 to 10 players: the first to solve wins, everyone else "
+        "loses together.\n"
+        "A match opens a lobby with Join, Start and Leave buttons. After Start the problem "
+        "appears with Check (look for your solve now) and Give Up. Solve on Codeforces, then "
+        "press Check.\n"
+        "`tags` and `exclude_tags` limit the problem. You can be in one unfinished match or "
+        "contest per server.",
+    ),
+    "contests": (
+        "Timed contests",
+        "`/host-rated contest` makes a timed contest of several problems with a live "
+        "scoreboard and changes match ratings. `/host-unrated contest` is the same without "
+        "rating changes.\n"
+        "Options: `min_rating`, `max_rating`, `count` (up to 10), `hour` and `minute` (length), "
+        "`penalty` (minutes per wrong attempt), `teams`, `players` (per team), `tags`, "
+        "`exclude_tags`.\n"
+        "`virtual <contest_id>` replays a finished Codeforces contest with its problems and length.\n"
+        "Press Join in the lobby (10 minutes), the host presses Start. Solve on Codeforces; "
+        "the scoreboard updates, Check reads you at once, Give Up leaves. A finished contest "
+        "has a Rematch button.",
+    ),
+    "ratings": (
+        "Ratings and stats",
+        "`/stats [sort] [kind]` ranks everyone by match rating, with pages; `sort: streak` ranks "
+        "by daily streak; `kind` counts matches or contests only.\n"
+        "`/profile [member] [handle]` shows one member's rating, rank, games and streak.\n"
+        "`/match history [member] [kind]` lists finished games with your place; with a member "
+        "it also shows your record against them.\n"
+        "`/plot rating` graphs match rating, `/plot codeforces` graphs Codeforces rating. "
+        "Both can compare up to 5 people.",
+    ),
+    "contest-list": (
+        "Codeforces contests",
+        "`/contests upcoming`, `/contests running` and `/contests recent` list Codeforces "
+        "contests.\n`/ranklist <contest_id>` shows how this server's linked members placed.\n"
+        "Admins (Manage Server) can set channels: `/channel reminder` posts a reminder before "
+        "each contest (optional role ping, minutes, and an `exclude` regex on the name), and "
+        "`/channel recap` posts how linked members placed after it ends. Set each one you want.",
+    ),
+}
+
+OVERVIEW = (
+    "LightningCCP is a Codeforces bot: link your handle, practice, play matches and contests "
+    "against other members and climb a server rating.\n"
+    "New here? Start with `/help topic:start`.\n\n"
+    + "\n".join(f"`/help topic:{key}` {title}" for key, (title, _) in HELP_TOPICS.items())
+)
+
+
+def help_embed(topic: str | None) -> discord.Embed:
+    if topic in HELP_TOPICS:
+        title, body = HELP_TOPICS[topic]
+        return discord.Embed(title=title, description=body, colour=discord.Colour.blue())
+    return discord.Embed(
+        title="LightningCCP help", description=OVERVIEW, colour=discord.Colour.blue()
+    )

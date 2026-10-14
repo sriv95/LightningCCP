@@ -23,6 +23,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 
 | Command | What it does |
 |---|---|
+| `/help [topic]` | A private guide: no topic gives an overview; topics are start, problems, matches, contests, ratings and contest-list |
 | `/handle link <handle>` | Link a Codeforces handle; prove it by submitting a compile error |
 | `/handle show [member] [handle]` | Profile of a member (default: you) or of whoever linked a handle |
 | `/handle unlink` | Remove your link |

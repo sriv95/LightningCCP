@@ -33,7 +33,7 @@ Config comes from `.env` (see `.env.example`): `BOT_TOKEN` (required), `DB_PATH`
 
 Slash commands only. The bot uses `Intents.default()` (no `message_content`, no `members`) and `help_command=None`; do not add prefix commands.
 
-**Startup** (`LightningBot.setup_hook` in `src/bot.py`) runs in a fixed order: open the SQLite store (migrates), build the `Services` container, start the caches (load from DB, then the refresh loop's first tick fetches live), load the six cogs, sync the command tree. `close()` calls `super().close()` first so cogs and the reminder loop stop before the session and DB close.
+**Startup** (`LightningBot.setup_hook` in `src/bot.py`) runs in a fixed order: open the SQLite store (migrates), build the `Services` container, start the caches (load from DB, then the refresh loop's first tick fetches live), load the seven cogs, sync the command tree. `close()` calls `super().close()` first so cogs and the reminder loop stop before the session and DB close.
 
 **`Services`** (`src/services.py`) holds `db`, `cf`, `problems`, `contests`, `matches`, `mashups`, `session`. It is attached as `bot.services`; cogs reach everything through `self.bot.services`. There are no module-level globals, which is a deliberate departure from TLE.
 
@@ -66,6 +66,7 @@ Slash commands only. The bot uses `Intents.default()` (no `message_content`, no 
 - `/gimme` and `/match` never recommend unrated problems; solved-problem exclusion matches by problem key (`contestId + index`) only. A match problem is unsolved by every player and follows the match's `tags`/`exclude_tags` (stored normalized by `logic.normalize_tags`, `''` for none; a rematch reuses them).
 - Match button callbacks must `defer()` then edit the original message (except Rematch on a finished duel, which posts a new lobby with `MatchService.rematch` and leaves the result alone); Start fetches every player's history (about 2 Codeforces calls each). A solve's time is the Codeforces submission time, not the click time; it is compared against the bot's local clock for `started_at`, so a badly skewed host clock can reject a very fast solve.
 - `/channel reminder` (`reminder` table; `channel_id` is NULL after `clear`, which keeps the role, minutes and `exclude` regex; `exclude` is matched with `re.search`, ignoring case, against the contest name before `reminders_due`) merges the given options into the stored row; with no options it shows it.
+- `/help [topic]` (`src/cogs/help.py`, text in `src/ui/help.py`) is static text: when a command or option changes, update the matching topic in `HELP_TOPICS` too.
 - Discord does not support per-subcommand default permissions, so admin subcommands use `@app_commands.checks.has_permissions(manage_guild=True)`; the `/channel` group also sets `default_permissions`.
 
 ## Testing notes

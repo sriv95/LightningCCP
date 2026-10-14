@@ -213,3 +213,20 @@ def test_mashup_group_commands_and_button_template():
     for action in ("join", "start", "leave", "check", "giveup", "rematch"):
         assert template.fullmatch(f"mashup:{action}:7")
     assert not template.fullmatch("mashup:other:7")
+
+
+def test_help_topics_fit_and_cover_every_command():
+    from src.ui.help import HELP_TOPICS, help_embed
+
+    assert help_embed(None).title == "LightningCCP help"
+    for key in HELP_TOPICS:
+        assert key in help_embed(None).description
+        assert len(help_embed(key).description) < 4096
+    text = " ".join(body for _, body in HELP_TOPICS.values())
+    for name in (
+        "/handle link", "/gimme", "/daily", "/stalk", "/match solo", "/match duel",
+        "/match custom", "/match history", "/host-rated", "/host-unrated", "/stats",
+        "/profile", "/plot rating", "/plot codeforces", "/contests upcoming", "/ranklist",
+        "/channel reminder", "/channel recap",
+    ):  # fmt: skip
+        assert name in text, name

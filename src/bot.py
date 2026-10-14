@@ -25,6 +25,7 @@ COGS = (
     "src.cogs.match",
     "src.cogs.plot",
     "src.cogs.mashup",
+    "src.cogs.help",
 )
 
 
