@@ -379,3 +379,17 @@ def test_team_solves_picks_the_earliest_solve_per_problem():
     solves = {1: {"A": (100, 0), "B": (500, 1)}, 2: {"A": (90, 2)}, 3: {"A": (10, 0)}}
     out = team_solves([(1, 1), (2, 1), (3, 2)], solves)
     assert out == {1: {"A": (90, 2), "B": (500, 1)}, 2: {"A": (10, 0)}}
+
+
+async def test_player_cap_is_chosen_by_the_host(env):
+    svc, store, cf, clock = env
+    view = await lobby(svc, max_players=2)
+    assert view.mashup.max_players == 2
+    assert "1/2 players" in mashup_embed(view, {}).description
+    await svc.join(view.mashup.id, 2)
+    with pytest.raises(MatchFull):
+        await svc.join(view.mashup.id, 3)
+    for bad in (0, MASHUP_MAX_PLAYERS + 1):
+        with pytest.raises(BotError, match="1 to 20"):
+            await lobby(svc, host=4, max_players=bad)
+    assert (await lobby(svc, host=3)).mashup.max_players == MASHUP_MAX_PLAYERS  # default

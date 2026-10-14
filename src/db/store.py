@@ -224,6 +224,8 @@ MIGRATIONS = [
     ALTER TABLE mashups ADD COLUMN teams INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE mashup_players ADD COLUMN team INTEGER;
     """,
+    # The host can lower the player cap of a mashup (20 until now).
+    "ALTER TABLE mashups ADD COLUMN max_players INTEGER NOT NULL DEFAULT 20;",
 ]
 
 
@@ -304,6 +306,7 @@ class MashupRow:
     started_at: int | None
     ends_at: int | None
     teams: int = 0
+    max_players: int = 20
 
 
 @dataclass(frozen=True)
@@ -839,6 +842,7 @@ class Store:
         now: int,
         teams: int = 0,
         host_team: int | None = None,
+        max_players: int = 20,
     ) -> int:
         try:
             async with self._tx() as db:
@@ -846,8 +850,8 @@ class Store:
                     raise AlreadyInMatch()
                 cur = await db.execute(
                     "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, "
-                    "count, duration_seconds, penalty_minutes, status, created_at, teams) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?)",
+                    "count, duration_seconds, penalty_minutes, status, created_at, teams, "
+                    "max_players) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?)",
                     (
                         guild_id,
                         channel_id,
@@ -859,6 +863,7 @@ class Store:
                         penalty_minutes,
                         now,
                         teams,
+                        max_players,
                     ),
                 )
                 mashup_id = cur.lastrowid

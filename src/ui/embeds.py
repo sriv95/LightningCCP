@@ -8,7 +8,6 @@ from src.db.store import MatchPlayer, MatchRow
 from src.logic import (
     DAY_SECONDS,
     LOBBY_TTL_SECONDS,
-    MASHUP_MAX_PLAYERS,
     chunked,
     format_hm,
     ordinal,
@@ -344,7 +343,7 @@ def _mashup_setup(view: MashupView) -> str:
 
 def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
     m = view.mashup
-    players = f"{len(view.players)}/{MASHUP_MAX_PLAYERS} players"
+    players = f"{len(view.players)}/{m.max_players} players"
     if m.status == "cancelled":
         return discord.Embed(
             title="Mashup cancelled",

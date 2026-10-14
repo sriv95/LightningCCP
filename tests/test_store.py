@@ -517,3 +517,19 @@ async def test_migration_9_adds_team_columns_with_defaults(tmp_path):
     assert (await s.get_mashup(1)).teams == 0
     assert (await s.mashup_players(1))[0].team is None
     await s.close()
+
+
+async def test_migration_10_defaults_the_player_cap_to_20(tmp_path):
+    db = await aiosqlite.connect(tmp_path / "old.db")
+    await db.executescript("\n".join(MIGRATIONS[:9]) + "\nPRAGMA user_version = 9;")
+    await db.execute(
+        "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, count, "
+        "duration_seconds, penalty_minutes, status, created_at) "
+        "VALUES (1, 2, 3, 800, 1200, 3, 7200, 0, 'lobby', 4)"
+    )
+    await db.commit()
+    await db.close()
+    s = Store(tmp_path / "old.db")
+    await s.connect()
+    assert (await s.get_mashup(1)).max_players == 20
+    await s.close()

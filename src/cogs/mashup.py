@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from src.errors import BotError, report_error
-from src.logic import MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAMS
+from src.logic import MASHUP_MAX_PLAYERS, MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAMS
 from src.mashup import MashupView
 from src.ui.embeds import mashup_embed
 
@@ -118,6 +118,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         hour="Hours the contest lasts (default 2)",
         minute="Extra minutes (default 0)",
         penalty="Minutes added per wrong attempt before a solve (default 0)",
+        players="Maximum number of players (default 20)",
     )
     async def contest(
         self,
@@ -128,8 +129,18 @@ class MashupCog(commands.Cog, name="Mashup"):
         hour: app_commands.Range[int, 0, 24] = 2,
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
+        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] = MASHUP_MAX_PLAYERS,
     ) -> None:
-        await self._open(interaction, min_rating, max_rating, count, hour, minute, penalty)
+        await self._open(
+            interaction,
+            min_rating,
+            max_rating,
+            count,
+            hour,
+            minute,
+            penalty,
+            max_players=players,
+        )
 
     @mashup.command(
         name="team-contest", description="Open a team contest lobby; Join asks for a team number"
@@ -171,6 +182,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         penalty: int,
         teams: int = 0,
         host_team: int = 1,
+        max_players: int = MASHUP_MAX_PLAYERS,
     ) -> None:
         await interaction.response.defer()
         view = await self.svc.create(
@@ -184,6 +196,7 @@ class MashupCog(commands.Cog, name="Mashup"):
             penalty_minutes=penalty,
             teams=teams,
             host_team=host_team,
+            max_players=max_players,
         )
         message = await interaction.followup.send(
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view), wait=True
