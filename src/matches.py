@@ -340,7 +340,9 @@ class MatchService:
         now = self._now()
         bonus_day = utc_day(now) if match.mode == "solo" else None
         finished = await self._store.finish_match(match.id, now, deltas, bonus_day)
-        if finished and bonus_day is not None:
+        if not finished:
+            return await self._view(match.id)  # its own result, not this caller's note
+        if bonus_day is not None:
             daily = await self._store.get_daily(match.guild_id, players[0].user_id, bonus_day)
             if daily and daily.match_id == match.id:
                 note = note or "Daily bonus: your first solo win of the day counts double."

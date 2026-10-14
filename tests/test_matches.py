@@ -618,3 +618,22 @@ async def test_rematch_keeps_the_tag_filters(env):
     done = await finished_duel(svc, tags="dp", exclude_tags="math")
     new = await svc.rematch(done.match.id, 1, 5)
     assert (new.match.tags, new.match.exclude_tags) == ("dp", "math")
+
+
+async def test_expiry_of_a_match_finished_meanwhile_adds_no_time_is_up_note(env, monkeypatch):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "duel", 2)
+    await svc.join(lobby.match.id, 2)
+    await svc.start(lobby.match.id, 1)
+    clock.t += MATCH_TTL_SECONDS
+    stale = await store.matches_due(clock.t - LOBBY_TTL_SECONDS, clock.t)
+    done = await svc.give_up(lobby.match.id, 2)  # finishes it before the expiry loop gets there
+    assert done.match.status == "finished"
+
+    async def due(*args):
+        return stale
+
+    monkeypatch.setattr(store, "matches_due", due)
+    (view,) = await svc.expire_due()
+    assert view.match.status == "finished" and view.note is None
+    assert deltas(view) == deltas(done)  # scored once
