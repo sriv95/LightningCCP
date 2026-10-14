@@ -1,14 +1,17 @@
 import logging
 import math
+import random
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.cf.models import Problem
-from src.db.store import MashupPlayer, MashupRow, Store
+from src.db.store import MashupCell, MashupPlayer, MashupRow, Store
 from src.errors import BotError, MatchClosed, MatchFull, NotLinked
 from src.logic import (
+    BINGO_MAX_SIZE,
+    BINGO_MIN_SIZE,
     LOBBY_TTL_SECONDS,
     MASHUP_MAX_INTERVAL,
     MASHUP_MAX_PLAYERS,
@@ -17,13 +20,17 @@ from src.logic import (
     MASHUP_MAX_TEAMS,
     MASHUP_MIN_INTERVAL,
     MASHUP_READS_PER_SECOND,
+    BingoBoard,
     MashupRank,
+    bingo_board,
+    bingo_standings,
     first_solve,
     mashup_standings,
     match_deltas,
     normalize_tags,
     parse_tags,
     pick_mashup,
+    pick_replacement,
     solved_keys,
     team_solves,
 )
@@ -38,24 +45,36 @@ class MashupView:
     players: list[MashupPlayer]
     solves: dict[int, dict[str, tuple[int, int]]]  # user -> problem -> (solve time, wrong)
     note: str | None = None
+    cells: list[MashupCell] = field(default_factory=list)  # bingo only: every problem on the board
+
+    @property
+    def team_solves(self) -> dict[int, dict[str, tuple[int, int]]]:
+        return team_solves(((p.user_id, p.team) for p in self.players), self.solves)
+
+    @property
+    def board(self) -> BingoBoard:
+        m = self.mashup
+        return bingo_board(
+            m.size, m.mode, m.win, [(c.key, c.rating, c.cell) for c in self.cells], self.team_solves
+        )
 
     @property
     def standings(self) -> list[MashupRank]:
         """The teams (MashupRank.user_id is the team number; a team of one shows its player's
-        handle): a problem counts for a team once, from the teammate who solved it first."""
+        handle): a problem counts for a team once, from the teammate who solved it first. A bingo
+        ranks by lines and squares claimed."""
         joined: dict[int, tuple[int, str]] = {}
         for p in self.players:
             if p.team not in joined or p.joined_at < joined[p.team][0]:
                 joined[p.team] = (p.joined_at, p.handle)
         solo = self.mashup.team_size == 1
+        teams = [
+            (team, handle if solo else f"Team {team}", at) for team, (at, handle) in joined.items()
+        ]
+        if self.mashup.mode != "contest":
+            return bingo_standings(teams, self.board, self.mashup.started_at or 0)
         return mashup_standings(
-            (
-                (team, handle if solo else f"Team {team}", at)
-                for team, (at, handle) in joined.items()
-            ),
-            team_solves(((p.user_id, p.team) for p in self.players), self.solves),
-            self.mashup.started_at or 0,
-            self.mashup.penalty_minutes,
+            teams, self.team_solves, self.mashup.started_at or 0, self.mashup.penalty_minutes
         )
 
 
@@ -99,6 +118,7 @@ class MashupService:
             await self._store.mashup_players(mashup_id),
             await self._store.mashup_solves(mashup_id),
             note,
+            await self._store.mashup_cells(mashup_id) if mashup.mode != "contest" else [],
         )
 
     async def history(self, guild_id: int, user_id: int, limit: int = 50) -> list[MashupRecord]:
@@ -158,7 +178,14 @@ class MashupService:
         tags: str | None = None,
         exclude_tags: str | None = None,
         contest_id: int | None = None,
+        mode: str = "contest",
+        size: int = 0,
+        win: str = "line",
     ) -> MashupView:
+        if mode != "contest":  # bingo: the board is size x size problems
+            if not BINGO_MIN_SIZE <= size <= BINGO_MAX_SIZE:
+                raise BotError(f"The board size must be from {BINGO_MIN_SIZE} to {BINGO_MAX_SIZE}.")
+            count, penalty_minutes = size * size, 0
         if contest_id is not None:  # a virtual contest: the problems are the contest's own
             problems = self._contest_problems(contest_id)
             min_rating = min(p.rating for p in problems)
@@ -192,6 +219,9 @@ class MashupService:
             tags=normalize_tags(tags),
             exclude_tags=normalize_tags(exclude_tags),
             contest_id=contest_id,
+            mode=mode,
+            size=size,
+            win=win,
         )
         return await self.view(mashup_id)
 
@@ -222,6 +252,9 @@ class MashupService:
             tags=m.tags,
             exclude_tags=m.exclude_tags,
             contest_id=m.contest_id,
+            mode=m.mode,
+            size=m.size,
+            win=m.win,
         )
 
     async def join(self, mashup_id: int, user_id: int, team: int | None = None) -> MashupView:
@@ -296,6 +329,8 @@ class MashupService:
                 f"{' with those tags' if mashup.tags or mashup.exclude_tags else ''} "
                 f"that nobody here has solved, for {mashup.count} problems."
             )
+        if mashup.mode != "contest":
+            random.shuffle(picked)  # pick_mashup lists easy to hard; a board is mixed
         now = self._now()
         if not await self._store.start_mashup(
             mashup_id,
@@ -339,7 +374,11 @@ class MashupService:
         return await self.view(mashup_id)
 
     async def _everyone_done(self, mashup: MashupRow) -> bool:
-        """Every player still in has a team that solved every problem (true when all gave up)."""
+        """Every player still in has a team that solved every problem (true when all gave up). A
+        bingo is over when it has a winner (or a full classic board) or all gave up."""
+        if mashup.mode != "contest":
+            view = await self.view(mashup.id)
+            return view.board.over or not any(p.active for p in view.players)
         total = len(await self._store.mashup_problems(mashup.id))
         players = await self._store.mashup_players(mashup.id)
         solves = team_solves(
@@ -349,14 +388,43 @@ class MashupService:
 
     async def _refresh(self, mashup: MashupRow, player: MashupPlayer) -> int:
         """Reads the player's recent submissions; returns how many new solves it stored."""
-        keys = [key for key, _ in await self._store.mashup_problems(mashup.id)]
+        cells = await self._store.mashup_cells(mashup.id)
         subs = await self._cf.user_status(player.handle, count=100)
         solves = {}
-        for key in keys:
-            found = first_solve(subs, key, mashup.started_at, mashup.ends_at)
+        for c in cells:
+            found = first_solve(subs, c.key, c.since, mashup.ends_at)
             if found is not None:
-                solves[key] = found
-        return await self._store.record_mashup_solves(mashup.id, player.user_id, solves)
+                solves[c.key] = found
+        new = await self._store.record_mashup_solves(mashup.id, player.user_id, solves)
+        if new and mashup.mode == "replace":
+            await self._replace_claimed(mashup)
+        return new
+
+    async def _replace_claimed(self, mashup: MashupRow) -> None:
+        """Gives every claimed square of a replace bingo a new problem rated 100 higher. The new
+        problem counts from the claim; problems the players solved earlier are not excluded
+        (shortcut: that would cost a full history read per player)."""
+        view = await self.view(mashup.id)
+        claims = view.board.claims
+        used = frozenset(c.key for c in view.cells)
+        newest = {c.cell: c for c in view.cells}  # the cells come in the order they were added
+        for cell, current in newest.items():
+            if current.key not in claims:
+                continue
+            pick = pick_replacement(
+                self._problems.require(),
+                current.rating,
+                used,
+                tags=parse_tags(mashup.tags),
+                exclude_tags=parse_tags(mashup.exclude_tags),
+            )
+            if pick is None:
+                log.warning("No replacement for %s in mashup %s", current.key, mashup.id)
+                continue
+            used |= {pick.key}
+            await self._store.replace_cell(
+                mashup.id, cell, current.idx, pick.key, pick.rating, claims[current.key][1]
+            )
 
     async def tick(self) -> list[MashupView]:
         """Cancels expired lobbies, reads the stalest players of running contests (the reads the
@@ -377,13 +445,22 @@ class MashupService:
             except Exception:
                 log.exception("Could not update mashup %s", mashup.id)
         changed, waiting = await self._read_players(running, now)
+        # A bingo that is won gets one full read first: a team may have claimed a square earlier
+        # than the solves read so far show.
+        won = [m for m in running if m.mode != "contest" and now < m.ends_at]
+        won = [m for m in won if await self._everyone_done(m)]
+        if won:
+            for mashup_id, n in (await self._read_players(won, now, {m.id for m in won}))[
+                0
+            ].items():
+                changed[mashup_id] = changed.get(mashup_id, 0) + n
         self.interval = min(
             MASHUP_MAX_INTERVAL,
             max(MASHUP_MIN_INTERVAL, math.ceil(waiting / MASHUP_READS_PER_SECOND)),
         )
         for mashup in running:
             try:
-                ended = now >= mashup.ends_at or await self._everyone_done(mashup)
+                ended = now >= mashup.ends_at or mashup in won or await self._everyone_done(mashup)
                 if ended:
                     await self._store.finish_mashup(
                         mashup.id, await self._rating_changes(await self.view(mashup.id)), now
@@ -414,14 +491,17 @@ class MashupService:
         changes = match_deltas([groups[k] for k in sorted(groups)], entrant_ratings)
         return {p.user_id: changes[p.team] for p in view.players}
 
-    async def _read_players(self, running: list[MashupRow], now: int) -> tuple[dict[int, int], int]:
+    async def _read_players(
+        self, running: list[MashupRow], now: int, full: frozenset[int] | set[int] = frozenset()
+    ) -> tuple[dict[int, int], int]:
         """Reads submissions; returns the new solves per contest and how many players of contests
-        still running are due the next time. A contest out of time is read in full (its last
-        solves count); the others share the budget of the last interval, the player read longest
+        still running are due the next time. A contest out of time (or in `full`) is read in full (its
+        last solves count); the others share the budget of the last interval, the player read longest
         ago first. A team that solved everything is not read."""
         due: list[tuple[int, MashupRow, MashupPlayer]] = []
         for mashup in running:
             try:
+                bingo = mashup.mode != "contest"  # a board is never solved by one team
                 total = len(await self._store.mashup_problems(mashup.id))
                 players = await self._store.mashup_players(mashup.id)
                 solves = team_solves(
@@ -431,9 +511,10 @@ class MashupService:
             except Exception:
                 log.exception("Could not list the players of mashup %s", mashup.id)
                 continue
-            last = -1 if now >= mashup.ends_at else 0  # out of time: before everyone, no budget
+            # out of time: before everyone, no budget
+            last = -1 if now >= mashup.ends_at or mashup.id in full else 0
             for p in players:
-                if p.active and len(solves.get(p.team, {})) < total:
+                if p.active and (bingo or len(solves.get(p.team, {})) < total):
                     due.append((last or self._read_at.get((mashup.id, p.user_id), 0), mashup, p))
         due.sort(key=lambda d: d[0])  # stable: equal staleness keeps contest and joining order
         budget = max(1, round(MASHUP_READS_PER_SECOND * self.interval))

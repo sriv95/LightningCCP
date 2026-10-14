@@ -1,5 +1,6 @@
 import logging
 import re
+from typing import Literal
 
 import discord
 from discord import app_commands
@@ -8,6 +9,8 @@ from discord.ext import commands, tasks
 from src.cogs.match import EXCLUDE_HELP, TAGS_HELP
 from src.errors import BotError, report_error
 from src.logic import (
+    BINGO_MAX_SIZE,
+    BINGO_MIN_SIZE,
     MASHUP_MAX_PROBLEMS,
     MASHUP_MAX_TEAM_SIZE,
     MASHUP_MAX_TEAMS,
@@ -50,6 +53,20 @@ VIRTUAL = {
     "penalty": OPTIONS["penalty"],
     "teams": TEAMS,
     "players": TEAM_SIZE,
+    "rated": RATED,
+}
+BINGO = {
+    "size": f"Squares on each side of the board, {BINGO_MIN_SIZE}-{BINGO_MAX_SIZE} (default 5)",
+    "mode": "classic: claimed squares stay; replace: a solved square gets a problem rated 100 higher",
+    "win": "Classic only. line (default): the first full line wins; continuous: play to the end",
+    "min_rating": OPTIONS["min_rating"],
+    "max_rating": OPTIONS["max_rating"],
+    "hour": OPTIONS["hour"],
+    "minute": OPTIONS["minute"],
+    "teams": TEAMS,
+    "players": TEAM_SIZE,
+    "tags": TAGS_HELP,
+    "exclude_tags": EXCLUDE_HELP,
     "rated": RATED,
 }
 ACTIONS = {
@@ -193,6 +210,42 @@ class MashupCog(commands.Cog, name="Mashup"):
     ) -> None:
         await self._virtual(interaction, contest_id, penalty, teams, players, rated)
 
+    @host.command(name="bingo", description="Open a bingo lobby: teams race for the squares")
+    @app_commands.describe(**BINGO)
+    async def bingo(
+        self,
+        interaction: discord.Interaction,
+        size: app_commands.Range[int, BINGO_MIN_SIZE, BINGO_MAX_SIZE] = 5,
+        mode: Literal["classic", "replace"] = "classic",
+        win: Literal["line", "continuous"] = "line",
+        min_rating: Rating = 800,
+        max_rating: Rating = 1500,
+        hour: app_commands.Range[int, 0, 24] = 2,
+        minute: app_commands.Range[int, 0, 59] = 0,
+        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = MASHUP_MAX_TEAMS,
+        players: app_commands.Range[int, 1, MASHUP_MAX_TEAM_SIZE] = 1,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
+        rated: bool = True,
+    ) -> None:
+        await self._open(
+            interaction,
+            min_rating,
+            max_rating,
+            size * size,
+            hour,
+            minute,
+            0,
+            teams,
+            players,
+            rated,
+            tags=tags,
+            exclude_tags=exclude_tags,
+            mode=mode,
+            size=size,
+            win=win,
+        )
+
     @virtual.autocomplete("contest_id")
     async def contest_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -234,6 +287,8 @@ class MashupCog(commands.Cog, name="Mashup"):
 
     @contest.autocomplete("tags")
     @contest.autocomplete("exclude_tags")
+    @bingo.autocomplete("tags")
+    @bingo.autocomplete("exclude_tags")
     async def tag_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
@@ -257,6 +312,9 @@ class MashupCog(commands.Cog, name="Mashup"):
         tags: str | None = None,
         exclude_tags: str | None = None,
         contest_id: int | None = None,
+        mode: str = "contest",
+        size: int = 0,
+        win: str = "line",
     ) -> None:
         await interaction.response.defer()
         view = await self.svc.create(
@@ -274,6 +332,9 @@ class MashupCog(commands.Cog, name="Mashup"):
             tags=tags,
             exclude_tags=exclude_tags,
             contest_id=contest_id,
+            mode=mode,
+            size=size,
+            win=win,
         )
         await self._post(interaction, view)
 

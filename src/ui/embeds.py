@@ -6,6 +6,7 @@ from src.cf.models import Contest, Problem, User
 from src.daily import DailyView
 from src.db.store import MatchPlayer, MatchRow
 from src.logic import (
+    BINGO_REPLACE_STEP,
     DAY_SECONDS,
     LOBBY_TTL_SECONDS,
     chunked,
@@ -349,7 +350,8 @@ def _line_pages(title: str, lines: Sequence[str], colour: discord.Colour) -> lis
 
 def _mashup_history_line(record: MashupRecord) -> str:
     m = record.mashup
-    kind = "Mashup" if m.team_size == 1 else f"Team mashup (team {record.team})"
+    name = "Bingo" if m.mode != "contest" else "Mashup"
+    kind = name if m.team_size == 1 else f"Team {name.lower()} (team {record.team})"
     place = f"{ordinal(record.rank)} of {record.entrants}" if record.solved else "nothing solved"
     rating = f", {record.delta:+d}" if record.delta is not None else ""
     return f"<t:{m.ends_at}:d> {kind} - {place}, {record.solved}/{m.count} solved{rating}"
@@ -413,9 +415,26 @@ def _mashup_change(view: MashupView, rank) -> int | None:
 def _mashup_setup(view: MashupView) -> str:
     m = view.mashup
     penalty = f"{m.penalty_minutes} min per wrong attempt" if m.penalty_minutes else "no penalty"
+    if m.mode == "classic":
+        head = f"{m.size}x{m.size} classic bingo, " + (
+            "the first full line wins" if m.win == "line" else "most lines at the end wins"
+        )
+        head += (
+            f", problems rated {m.min_rating}-{m.max_rating}, {format_hm(m.duration_seconds)} long"
+        )
+    elif m.mode == "replace":
+        head = (
+            f"{m.size}x{m.size} replace bingo, a solved square gets a problem rated "
+            f"{BINGO_REPLACE_STEP} higher, problems start at {m.min_rating}-{m.max_rating}, "
+            f"{format_hm(m.duration_seconds)} long"
+        )
+    else:
+        head = (
+            f"{m.count} problems rated {m.min_rating}-{m.max_rating}, "
+            f"{format_hm(m.duration_seconds)} long, {penalty}"
+        )
     return (
-        f"{m.count} problems rated {m.min_rating}-{m.max_rating}, "
-        f"{format_hm(m.duration_seconds)} long, {penalty}"
+        head
         + (f", {m.teams} teams" if m.team_size != 1 else "")
         + (f" of up to {m.team_size}" if m.team_size > 1 else "")
         + (f", virtual contest {m.contest_id}" if m.contest_id else "")
@@ -425,12 +444,59 @@ def _mashup_setup(view: MashupView) -> str:
     )
 
 
+def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
+    """The board (open squares show their problem, claimed ones [team]), the open problems by
+    row and the standings."""
+    m = view.mashup
+    board = view.board
+    finished = m.status == "finished"
+    shown = [f"[{team}]" if team is not None else key for key, _, team in board.squares]
+    width = max(len(text) for text in shown)
+    grid = "\n".join(
+        "  ".join(text.ljust(width) for text in shown[r * m.size : (r + 1) * m.size]).rstrip()
+        for r in range(m.size)
+    )
+    when = f"Ended <t:{m.ends_at}:f>" if finished else f"Ends <t:{m.ends_at}:R>"
+    lines = [f"Host: <@{m.host_id}> | {_mashup_setup(view)} | {when}", f"```\n{grid}\n```"]
+    lines.append("**Standings** (the number in brackets is the team on the board)")
+    for r in view.standings:
+        who = r.handle
+        if m.team_size != 1:
+            members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
+            who = f"{r.handle} ({members})"
+        score = f"{r.solved} squares" + (f", {r.lines} lines" if m.mode == "classic" else "")
+        lines.append(f"{r.rank}. [{r.user_id}] {who} - {score}")
+        if m.status == "active" and m.team_size == 1:
+            if not next(p for p in view.players if p.team == r.user_id).active:
+                lines[-1] += " (gave up)"
+        if finished and (change := _mashup_change(view, r)) is not None:
+            lines[-1] += f", rating {change:+d}"
+    embed = discord.Embed(
+        title=(
+            ("Team bingo" if m.team_size != 1 else "Bingo")
+            + (" - final standings" if finished else "")
+        ),
+        description="\n".join(lines),
+        colour=discord.Colour.green() if finished else discord.Colour.gold(),
+    )
+    if not finished:
+        for r in range(m.size):  # open problems by row, linked (a field holds 1024 characters)
+            row = []
+            for key, rating, team in board.squares[r * m.size : (r + 1) * m.size]:
+                if team is None:
+                    problem = by_key.get(key)
+                    row.append(f"[{key}]({problem.url}) {rating}" if problem else f"{key} {rating}")
+            if row:
+                embed.add_field(name=f"Row {r + 1}", value=" | ".join(row), inline=False)
+    return embed
+
+
 def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
     m = view.mashup
     players = f"{len(view.players)}/{m.max_players} players"
     if m.status == "cancelled":
         return discord.Embed(
-            title="Mashup cancelled",
+            title="Bingo cancelled" if m.mode != "contest" else "Mashup cancelled",
             description=f"{view.note or 'The contest was cancelled.'}\nHost: <@{m.host_id}>",
             colour=discord.Colour.red(),
         )
@@ -445,7 +511,7 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
         else:
             names = "\n".join(f"<@{p.user_id}> ({p.handle})" for p in view.players)
         return discord.Embed(
-            title="Mashup lobby" if m.team_size == 1 else "Team mashup lobby",
+            title=f"{'Team ' if m.team_size != 1 else ''}{'bingo' if m.mode != 'contest' else 'mashup'} lobby".capitalize(),
             description=(
                 f"Host: <@{m.host_id}>\n{_mashup_setup(view)}\n{players}:\n{names}\n"
                 f"Expires <t:{m.created_at + LOBBY_TTL_SECONDS}:R>. "
@@ -454,6 +520,8 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
             ),
             colour=discord.Colour.blurple(),
         )
+    if m.mode != "contest":
+        return _bingo_embed(view, by_key)
     letters = {key: chr(ord("A") + i) for i, (key, _) in enumerate(view.problems)}
     finished = m.status == "finished"
     when = f"Ended <t:{m.ends_at}:f>" if finished else f"Ends <t:{m.ends_at}:R>"

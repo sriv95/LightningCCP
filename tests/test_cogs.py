@@ -207,7 +207,12 @@ def test_rating_plot_renders_png():
 
 def test_mashup_group_commands_and_button_template():
     group = MashupCog.host
-    assert {c.name for c in group.commands} == {"contest", "virtual"}
+    assert {c.name for c in group.commands} == {"contest", "virtual", "bingo"}
+    bingo = next(c for c in group.commands if c.name == "bingo")
+    by_name = {p.name: p for p in bingo.parameters}
+    assert [c.value for c in by_name["mode"].choices] == ["classic", "replace"]
+    assert [c.value for c in by_name["win"].choices] == ["line", "continuous"]
+    assert (by_name["size"].min_value, by_name["size"].max_value) == (3, 7)
     assert group.guild_only
     for command in group.commands:
         rated = next(p for p in command.parameters if p.name == "rated")
@@ -228,7 +233,7 @@ def test_help_topics_fit_and_cover_every_command():
     text = " ".join(body for _, body in HELP_TOPICS.values())
     for name in (
         "/handle link", "/gimme", "/daily", "/stalk", "/match solo", "/match duel",
-        "/match custom", "/match history", "/host contest", "/host virtual", "/stats",
+        "/match custom", "/match history", "/host contest", "/host virtual", "/host bingo", "/stats",
         "/profile", "/plot rating", "/plot codeforces", "/contests upcoming", "/ranklist",
         "/channel reminder", "/channel recap",
     ):  # fmt: skip

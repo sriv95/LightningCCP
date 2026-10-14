@@ -43,7 +43,15 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "and length (it also has `rated`).\n"
         "Press Join in the lobby (10 minutes), the host presses Start. Solve on Codeforces; "
         "the scoreboard updates, Check reads you at once, Give Up leaves. A finished contest "
-        "has a Rematch button.",
+        "has a Rematch button.\n"
+        "`/host bingo [size] [mode] [win]` is a bingo: teams race for the squares of one shared "
+        "size x size board (3 to 7, default 5), solved on Codeforces after Start. "
+        "`mode: classic` (default) keeps a claimed square for the team that solved it first; "
+        "with `win: line` (default) the first full row, column or diagonal wins, with "
+        "`win: continuous` the game runs to the end and ranks by lines. `mode: replace` gives "
+        "a solved square a new problem rated 100 higher and ranks by squares claimed. "
+        "It also has `min_rating`, `max_rating`, `hour`, `minute`, `teams`, `players`, `tags`, "
+        "`exclude_tags` and `rated`.",
     ),
     "ratings": (
         "Ratings and stats",

@@ -25,6 +25,10 @@ MASHUP_MAX_INTERVAL = 60
 MASHUP_MAX_PROBLEMS = 10
 MASHUP_MAX_TEAMS = 10
 MASHUP_MAX_TEAM_SIZE = 5
+BINGO_MIN_SIZE = 3
+BINGO_MAX_SIZE = 7
+BINGO_REPLACE_STEP = 100  # a solved square of a replace bingo gets a problem rated this much higher
+MAX_PROBLEM_RATING = 3500
 START_RATING = 800
 SOLO_MIN = 1
 SOLO_EQUAL = 10
@@ -411,6 +415,7 @@ class MashupRank:
     total_seconds: int  # solve times plus the penalty of every wrong attempt
     times: dict[str, int]  # problem key -> seconds after the start, for solved problems
     wrong: dict[str, int]  # problem key -> wrong attempts before the solve
+    lines: int = 0  # full bingo lines (always 0 in a contest)
 
 
 def mashup_standings(
@@ -436,4 +441,139 @@ def mashup_standings(
         same = ranked and (ranked[-1].solved, ranked[-1].total_seconds) == (-neg, total)
         rank = ranked[-1].rank if same else i + 1
         ranked.append(MashupRank(rank, user_id, handle, -neg, total, times, wrong))
+    return ranked
+
+
+def pick_replacement(
+    problems: Sequence[Problem],
+    rating: int,
+    used: frozenset[str],
+    rng: random.Random | None = None,
+    tags: frozenset[str] = frozenset(),
+    exclude_tags: frozenset[str] = frozenset(),
+) -> Problem | None:
+    """A random unused problem rated BINGO_REPLACE_STEP above `rating`, else the next rating up that
+    has one; at the top of the scale (nothing higher), one of the same rating. None when no
+    problem fits."""
+    rng = rng or random.Random()
+    for r in [*range(rating + BINGO_REPLACE_STEP, MAX_PROBLEM_RATING + 1, 100), rating]:
+        pool = filter_problems(
+            problems,
+            min_rating=r,
+            max_rating=r,
+            tags=tags,
+            exclude_tags=exclude_tags,
+            solved=used,
+        )
+        if pool:
+            return rng.choice(pool)
+    return None
+
+
+def bingo_lines(size: int) -> list[tuple[int, ...]]:
+    """Every row, column and the two diagonals of a size x size board, as cell numbers."""
+    rows = [tuple(range(r * size, (r + 1) * size)) for r in range(size)]
+    cols = [tuple(range(c, size * size, size)) for c in range(size)]
+    diagonals = [
+        tuple(i * (size + 1) for i in range(size)),
+        tuple((i + 1) * (size - 1) for i in range(size)),
+    ]
+    return rows + cols + diagonals
+
+
+@dataclass(frozen=True)
+class BingoBoard:
+    squares: list[tuple[str, int, int | None]]  # per cell: (problem key, rating, owning team)
+    claims: dict[str, tuple[int, int]]  # claimed problem key -> (team, solve time)
+    lines: dict[int, int]  # team -> full lines (classic only)
+    over: bool  # classic: a team holds a line (first-line win) or every square is claimed
+
+
+def bingo_board(
+    size: int,
+    mode: str,
+    win: str,
+    cells: Sequence[tuple[str, int, int]],
+    solves: dict[int, dict[str, tuple[int, int]]],
+) -> BingoBoard:
+    """The state of a shared bingo board. `cells` are (problem key, rating, cell) in the order
+    they were put on the board (a replace bingo has several problems per cell, the last is the
+    current one); `solves` is team -> problem key -> (solve time, wrong attempts).
+
+    The team with the earliest solve of a problem claims it. In a classic board the claimed
+    problem fills its cell and, with win == "line", the claims stop at the one that gives a team
+    its first full line (that team wins). A replace board has no lines: every claim scores."""
+    first: dict[str, tuple[int, int]] = {}  # problem key -> (solve time, team)
+    for team, mine in solves.items():
+        for key, (at, _) in mine.items():
+            if key not in first or (at, team) < first[key]:
+                first[key] = (at, team)
+    cell_of = {key: cell for key, _, cell in cells}
+    owner: dict[int, int] = {}
+    kept: list[tuple[str, int, int]] = []
+    over = False
+    lines = bingo_lines(size)
+    for key, (at, team) in sorted(first.items(), key=lambda kv: kv[1]):
+        if key not in cell_of:
+            continue
+        kept.append((key, team, at))
+        if mode != "classic":
+            continue
+        owner[cell_of[key]] = team
+        if win == "line" and any(
+            cell_of[key] in line and all(owner.get(c) == team for c in line) for line in lines
+        ):
+            over = True
+            break
+    if mode == "classic":
+        over = over or len(kept) == size * size
+    claims = {key: (team, at) for key, team, at in kept}
+    held = {
+        team: n
+        for team in set(owner.values())
+        if (n := sum(all(owner.get(c) == team for c in line) for line in lines))
+    }
+    latest = {cell: (key, rating) for key, rating, cell in cells}
+    squares = [
+        (*latest[c], claims[latest[c][0]][0] if latest[c][0] in claims else None)
+        for c in range(size * size)
+    ]
+    return BingoBoard(squares, claims, held, over)
+
+
+def bingo_standings(
+    players: Iterable[tuple[int, str, int]], board: BingoBoard, started_at: int
+) -> list[MashupRank]:
+    """Teams by full lines, then claimed squares, then who reached that score first; equal
+    scores share a rank. players are (team, handle, joined_at)."""
+    rows = []
+    for team, handle, joined_at in players:
+        mine = {k: at for k, (t, at) in board.claims.items() if t == team}
+        held = board.lines.get(team, 0)
+        rows.append(
+            (
+                (-held, -len(mine), max(mine.values(), default=0), joined_at),
+                team,
+                handle,
+                mine,
+                held,
+            )
+        )
+    rows.sort(key=lambda r: r[0])
+    ranked: list[MashupRank] = []
+    for i, (score, team, handle, mine, held) in enumerate(rows):
+        same = ranked and rows[i - 1][0][:3] == score[:3]
+        times = {k: max(0, at - started_at) for k, at in mine.items()}
+        ranked.append(
+            MashupRank(
+                ranked[-1].rank if same else i + 1,
+                team,
+                handle,
+                len(mine),
+                max(times.values(), default=0),
+                times,
+                {},
+                held,
+            )
+        )
     return ranked

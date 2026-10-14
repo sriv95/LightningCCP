@@ -271,6 +271,16 @@ MIGRATIONS = [
     DROP TABLE reminder;
     ALTER TABLE reminder_new RENAME TO reminder;
     """,
+    # Bingo: a mashup with mode classic or replace plays on a size x size board (win is "line" or
+    # "continuous"); every problem sits in a cell, and a replace board stacks problems per cell,
+    # each counting only from `since` (NULL = the start).
+    """
+    ALTER TABLE mashups ADD COLUMN mode TEXT NOT NULL DEFAULT 'contest';
+    ALTER TABLE mashups ADD COLUMN size INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE mashups ADD COLUMN win TEXT NOT NULL DEFAULT 'line';
+    ALTER TABLE mashup_problems ADD COLUMN cell INTEGER;
+    ALTER TABLE mashup_problems ADD COLUMN since INTEGER;
+    """,
 ]
 
 
@@ -357,6 +367,18 @@ class MashupRow:
     tags: str = ""
     exclude_tags: str = ""
     contest_id: int | None = None
+    mode: str = "contest"  # contest, or bingo: classic or replace
+    size: int = 0  # side of a bingo board
+    win: str = "line"  # classic bingo: "line" (first full line) or "continuous" (play to the end)
+
+
+@dataclass(frozen=True)
+class MashupCell:
+    idx: int
+    key: str
+    rating: int
+    cell: int | None
+    since: int  # solves count from here (the contest start unless a bingo cell was replaced)
 
 
 @dataclass(frozen=True)
@@ -925,6 +947,9 @@ class Store:
         tags: str = "",
         exclude_tags: str = "",
         contest_id: int | None = None,
+        mode: str = "contest",
+        size: int = 0,
+        win: str = "line",
     ) -> int:
         try:
             async with self._tx() as db:
@@ -933,8 +958,8 @@ class Store:
                 cur = await db.execute(
                     "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, "
                     "count, duration_seconds, penalty_minutes, status, created_at, teams, "
-                    "max_players, rated, team_size, tags, exclude_tags, contest_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "max_players, rated, team_size, tags, exclude_tags, contest_id, mode, size, win) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         guild_id,
                         channel_id,
@@ -952,6 +977,9 @@ class Store:
                         tags,
                         exclude_tags,
                         contest_id,
+                        mode,
+                        size,
+                        win,
                     ),
                 )
                 mashup_id = cur.lastrowid
@@ -999,6 +1027,36 @@ class Store:
             (mashup_id,),
         )
         return [(r["problem_key"], r["rating"]) for r in rows]
+
+    async def mashup_cells(self, mashup_id: int) -> list[MashupCell]:
+        """Every problem of the contest in the order it was added."""
+        rows = await self._all(
+            "SELECT p.idx, p.problem_key, p.rating, p.cell, COALESCE(p.since, m.started_at) AS since "
+            "FROM mashup_problems p JOIN mashups m ON m.id = p.mashup_id "
+            "WHERE p.mashup_id = ? ORDER BY p.idx",
+            (mashup_id,),
+        )
+        return [MashupCell(*row) for row in rows]
+
+    async def replace_cell(
+        self, mashup_id: int, cell: int, after_idx: int, key: str, rating: int, since: int
+    ) -> bool:
+        """Puts a new problem on a bingo cell of a running contest, only if `after_idx` is still the
+        cell's newest problem (so two reads that both saw the claim add one problem)."""
+        async with self._tx() as db:
+            cur = await db.execute(
+                "SELECT MAX(idx) FROM mashup_problems WHERE mashup_id = ? AND cell = ? "
+                "AND EXISTS (SELECT 1 FROM mashups WHERE id = ? AND status = 'active')",
+                (mashup_id, cell, mashup_id),
+            )
+            if (await cur.fetchone())[0] != after_idx:
+                return False
+            await db.execute(
+                "INSERT INTO mashup_problems (mashup_id, idx, problem_key, rating, cell, since) "
+                "SELECT ?, MAX(idx) + 1, ?, ?, ?, ? FROM mashup_problems WHERE mashup_id = ?",
+                (mashup_id, key, rating, cell, since, mashup_id),
+            )
+            return True
 
     async def mashup_players(self, mashup_id: int) -> list[MashupPlayer]:
         rows = await self._all(
@@ -1119,9 +1177,9 @@ class Store:
                 (started_at, ends_at, mashup_id),
             )
             await db.executemany(
-                "INSERT INTO mashup_problems (mashup_id, idx, problem_key, rating) "
-                "VALUES (?, ?, ?, ?)",
-                [(mashup_id, i, key, rating) for i, (key, rating) in enumerate(problems)],
+                "INSERT INTO mashup_problems (mashup_id, idx, problem_key, rating, cell) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [(mashup_id, i, key, rating, i) for i, (key, rating) in enumerate(problems)],
             )
             return True
 
