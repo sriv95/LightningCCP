@@ -22,7 +22,11 @@ class LightningBot(commands.Bot):
     services: Services
 
     def __init__(self, config: Config):
-        super().__init__(command_prefix=commands.when_mentioned, intents=discord.Intents.default())
+        super().__init__(
+            command_prefix=commands.when_mentioned,
+            intents=discord.Intents.default(),
+            help_command=None,
+        )
         self.config = config
 
     async def setup_hook(self) -> None:
@@ -57,10 +61,15 @@ class LightningBot(commands.Bot):
         await report_error(interaction, error)
 
     async def close(self) -> None:
+        await super().close()  # unloads cogs (stops the reminder loop) before services go away
         services = getattr(self, "services", None)
-        if services is not None:
+        if services is None:
+            return
+        try:
             services.problems.stop()
             services.contests.stop()
-            await services.session.close()
-            await services.db.close()
-        await super().close()
+        finally:
+            try:
+                await services.session.close()
+            finally:
+                await services.db.close()
