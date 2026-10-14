@@ -278,3 +278,15 @@ async def test_gimme_contest_autocomplete_matches_name_and_id():
     ]  # newest first; the contest with no known problems is left out
     assert [c.value for c in await cog.contest_autocomplete(None, "round")] == [1700]
     assert [c.value for c in await cog.contest_autocomplete(None, "1701")] == [1701]
+
+
+def test_solve_log_stamp_shows_the_time_since_the_start():
+    from types import SimpleNamespace
+
+    from src.ui.embeds import _stamp
+
+    view = SimpleNamespace(mashup=SimpleNamespace(started_at=1000))
+    assert _stamp(view, 1000) == "<t:1000:T> (+0m)"
+    assert _stamp(view, 1000 + 59 * 60 + 59) == "<t:4599:T> (+59m)"
+    assert _stamp(view, 1000 + 3600 + 5 * 60) == "<t:4900:T> (+1h05m)"
+    assert _stamp(view, 900) == "<t:900:T> (+0m)"  # never negative

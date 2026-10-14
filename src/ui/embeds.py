@@ -466,6 +466,13 @@ def give_up_message(view: MashupView, user: int) -> str:
     return f"{_log_who(view, team, user)} gave up."
 
 
+def _stamp(view: MashupView, at: int) -> str:
+    """The clock time of a solve and how long after the start it came."""
+    minutes = max(0, at - (view.mashup.started_at or at)) // 60
+    elapsed = f"{minutes}m" if minutes < 60 else f"{minutes // 60}h{minutes % 60:02d}m"
+    return f"<t:{at}:T> (+{elapsed})"
+
+
 def log_message(view: MashupView, entry: LogEntry, by_key: dict[str, Problem]) -> str:
     """One solve for the thread log; a replace bingo adds the cell's new problem."""
     m = view.mashup
@@ -474,9 +481,9 @@ def log_message(view: MashupView, entry: LogEntry, by_key: dict[str, Problem]) -
     who = _log_who(view, entry.team, entry.user)
     if m.mode == "contest":
         letter = chr(ord("A") + [k for k, _ in view.problems].index(entry.key))
-        text = f"<t:{entry.at}:T> {who} solved {letter}. {name} ({entry.rating})"
+        text = f"{_stamp(view, entry.at)} {who} solved {letter}. {name} ({entry.rating})"
         return text + (f", {entry.wrong} wrong before" if entry.wrong else "")
-    text = f"<t:{entry.at}:T> {who} claimed {name} ({entry.rating})"
+    text = f"{_stamp(view, entry.at)} {who} claimed {name} ({entry.rating})"
     cell = next(c for c in view.cells if c.key == entry.key)
     new = next((c for c in view.cells if c.cell == cell.cell and c.idx > cell.idx), None)
     if new is not None:
@@ -491,7 +498,7 @@ def _bingo_log(view: MashupView) -> str:
     out: list[str] = []
     size = 0
     for e in reversed(view.log):
-        line = f"<t:{e.at}:T> {e.key} ({e.rating}) - {_log_who(view, e.team, e.user)}"
+        line = f"{_stamp(view, e.at)} {e.key} ({e.rating}) - {_log_who(view, e.team, e.user)}"
         if len(out) == 12 or size + len(line) + 1 > 1000:
             break
         out.append(line)

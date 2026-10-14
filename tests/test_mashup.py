@@ -733,7 +733,7 @@ async def test_contest_log_has_every_teams_solve_once_with_the_solver(env):
     ]
     assert await svc.claims_to_log(await svc.view(mid)) == []  # once each
     by_key = {p.key: p for p in PROBLEMS}
-    assert log_message(view, entries[0], by_key).startswith("<t:1100:T> <@1> solved A. [")
+    assert log_message(view, entries[0], by_key).startswith("<t:1100:T> (+1m) <@1> solved A. [")
     assert log_message(view, entries[1], by_key).endswith(", 1 wrong before")
     assert "h2" in log_board_embed(view).description  # the standings
 

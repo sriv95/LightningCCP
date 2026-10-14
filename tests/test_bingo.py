@@ -416,7 +416,7 @@ async def test_claims_are_logged_to_the_thread_once_and_only_the_newest_shows_th
     await cog._log(await svc.view(mid))  # nothing new the second time
     assert len(sent) == 1 and edits == []
     text, embed = sent[0]
-    assert text.startswith("<t:1010:T> <@2> claimed [")
+    assert text.startswith("<t:1010:T> (+0m) <@2> claimed [")
     assert f"({first.rating})" in text and "New problem there:" in text
     assert f"({first.rating + 100})" in text
     assert "[2]" in embed.description  # the board shows team 2 holding the square
