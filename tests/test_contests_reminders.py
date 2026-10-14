@@ -98,3 +98,72 @@ async def test_list_raises_cache_not_ready_when_empty(monkeypatch):
     cog, db, ch = build(monkeypatch, contests=[])
     with pytest.raises(CacheNotReady):
         await cog._list(None, "upcoming")
+
+
+def finished(cid=7, ended_ago=600):
+    return Contest(cid, "Round", "CF", "FINISHED", NOW - ended_ago - 7200, 7200)
+
+
+def build_recap(monkeypatch, entries, contests=None):
+    cog, db, ch = build(monkeypatch, contests=[finished()] if contests is None else contests)
+    db.recaps = set()
+
+    async def recapped(guild_id):
+        return {c for g, c in db.recaps if g == guild_id}
+
+    async def mark_recapped(guild_id, contest_id):
+        if (guild_id, contest_id) in db.recaps:
+            return False
+        db.recaps.add((guild_id, contest_id))
+        return True
+
+    db.recapped, db.mark_recapped = recapped, mark_recapped
+    calls = []
+
+    async def fetch(guild_id, contest_id):
+        calls.append(contest_id)
+        if isinstance(entries, Exception):
+            raise entries
+        return entries
+
+    cog._entries = fetch
+    cog.calls = calls
+    ch.embeds = []
+
+    async def send(text=None, embed=None, **kwargs):
+        ch.embeds.append(embed)
+
+    ch.send = send
+    return cog, db, ch
+
+
+async def test_recap_posts_linked_members_once(monkeypatch):
+    cog, db, ch = build_recap(monkeypatch, [(1, 10, "a", 3.0, 0), (5, 11, "b", 1.0, 40)])
+    await cog._send_recaps()
+    await cog._send_recaps()
+    assert len(ch.embeds) == 1 and db.recaps == {(1, 7)}
+    e = ch.embeds[0]
+    assert e.title == "Contest recap - Round" and e.footer.text == "2 linked members took part"
+    assert e.description.splitlines()[0] == "1. <@10> (a) 3"
+
+
+async def test_recap_skips_empty_and_marks_it(monkeypatch):
+    cog, db, ch = build_recap(monkeypatch, [])
+    await cog._send_recaps()
+    await cog._send_recaps()
+    assert ch.embeds == [] and db.recaps == {(1, 7)} and cog.calls == [7]
+
+
+async def test_recap_failure_is_retried_not_marked(monkeypatch):
+    cog, db, ch = build_recap(monkeypatch, RuntimeError("cf down"))
+    await cog._send_recaps()
+    await cog._send_recaps()
+    assert db.recaps == set() and cog.calls == [7, 7]
+
+
+async def test_recap_ignores_old_running_and_upcoming_contests(monkeypatch):
+    old = finished(8, ended_ago=2 * 86400)
+    running = Contest(9, "R", "CF", "CODING", NOW - 100, 7200)
+    cog, db, ch = build_recap(monkeypatch, [(1, 10, "a", 3.0, 0)], [old, running])
+    await cog._send_recaps()
+    assert cog.calls == [] and ch.embeds == []

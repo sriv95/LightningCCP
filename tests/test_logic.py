@@ -380,3 +380,15 @@ def test_mashup_standings_penalty_per_wrong_attempt():
     assert rows[1].wrong == {"A": 2}
     free = mashup_standings(players, solves, started_at=100)  # no penalty: a is first
     assert [r.handle for r in free] == ["a", "b"]
+
+
+def test_recaps_due_window_and_sent():
+    from src.logic import RECAP_WINDOW_SECONDS, recaps_due
+
+    now = 1_000_000
+    done = Contest(1, "a", "CF", "FINISHED", now - 7200 - 60, 7200)  # ended 60 s ago
+    older = Contest(2, "b", "CF", "FINISHED", now - 7200 - 600, 7200)
+    stale = Contest(3, "c", "CF", "FINISHED", now - 7200 - RECAP_WINDOW_SECONDS - 1, 7200)
+    running = Contest(4, "d", "CF", "CODING", now - 100, 7200)
+    assert [c.id for c in recaps_due([done, older, stale, running], set(), now)] == [2, 1]
+    assert [c.id for c in recaps_due([done, older], {2}, now)] == [1]

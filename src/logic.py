@@ -11,6 +11,7 @@ LINK_MAX_RATING = 1200
 RUNNING_PHASES = frozenset({"CODING", "PENDING_SYSTEM_TEST", "SYSTEM_TEST"})
 MAX_REMINDER_MINUTES = 10080
 MAX_REMINDER_COUNT = 5
+RECAP_WINDOW_SECONDS = 86400  # only contests that ended this recently get a recap
 CHOICE_MAX_LEN = 100
 LOBBY_TTL_SECONDS = 600
 MATCH_TTL_SECONDS = 7200
@@ -292,6 +293,19 @@ def reminders_due(
             if now >= c.start_time - b * 60 and (c.id, b) not in sent:
                 due.append((c, b))
     return due
+
+
+def recaps_due(contests: Iterable[Contest], sent: set[int], now: int) -> list[Contest]:
+    """Finished contests that ended within the recap window and have no recap yet, oldest first."""
+    due = [
+        c
+        for c in contests
+        if c.phase == "FINISHED"
+        and c.start_time is not None
+        and c.id not in sent
+        and 0 <= now - (c.start_time + c.duration) <= RECAP_WINDOW_SECONDS
+    ]
+    return sorted(due, key=lambda c: c.start_time)
 
 
 def chunked[T](seq: Sequence[T], size: int) -> list[list[T]]:

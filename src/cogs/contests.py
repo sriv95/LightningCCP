@@ -6,8 +6,8 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from src.errors import BotError, CacheNotReady
-from src.logic import parse_minutes, reminders_due, select_contests
-from src.ui.embeds import contest_pages, ranklist_pages
+from src.logic import parse_minutes, recaps_due, reminders_due, select_contests
+from src.ui.embeds import contest_pages, ranklist_pages, recap_embed
 from src.ui.paginator import send_pages
 
 log = logging.getLogger(__name__)
@@ -65,6 +65,24 @@ class ContestsCog(commands.Cog, name="Contests"):
     async def recent(self, interaction: discord.Interaction) -> None:
         await self._list(interaction, "recent")
 
+    async def _entries(
+        self, guild_id: int, contest_id: int
+    ) -> list[tuple[int, int, str, float, int]]:
+        """(rank, user_id, handle, points, penalty) of this server's linked members, best first."""
+        s = self.s
+        linked = await s.db.linked_handles(guild_id)
+        if not linked:
+            return []
+        owners = {handle.lower(): user_id for user_id, handle in linked}
+        entries = []
+        for row in await s.cf.standings(contest_id, [handle for _, handle in linked]):
+            # A team row counts for the first member who is linked here.
+            handle = next((h for h in row.handles if h.lower() in owners), None)
+            if handle is not None:
+                entries.append((row.rank, owners[handle.lower()], handle, row.points, row.penalty))
+        entries.sort()  # chunked Codeforces calls arrive in separate rank order
+        return entries
+
     @app_commands.command(name="ranklist", description="Standings of linked members in a contest")
     @app_commands.describe(contest_id="Codeforces contest id")
     @app_commands.guild_only()
@@ -74,17 +92,7 @@ class ContestsCog(commands.Cog, name="Contests"):
         contest = next((c for c in s.contests.contests if c.id == contest_id), None)
         if contest is not None and contest.phase == "BEFORE":
             raise BotError("That contest has not started yet.")
-        linked = await s.db.linked_handles(interaction.guild_id)
-        if not linked:
-            raise BotError("No handles are linked in this server.")
-        owners = {handle.lower(): user_id for user_id, handle in linked}
-        entries = []
-        for row in await s.cf.standings(contest_id, [handle for _, handle in linked]):
-            # A team row counts for the first member who is linked here.
-            handle = next((h for h in row.handles if h.lower() in owners), None)
-            if handle is not None:
-                entries.append((row.rank, owners[handle.lower()], handle, row.points, row.penalty))
-        entries.sort()  # chunked Codeforces calls arrive in separate rank order
+        entries = await self._entries(interaction.guild_id, contest_id)
         title = f"Ranklist - {contest.name}" if contest else f"Ranklist - contest {contest_id}"
         pages = ranklist_pages(entries, title)
         if not pages:
@@ -142,6 +150,10 @@ class ContestsCog(commands.Cog, name="Contests"):
             await self._send_due_reminders()
         except Exception:
             log.exception("Reminder loop failed")
+        try:
+            await self._send_recaps()
+        except Exception:
+            log.exception("Recap loop failed")
 
     @remind_loop.before_loop
     async def _before_remind_loop(self) -> None:
@@ -188,6 +200,30 @@ class ContestsCog(commands.Cog, name="Contests"):
                     )
                 except discord.HTTPException:
                     log.warning("Could not send reminder to %s", reminder.channel_id, exc_info=True)
+
+    async def _send_recaps(self) -> None:
+        """Post how linked members placed in each contest that just ended, in the reminder channel
+        of every server that has reminders on. At most once per server and contest."""
+        s = self.s
+        now = int(time.time())
+        for reminder in await s.db.all_reminders():
+            channel = self.bot.get_channel(reminder.channel_id)
+            if channel is None:
+                continue
+            for contest in recaps_due(
+                s.contests.contests, await s.db.recapped(reminder.guild_id), now
+            ):
+                try:
+                    entries = await self._entries(reminder.guild_id, contest.id)
+                except Exception:
+                    log.warning("Could not fetch recap for contest %s", contest.id, exc_info=True)
+                    continue  # not marked: try again next tick
+                if not await s.db.mark_recapped(reminder.guild_id, contest.id) or not entries:
+                    continue
+                try:
+                    await channel.send(embed=recap_embed(contest, entries))
+                except discord.HTTPException:
+                    log.warning("Could not send recap to %s", reminder.channel_id, exc_info=True)
 
 
 async def setup(bot: commands.Bot) -> None:

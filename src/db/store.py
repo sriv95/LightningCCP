@@ -206,6 +206,14 @@ MIGRATIONS = [
         PRIMARY KEY (guild_id, user_id, day)
     );
     """,
+    # Contest recaps are posted once per server and contest.
+    """
+    CREATE TABLE recap_sent (
+        guild_id INTEGER NOT NULL,
+        contest_id INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, contest_id)
+    );
+    """,
 ]
 
 
@@ -995,6 +1003,7 @@ class Store:
 
     async def clear_reminder(self, guild_id: int) -> bool:
         await self._write("DELETE FROM reminder_sent WHERE guild_id = ?", (guild_id,))
+        await self._write("DELETE FROM recap_sent WHERE guild_id = ?", (guild_id,))
         return await self._write("DELETE FROM reminder WHERE guild_id = ?", (guild_id,)) > 0
 
     async def mark_sent(self, guild_id: int, contest_id: int, before_min: int) -> bool:
@@ -1009,6 +1018,18 @@ class Store:
             "SELECT contest_id, before_min FROM reminder_sent WHERE guild_id = ?", (guild_id,)
         )
         return {(r["contest_id"], r["before_min"]) for r in rows}
+
+    async def mark_recapped(self, guild_id: int, contest_id: int) -> bool:
+        """True only the first time, which makes a contest recap at-most-once."""
+        n = await self._write(
+            "INSERT OR IGNORE INTO recap_sent (guild_id, contest_id) VALUES (?, ?)",
+            (guild_id, contest_id),
+        )
+        return n == 1
+
+    async def recapped(self, guild_id: int) -> set[int]:
+        rows = await self._all("SELECT contest_id FROM recap_sent WHERE guild_id = ?", (guild_id,))
+        return {r["contest_id"] for r in rows}
 
     # --- caches ---
     async def replace_contests(self, contests: Sequence[Contest]) -> None:

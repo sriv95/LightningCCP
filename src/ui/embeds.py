@@ -222,6 +222,17 @@ def ranklist_pages(
     return pages
 
 
+def recap_embed(
+    contest: Contest, entries: Sequence[tuple[int, int, str, float, int]]
+) -> discord.Embed:
+    """entries: (rank, user_id, handle, points, penalty), best first; the top 10 are shown."""
+    embed = ranklist_pages(entries[:10], f"Contest recap - {contest.name}")[0]
+    embed.url = contest.url
+    n = len(entries)
+    embed.set_footer(text=f"{n} linked member{'' if n == 1 else 's'} took part")
+    return embed
+
+
 def stalk_pages(
     handle: str, items: Sequence[tuple[str, Problem | None]], per_page: int = 15
 ) -> list[discord.Embed]:

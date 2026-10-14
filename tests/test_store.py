@@ -471,3 +471,12 @@ async def test_migration_5_rebuilds_the_mashup_tables(tmp_path):
     )
     assert (await s.get_mashup(mid)).status == "lobby"
     await s.close()
+
+
+async def test_recap_marks_once_and_clear_reminder_resets(store):
+    assert await store.mark_recapped(1, 7) is True
+    assert await store.mark_recapped(1, 7) is False
+    assert await store.recapped(1) == {7} and await store.recapped(2) == set()
+    await store.set_reminder(1, 99, None, [60])
+    await store.clear_reminder(1)
+    assert await store.recapped(1) == set()
