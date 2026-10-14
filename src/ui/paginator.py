@@ -37,10 +37,10 @@ class PaginatorView(discord.ui.View):
 
 
 async def send_pages(interaction: discord.Interaction, pages: list[discord.Embed]) -> None:
-    """Send via followup (caller already deferred). Buttons only when there is more than one page."""
+    """Send privately via followup (caller already deferred). Buttons only when there is more than one page."""
     if len(pages) == 1:
-        await interaction.followup.send(embed=pages[0])
+        await interaction.followup.send(embed=pages[0], ephemeral=True)
     else:
         await interaction.followup.send(
-            embed=pages[0], view=PaginatorView(pages, interaction.user.id)
+            embed=pages[0], view=PaginatorView(pages, interaction.user.id), ephemeral=True
         )

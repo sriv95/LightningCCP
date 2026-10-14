@@ -121,23 +121,25 @@ class HandlesCog(commands.Cog, name="Handles"):
     async def set_handle(
         self, interaction: discord.Interaction, member: discord.Member, handle: str
     ) -> None:
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         user = await self.s.cf.user_info(handle)
         await self.s.db.link_handle(interaction.guild_id, member.id, user.handle, user.rating)
-        await interaction.followup.send(f"Linked {member.mention} to **{user.handle}**.")
+        await interaction.followup.send(
+            f"Linked {member.mention} to **{user.handle}**.", ephemeral=True
+        )
 
     @handle.command(name="show", description="Show a member's Codeforces profile")
     @app_commands.describe(member="Defaults to you")
     async def show(
         self, interaction: discord.Interaction, member: discord.Member | None = None
     ) -> None:
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         target = member or interaction.user
         linked = await self.s.db.get_handle(interaction.guild_id, target.id)
         if linked is None:
             raise NotLinked(f"{target.display_name} has no linked handle.")
         user = await self.s.cf.user_info(linked.handle)
-        await interaction.followup.send(embed=profile_embed(user, target))
+        await interaction.followup.send(embed=profile_embed(user, target), ephemeral=True)
 
     @handle.command(name="whois", description="Find which member owns a handle")
     @app_commands.describe(handle="Codeforces handle")
@@ -146,7 +148,9 @@ class HandlesCog(commands.Cog, name="Handles"):
         if owner is None:
             raise BotError(f"No member is linked to {handle}.")
         await interaction.response.send_message(
-            f"**{handle}** is <@{owner}>.", allowed_mentions=discord.AllowedMentions.none()
+            f"**{handle}** is <@{owner}>.",
+            allowed_mentions=discord.AllowedMentions.none(),
+            ephemeral=True,
         )
 
     @handle.command(name="unlink", description="Remove your linked handle")

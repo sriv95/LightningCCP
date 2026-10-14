@@ -50,7 +50,7 @@ class ContestsCog(commands.Cog, name="Contests"):
         pages = contest_pages(select_contests(self.s.contests.contests, kind), TITLES[kind])
         if not pages:
             raise BotError(f"No {kind} contests.")
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         await send_pages(interaction, pages)
 
     @contests.command(name="upcoming", description="List future contests")
@@ -86,7 +86,8 @@ class ContestsCog(commands.Cog, name="Contests"):
             interaction.guild_id, channel.id, role.id if role else None, mins
         )
         await interaction.response.send_message(
-            f"Reminders go to {channel.mention} {', '.join(str(m) for m in mins)} minutes before start."
+            f"Reminders go to {channel.mention} {', '.join(str(m) for m in mins)} minutes before start.",
+            ephemeral=True,
         )
 
     @remind.command(name="show", description="Show reminder settings")
@@ -98,7 +99,8 @@ class ContestsCog(commands.Cog, name="Contests"):
         role = f" pinging <@&{reminder.role_id}>" if reminder.role_id else ""
         await interaction.response.send_message(
             f"<#{reminder.channel_id}>{role}, "
-            f"{', '.join(str(m) for m in reminder.before_mins)} minutes before start."
+            f"{', '.join(str(m) for m in reminder.before_mins)} minutes before start.",
+            ephemeral=True,
         )
 
     @remind.command(name="clear", description="Stop contest reminders")
@@ -106,7 +108,7 @@ class ContestsCog(commands.Cog, name="Contests"):
     async def clear_reminder(self, interaction: discord.Interaction) -> None:
         if not await self.s.db.clear_reminder(interaction.guild_id):
             raise BotError("No reminders configured.")
-        await interaction.response.send_message("Reminders cleared.")
+        await interaction.response.send_message("Reminders cleared.", ephemeral=True)
 
     @tasks.loop(seconds=60)
     async def remind_loop(self) -> None:

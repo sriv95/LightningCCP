@@ -4,6 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 LightningCCP is a slash-command-only Discord bot for competitive programmers, modeled on [TLE](https://github.com/cheran-senthil/TLE) but rewritten from scratch (TLE is a behavior reference, not a fork). Phase 1 covers Codeforces handle linking, `/gimme` and `/gitgud`, contest lists and reminders. Graphs, duels, starboard, rated virtual contests and rank roles are phase 2 and do not exist yet.
 
+## Working agreement
+
+Always ask the user before adding any new feature, command, option or behavior, and wait for an answer. Bug fixes and changes the user asked for explicitly do not need this. Features not yet built are phase 2 (see above); do not start them unprompted.
+
 ## Commands
 
 Python is managed with `uv`. This is an application, not a package (`[tool.uv] package = false`), so there is no install step beyond `uv sync`.
