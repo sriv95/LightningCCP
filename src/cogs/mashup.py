@@ -30,6 +30,7 @@ OPTIONS = {
 }
 PLAYERS = "Maximum number of players (default 20)"
 TEAMS = "Number of teams (default 2)"
+TEAM_SIZE = "Maximum players in each team (default: no cap, 20 players in all)"
 ACTIONS = {"lobby": ("join", "start", "leave"), "active": ("check",)}
 
 
@@ -150,7 +151,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         name="team-contest",
         description="Open a rated team contest lobby; Join asks for a team number",
     )
-    @app_commands.describe(teams=TEAMS, **OPTIONS)
+    @app_commands.describe(teams=TEAMS, **OPTIONS, players=TEAM_SIZE)
     async def rated_team_contest(
         self,
         interaction: discord.Interaction,
@@ -161,8 +162,19 @@ class MashupCog(commands.Cog, name="Mashup"):
         hour: app_commands.Range[int, 0, 24] = 2,
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
+        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] | None = None,
     ) -> None:
-        await self._open(interaction, min_rating, max_rating, count, hour, minute, penalty, teams)
+        await self._open(
+            interaction,
+            min_rating,
+            max_rating,
+            count,
+            hour,
+            minute,
+            penalty,
+            teams,
+            team_size=players or 0,
+        )
 
     @host_unrated.command(
         name="contest", description="Open an unrated timed contest lobby with a live scoreboard"
@@ -195,7 +207,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         name="team-contest",
         description="Open an unrated team contest lobby; Join asks for a team number",
     )
-    @app_commands.describe(teams=TEAMS, **OPTIONS)
+    @app_commands.describe(teams=TEAMS, **OPTIONS, players=TEAM_SIZE)
     async def unrated_team_contest(
         self,
         interaction: discord.Interaction,
@@ -206,9 +218,19 @@ class MashupCog(commands.Cog, name="Mashup"):
         hour: app_commands.Range[int, 0, 24] = 2,
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
+        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] | None = None,
     ) -> None:
         await self._open(
-            interaction, min_rating, max_rating, count, hour, minute, penalty, teams, rated=False
+            interaction,
+            min_rating,
+            max_rating,
+            count,
+            hour,
+            minute,
+            penalty,
+            teams,
+            rated=False,
+            team_size=players or 0,
         )
 
     async def _open(
@@ -223,6 +245,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         teams: int = 0,
         max_players: int = MASHUP_MAX_PLAYERS,
         rated: bool = True,
+        team_size: int = 0,
     ) -> None:
         await interaction.response.defer()
         view = await self.svc.create(
@@ -237,6 +260,7 @@ class MashupCog(commands.Cog, name="Mashup"):
             teams=teams,
             max_players=max_players,
             rated=rated,
+            team_size=team_size,
         )
         message = await interaction.followup.send(
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view), wait=True

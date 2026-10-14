@@ -51,8 +51,8 @@ class MatchClosed(BotError):
 
 
 class MatchFull(BotError):
-    def __init__(self):
-        super().__init__("This match is full.")
+    def __init__(self, message: str = "This match is full."):
+        super().__init__(message)
 
 
 async def report_error(interaction: discord.Interaction, error: Exception) -> None:

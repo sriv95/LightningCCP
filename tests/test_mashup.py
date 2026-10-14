@@ -503,3 +503,16 @@ async def test_unrated_contest_changes_no_rating(env):
     assert [p.delta for p in done.players] == [None, None]
     assert [await store.rating(GUILD, u) for u in (1, 2)] == [800, 800]
     assert "rating" not in mashup_embed(done, {}).description.split("**Standings**")[1]
+
+
+async def test_team_size_caps_each_team(env):
+    svc, store, cf, clock = env
+    mid = (await team_lobby(svc, team_size=2)).mashup.id
+    await svc.join(mid, 2, 1)  # team 1 now has the host and player 2
+    with pytest.raises(MatchFull):
+        await svc.join(mid, 3, 1)
+    assert [p.team for p in (await svc.join(mid, 3, 2)).players] == [1, 1, 2]
+    with pytest.raises(BotError):
+        await team_lobby(svc, host=4, teams=0, team_size=2)  # needs a team contest
+    with pytest.raises(BotError):
+        await team_lobby(svc, host=4, team_size=MASHUP_MAX_PLAYERS + 1)

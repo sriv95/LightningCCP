@@ -231,6 +231,8 @@ MIGRATIONS = [
     "ALTER TABLE mashup_players ADD COLUMN delta INTEGER;",
     # The host can open an unrated contest (rated = 0), which never changes ratings.
     "ALTER TABLE mashups ADD COLUMN rated INTEGER NOT NULL DEFAULT 1;",
+    # A team contest can cap each team's size (0 for no per-team cap).
+    "ALTER TABLE mashups ADD COLUMN team_size INTEGER NOT NULL DEFAULT 0;",
 ]
 
 
@@ -313,6 +315,7 @@ class MashupRow:
     teams: int = 0
     max_players: int = 20
     rated: int = 1
+    team_size: int = 0
 
 
 @dataclass(frozen=True)
@@ -864,6 +867,7 @@ class Store:
         host_team: int | None = None,
         max_players: int = 20,
         rated: bool = True,
+        team_size: int = 0,
     ) -> int:
         try:
             async with self._tx() as db:
@@ -872,7 +876,7 @@ class Store:
                 cur = await db.execute(
                     "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, "
                     "count, duration_seconds, penalty_minutes, status, created_at, teams, "
-                    "max_players, rated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?, ?)",
+                    "max_players, rated, team_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?, ?, ?)",
                     (
                         guild_id,
                         channel_id,
@@ -886,6 +890,7 @@ class Store:
                         teams,
                         max_players,
                         int(rated),
+                        team_size,
                     ),
                 )
                 mashup_id = cur.lastrowid
@@ -954,6 +959,7 @@ class Store:
         now: int,
         cap: int,
         team: int | None = None,
+        team_size: int = 0,
     ) -> None:
         try:
             async with self._tx() as db:
@@ -966,6 +972,13 @@ class Store:
                 )
                 if (await cur.fetchone())[0] >= cap:
                     raise MatchFull()
+                if team_size:
+                    cur = await db.execute(
+                        "SELECT COUNT(*) FROM mashup_players WHERE mashup_id = ? AND team = ?",
+                        (mashup_id, team),
+                    )
+                    if (await cur.fetchone())[0] >= team_size:
+                        raise MatchFull("That team is full.")
                 if await self._in_match(db, guild_id, user_id):
                     raise AlreadyInMatch()
                 await db.execute(
