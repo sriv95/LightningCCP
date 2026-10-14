@@ -87,6 +87,37 @@ async def test_reminder_crud(store):
     assert len(await store.all_reminders()) == 1
     assert await store.clear_reminder(1) is True
     assert await store.clear_reminder(1) is False
+    assert await store.all_reminders() == []
+
+
+async def test_clear_reminder_keeps_role_minutes_and_exclude(store):
+    await store.set_reminder(1, 99, 5, [30], "div")
+    await store.clear_reminder(1)
+    r = await store.get_reminder(1)
+    assert (r.channel_id, r.role_id, r.before_mins, r.exclude) == (None, 5, (30,), "div")
+
+
+async def test_recap_channel_crud(store):
+    assert await store.get_recap(1) is None
+    await store.set_recap(1, 7)
+    await store.set_recap(1, 8)
+    assert await store.get_recap(1) == 8 and await store.all_recaps() == [(1, 8)]
+    assert await store.clear_recap(1) is True
+    assert await store.clear_recap(1) is False
+
+
+async def test_migration_17_gives_old_channel_to_reminder_and_recap(tmp_path):
+    db = await aiosqlite.connect(tmp_path / "old.db")
+    await db.executescript("\n".join(MIGRATIONS[:16]) + "\nPRAGMA user_version = 16;")
+    await db.execute("INSERT INTO reminder VALUES (1, 99, 5, '[60, 10]')")
+    await db.commit()
+    await db.close()
+    s = Store(tmp_path / "old.db")
+    await s.connect()
+    r = await s.get_reminder(1)
+    assert (r.channel_id, r.role_id, r.before_mins, r.exclude) == (99, 5, (60, 10), "")
+    assert await s.get_recap(1) == 99
+    await s.close()
 
 
 async def test_mark_sent_is_once(store):
@@ -473,12 +504,12 @@ async def test_migration_5_rebuilds_the_mashup_tables(tmp_path):
     await s.close()
 
 
-async def test_recap_marks_once_and_clear_reminder_resets(store):
+async def test_recap_marks_once_and_clear_recap_resets(store):
     assert await store.mark_recapped(1, 7) is True
     assert await store.mark_recapped(1, 7) is False
     assert await store.recapped(1) == {7} and await store.recapped(2) == set()
-    await store.set_reminder(1, 99, None, [60])
-    await store.clear_reminder(1)
+    await store.set_recap(1, 99)
+    await store.clear_recap(1)
     assert await store.recapped(1) == set()
 
 

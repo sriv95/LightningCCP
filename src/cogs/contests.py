@@ -1,10 +1,12 @@
 import logging
+import re
 import time
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from src.db.store import Reminder
 from src.errors import BotError, CacheNotReady
 from src.logic import parse_minutes, recaps_due, reminders_due, select_contests
 from src.ui.embeds import contest_pages, ranklist_pages, recap_embed
@@ -18,6 +20,34 @@ TITLES = {
     "recent": "Recently finished contests",
 }
 
+MAX_EXCLUDE_LENGTH = 100
+
+
+def _check_regex(raw: str) -> str:
+    pattern = raw.strip()
+    if len(pattern) > MAX_EXCLUDE_LENGTH:
+        raise BotError(f"The regex can be at most {MAX_EXCLUDE_LENGTH} characters.")
+    try:
+        re.compile(pattern)
+    except re.error as e:
+        raise BotError(f"Invalid regex: {e}") from None
+    return pattern
+
+
+def _not_excluded(contests, pattern: str):
+    if not pattern:
+        return contests
+    rx = re.compile(pattern, re.IGNORECASE)
+    return [c for c in contests if not rx.search(c.name)]
+
+
+def _reminder_text(r: Reminder) -> str:
+    where = f"<#{r.channel_id}>" if r.channel_id else "no channel (use set)"
+    role = f", pinging <@&{r.role_id}>" if r.role_id else ""
+    skip = f"\nExcluding names matching `{r.exclude}`." if r.exclude else ""
+    mins = ", ".join(str(m) for m in r.before_mins)
+    return f"Reminders: {where}{role}, {mins} minutes before start.{skip}"
+
 
 class ContestsCog(commands.Cog, name="Contests"):
     contests = app_commands.Group(
@@ -25,7 +55,7 @@ class ContestsCog(commands.Cog, name="Contests"):
     )
     channel = app_commands.Group(
         name="channel",
-        description="Default bot channel for contest reminders and recaps",
+        description="Channels for contest reminders and recaps",
         guild_only=True,
         default_permissions=discord.Permissions(manage_guild=True),
     )
@@ -99,52 +129,84 @@ class ContestsCog(commands.Cog, name="Contests"):
             raise BotError("No linked member took part in that contest.")
         await send_pages(interaction, pages)
 
-    @channel.command(name="set", description="Set the default bot channel for reminders and recaps")
+    @channel.command(
+        name="reminder", description="Where to remind about upcoming contests; no options shows it"
+    )
     @app_commands.describe(
-        channel="Where to post reminders and recaps",
-        role="Role to ping (optional)",
+        set="Channel to post reminders in",
+        role="Role to ping",
         before="Minutes before the start, comma-separated (default 10,60)",
+        exclude="Regex on the contest name: matching contests get no reminder; clear removes it",
+        clear="Stop reminders (forgets the channel only)",
     )
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def set_reminder(
+    async def reminder_config(
         self,
         interaction: discord.Interaction,
-        channel: discord.TextChannel,
+        set: discord.TextChannel | None = None,
         role: discord.Role | None = None,
-        before: str = "10,60",
+        before: str | None = None,
+        exclude: str | None = None,
+        clear: bool = False,
     ) -> None:
-        mins = parse_minutes(before)
-        if not channel.permissions_for(interaction.guild.me).send_messages:
-            raise BotError(f"I cannot send messages in {channel.mention}.")
+        guild_id = interaction.guild_id
+        current = await self.s.db.get_reminder(guild_id) or Reminder(guild_id, None, None, (60, 10))
+        if clear:
+            if set or role or before or exclude:
+                raise BotError("Use clear on its own.")
+            if not await self.s.db.clear_reminder(guild_id):
+                raise BotError("No reminder channel set.")
+            await interaction.response.send_message("Reminders stopped.", ephemeral=True)
+            return
+        if set is None and role is None and before is None and exclude is None:
+            await interaction.response.send_message(_reminder_text(current), ephemeral=True)
+            return
+        if set and not set.permissions_for(interaction.guild.me).send_messages:
+            raise BotError(f"I cannot send messages in {set.mention}.")
+        pattern = current.exclude
+        if exclude is not None:
+            pattern = "" if exclude.strip().lower() == "clear" else _check_regex(exclude)
+        current = Reminder(
+            guild_id,
+            set.id if set else current.channel_id,
+            role.id if role else current.role_id,
+            parse_minutes(before) if before else current.before_mins,
+            pattern,
+        )
         await self.s.db.set_reminder(
-            interaction.guild_id, channel.id, role.id if role else None, mins
+            guild_id, current.channel_id, current.role_id, current.before_mins, current.exclude
         )
-        await interaction.response.send_message(
-            f"Default channel is {channel.mention}: reminders {', '.join(str(m) for m in mins)} minutes before start, and contest recaps.",
-            ephemeral=True,
-        )
+        await interaction.response.send_message(_reminder_text(current), ephemeral=True)
 
-    @channel.command(name="show", description="Show the default bot channel settings")
+    @channel.command(
+        name="recap",
+        description="Where to post how linked members placed after a contest; no options shows it",
+    )
+    @app_commands.describe(set="Channel to post recaps in", clear="Stop recaps")
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def show_reminder(self, interaction: discord.Interaction) -> None:
-        reminder = await self.s.db.get_reminder(interaction.guild_id)
-        if reminder is None:
-            raise BotError("No default channel set. Use /channel set.")
-        role = f" pinging <@&{reminder.role_id}>" if reminder.role_id else ""
-        await interaction.response.send_message(
-            f"<#{reminder.channel_id}>{role}, "
-            f"{', '.join(str(m) for m in reminder.before_mins)} minutes before start.",
-            ephemeral=True,
-        )
-
-    @channel.command(name="clear", description="Clear the default bot channel")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def clear_reminder(self, interaction: discord.Interaction) -> None:
-        if not await self.s.db.clear_reminder(interaction.guild_id):
-            raise BotError("No default channel set.")
-        await interaction.response.send_message(
-            "Default channel cleared. No more reminders or recaps.", ephemeral=True
-        )
+    async def recap_config(
+        self,
+        interaction: discord.Interaction,
+        set: discord.TextChannel | None = None,
+        clear: bool = False,
+    ) -> None:
+        guild_id = interaction.guild_id
+        if clear:
+            if set:
+                raise BotError("Use clear on its own.")
+            if not await self.s.db.clear_recap(guild_id):
+                raise BotError("No recap channel set.")
+            await interaction.response.send_message("Recaps stopped.", ephemeral=True)
+            return
+        if set is None:
+            channel_id = await self.s.db.get_recap(guild_id)
+            text = f"Recaps go to <#{channel_id}>." if channel_id else "No recap channel set."
+            await interaction.response.send_message(text, ephemeral=True)
+            return
+        if not set.permissions_for(interaction.guild.me).send_messages:
+            raise BotError(f"I cannot send messages in {set.mention}.")
+        await self.s.db.set_recap(guild_id, set.id)
+        await interaction.response.send_message(f"Recaps go to {set.mention}.", ephemeral=True)
 
     @tasks.loop(seconds=60)
     async def remind_loop(self) -> None:
@@ -180,7 +242,10 @@ class ContestsCog(commands.Cog, name="Contests"):
             offsets: dict[int, list[int]] = {}
             contests = {}
             for contest, before in reminders_due(
-                s.contests.contests, reminder.before_mins, sent, now
+                _not_excluded(s.contests.contests, reminder.exclude),
+                reminder.before_mins,
+                sent,
+                now,
             ):
                 contests[contest.id] = contest
                 offsets.setdefault(contest.id, []).append(before)
@@ -204,28 +269,26 @@ class ContestsCog(commands.Cog, name="Contests"):
                     log.warning("Could not send reminder to %s", reminder.channel_id, exc_info=True)
 
     async def _send_recaps(self) -> None:
-        """Post how linked members placed in each contest that just ended, in the reminder channel
-        of every server that has reminders on. At most once per server and contest."""
+        """Post how linked members placed in each contest that just ended, in the recap channel
+        of every server that has one. At most once per server and contest."""
         s = self.s
         now = int(time.time())
-        for reminder in await s.db.all_reminders():
-            channel = self.bot.get_channel(reminder.channel_id)
+        for guild_id, channel_id in await s.db.all_recaps():
+            channel = self.bot.get_channel(channel_id)
             if channel is None:
                 continue
-            for contest in recaps_due(
-                s.contests.contests, await s.db.recapped(reminder.guild_id), now
-            ):
+            for contest in recaps_due(s.contests.contests, await s.db.recapped(guild_id), now):
                 try:
-                    entries = await self._entries(reminder.guild_id, contest.id)
+                    entries = await self._entries(guild_id, contest.id)
                 except Exception:
                     log.warning("Could not fetch recap for contest %s", contest.id, exc_info=True)
                     continue  # not marked: try again next tick
-                if not await s.db.mark_recapped(reminder.guild_id, contest.id) or not entries:
+                if not await s.db.mark_recapped(guild_id, contest.id) or not entries:
                     continue
                 try:
                     await channel.send(embed=recap_embed(contest, entries))
                 except discord.HTTPException:
-                    log.warning("Could not send recap to %s", reminder.channel_id, exc_info=True)
+                    log.warning("Could not send recap to %s", channel_id, exc_info=True)
 
 
 async def setup(bot: commands.Bot) -> None:

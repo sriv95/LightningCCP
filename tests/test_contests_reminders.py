@@ -20,6 +20,9 @@ class FakeDB:
     async def all_reminders(self):
         return self.reminders
 
+    async def all_recaps(self):
+        return [(1, 5)]
+
     async def sent_for_guild(self, guild_id):
         return {(c, b) for g, c, b in self.sent if g == guild_id}
 
@@ -63,6 +66,16 @@ async def test_catch_up_sends_one_message_and_marks_all_offsets(monkeypatch):
     await cog._send_due_reminders()
     assert len(ch.messages) == 1
     assert db.sent == {(1, 7, 60), (1, 7, 10)}
+
+
+async def test_exclude_regex_skips_matching_contest_names(monkeypatch):
+    cog, db, ch = build(monkeypatch, start=NOW + 300)
+    db.reminders = [Reminder(1, 5, None, (60, 10), "^round|educational")]
+    await cog._send_due_reminders()
+    assert ch.messages == [] and db.sent == set()
+    db.reminders = [Reminder(1, 5, None, (60, 10), "educational")]
+    await cog._send_due_reminders()
+    assert len(ch.messages) == 1
 
 
 async def test_at_most_once(monkeypatch):

@@ -251,6 +251,26 @@ MIGRATIONS = [
         ELSE (SELECT COUNT(*) FROM mashup_players p WHERE p.mashup_id = mashups.id) END)
     WHERE teams = 0;
     """,
+    # Reminders and recaps get separate channels. A reminder row may have no channel (the channel
+    # was cleared) and keeps its role, minutes and exclude regex; existing servers keep both.
+    """
+    CREATE TABLE reminder_new (
+        guild_id INTEGER PRIMARY KEY,
+        channel_id INTEGER,
+        role_id INTEGER,
+        before_mins TEXT NOT NULL,
+        exclude TEXT NOT NULL DEFAULT ''
+    );
+    INSERT INTO reminder_new (guild_id, channel_id, role_id, before_mins)
+        SELECT guild_id, channel_id, role_id, before_mins FROM reminder;
+    CREATE TABLE recap (
+        guild_id INTEGER PRIMARY KEY,
+        channel_id INTEGER NOT NULL
+    );
+    INSERT INTO recap (guild_id, channel_id) SELECT guild_id, channel_id FROM reminder;
+    DROP TABLE reminder;
+    ALTER TABLE reminder_new RENAME TO reminder;
+    """,
 ]
 
 
@@ -363,14 +383,19 @@ def _player(row: aiosqlite.Row) -> MatchPlayer:
 @dataclass(frozen=True)
 class Reminder:
     guild_id: int
-    channel_id: int
+    channel_id: int | None
     role_id: int | None
     before_mins: tuple[int, ...]
+    exclude: str = ""
 
 
 def _reminder(row: aiosqlite.Row) -> Reminder:
     return Reminder(
-        row["guild_id"], row["channel_id"], row["role_id"], tuple(json.loads(row["before_mins"]))
+        row["guild_id"],
+        row["channel_id"],
+        row["role_id"],
+        tuple(json.loads(row["before_mins"])),
+        row["exclude"],
     )
 
 
@@ -1153,13 +1178,19 @@ class Store:
 
     # --- reminders ---
     async def set_reminder(
-        self, guild_id: int, channel_id: int, role_id: int | None, before_mins: Sequence[int]
+        self,
+        guild_id: int,
+        channel_id: int | None,
+        role_id: int | None,
+        before_mins: Sequence[int],
+        exclude: str = "",
     ) -> None:
         await self._write(
-            "INSERT INTO reminder (guild_id, channel_id, role_id, before_mins) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT (guild_id) DO UPDATE SET channel_id = excluded.channel_id, "
-            "role_id = excluded.role_id, before_mins = excluded.before_mins",
-            (guild_id, channel_id, role_id, json.dumps(list(before_mins))),
+            "INSERT INTO reminder (guild_id, channel_id, role_id, before_mins, exclude) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (guild_id) DO UPDATE SET "
+            "channel_id = excluded.channel_id, role_id = excluded.role_id, "
+            "before_mins = excluded.before_mins, exclude = excluded.exclude",
+            (guild_id, channel_id, role_id, json.dumps(list(before_mins)), exclude),
         )
 
     async def get_reminder(self, guild_id: int) -> Reminder | None:
@@ -1167,12 +1198,38 @@ class Store:
         return _reminder(row) if row else None
 
     async def all_reminders(self) -> list[Reminder]:
-        return [_reminder(r) for r in await self._all("SELECT * FROM reminder")]
+        rows = await self._all("SELECT * FROM reminder WHERE channel_id IS NOT NULL")
+        return [_reminder(r) for r in rows]
 
     async def clear_reminder(self, guild_id: int) -> bool:
+        """Forget the channel only; the role, minutes and exclude regex stay."""
         await self._write("DELETE FROM reminder_sent WHERE guild_id = ?", (guild_id,))
+        return (
+            await self._write(
+                "UPDATE reminder SET channel_id = NULL WHERE guild_id = ? AND channel_id IS NOT NULL",
+                (guild_id,),
+            )
+            > 0
+        )
+
+    async def set_recap(self, guild_id: int, channel_id: int) -> None:
+        await self._write(
+            "INSERT INTO recap (guild_id, channel_id) VALUES (?, ?) "
+            "ON CONFLICT (guild_id) DO UPDATE SET channel_id = excluded.channel_id",
+            (guild_id, channel_id),
+        )
+
+    async def get_recap(self, guild_id: int) -> int | None:
+        row = await self._one("SELECT channel_id FROM recap WHERE guild_id = ?", (guild_id,))
+        return row["channel_id"] if row else None
+
+    async def all_recaps(self) -> list[tuple[int, int]]:
+        rows = await self._all("SELECT guild_id, channel_id FROM recap")
+        return [(r["guild_id"], r["channel_id"]) for r in rows]
+
+    async def clear_recap(self, guild_id: int) -> bool:
         await self._write("DELETE FROM recap_sent WHERE guild_id = ?", (guild_id,))
-        return await self._write("DELETE FROM reminder WHERE guild_id = ?", (guild_id,)) > 0
+        return await self._write("DELETE FROM recap WHERE guild_id = ?", (guild_id,)) > 0
 
     async def mark_sent(self, guild_id: int, contest_id: int, before_min: int) -> bool:
         n = await self._write(
