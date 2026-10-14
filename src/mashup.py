@@ -52,6 +52,20 @@ class MashupView:
         return team_solves(((p.user_id, p.team) for p in self.players), self.solves)
 
     @property
+    def log(self) -> list[tuple[int, int, str, int, int]]:
+        """Bingo claims oldest first as (time, team, problem key, rating, user who solved it)."""
+        rating = {c.key: c.rating for c in self.cells}
+        out = []
+        for key, (team, at) in self.board.claims.items():
+            user = next(
+                p.user_id
+                for p in self.players
+                if p.team == team and self.solves.get(p.user_id, {}).get(key, (None,))[0] == at
+            )
+            out.append((at, team, key, rating[key], user))
+        return sorted(out)
+
+    @property
     def board(self) -> BingoBoard:
         m = self.mashup
         return bingo_board(
@@ -416,6 +430,7 @@ class MashupService:
                 self._problems.require(),
                 current.rating,
                 used,
+                mashup.max_rating,
                 tags=parse_tags(mashup.tags),
                 exclude_tags=parse_tags(mashup.exclude_tags),
             )

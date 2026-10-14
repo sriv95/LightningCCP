@@ -448,15 +448,19 @@ def pick_replacement(
     problems: Sequence[Problem],
     rating: int,
     used: frozenset[str],
+    max_rating: int = MAX_PROBLEM_RATING,
     rng: random.Random | None = None,
     tags: frozenset[str] = frozenset(),
     exclude_tags: frozenset[str] = frozenset(),
 ) -> Problem | None:
     """A random unused problem rated BINGO_REPLACE_STEP above `rating`, else the next rating up that
-    has one; at the top of the scale (nothing higher), one of the same rating. None when no
-    problem fits."""
+    has one, never above `max_rating`; when nothing higher fits, one of the same rating. None when
+    no problem fits."""
     rng = rng or random.Random()
-    for r in [*range(rating + BINGO_REPLACE_STEP, MAX_PROBLEM_RATING + 1, 100), rating]:
+    for r in [
+        *range(rating + BINGO_REPLACE_STEP, min(max_rating, MAX_PROBLEM_RATING) + 1, 100),
+        rating,
+    ]:
         pool = filter_problems(
             problems,
             min_rating=r,

@@ -11,14 +11,14 @@ from src.logic import (
     bingo_standings,
     pick_replacement,
 )
-from src.mashup import MashupService
+from src.mashup import MashupService, MashupView
 from src.matches import MatchService
 from src.ui.embeds import mashup_embed
 from tests.test_mashup import Clock, FakeCF, FakeProblems, sub
 
 GUILD = 1
-# Three problems at each rating 800-1700.
-BINGO_PROBLEMS = [Problem(i, "A", f"Name{i}", 800 + 100 * (i % 10), ()) for i in range(1, 31)]
+# Five problems at each rating 800-1700.
+BINGO_PROBLEMS = [Problem(i, "A", f"Name{i}", 800 + 100 * (i % 10), ()) for i in range(1, 51)]
 
 
 def test_bingo_lines_cover_rows_columns_and_both_diagonals():
@@ -101,11 +101,16 @@ def test_pick_replacement_goes_100_up_then_higher_then_same_at_the_top():
         Problem(3, "A", "z", 3500, ()),
     ]
     rng = random.Random(1)
-    assert pick_replacement(pool, 800, frozenset(), rng).key == "1A"
-    assert pick_replacement(pool, 900, frozenset(), rng).key == "2A"  # 1000 has none
-    assert pick_replacement(pool, 1100, frozenset({"2A"}), rng).key == "3A"
-    assert pick_replacement(pool, 3500, frozenset(), rng).key == "3A"  # the top: the same rating
-    assert pick_replacement(pool, 3500, frozenset({"3A"}), rng) is None
+    assert pick_replacement(pool, 800, frozenset(), rng=rng).key == "1A"
+    assert pick_replacement(pool, 900, frozenset(), rng=rng).key == "2A"  # 1000 has none
+    assert pick_replacement(pool, 1100, frozenset({"2A"}), rng=rng).key == "3A"
+    assert (
+        pick_replacement(pool, 3500, frozenset(), rng=rng).key == "3A"
+    )  # the top: the same rating
+    assert pick_replacement(pool, 3500, frozenset({"3A"}), rng=rng) is None
+    # Never above max_rating: 1100 is too high for a 1000 cap, so the same rating again.
+    assert pick_replacement(pool, 900, frozenset(), 1000, rng=rng).key == "1A"
+    assert pick_replacement(pool, 900, frozenset({"1A"}), 1000, rng=rng) is None
 
 
 @pytest.fixture
@@ -255,9 +260,9 @@ async def test_replace_never_picks_a_problem_someone_in_the_lobby_solved(env):
     solved_1100 = [p for p in BINGO_PROBLEMS if p.rating == 1100]
     for p in solved_1100:  # h1 solved every problem rated 1100
         sub(cf, "h1", p.key, 10)
-    view = await bingo(svc, 2, mode="replace", min_rating=800, max_rating=1000)
+    view = await bingo(svc, 2, mode="replace", min_rating=800, max_rating=1200)
     assert await store.mashup_excluded(view.mashup.id) >= {p.key for p in solved_1100}
-    assert {c.rating for c in view.cells} <= {800, 900, 1000}
+    assert 1100 not in {c.rating for c in view.cells}
     top = next(c for c in view.cells if c.rating == 1000)
     sub(cf, "h2", top.key, 1010)
     clock.t = 1020
@@ -315,3 +320,55 @@ async def bingo_lobby_replace(svc):
         guild_id=GUILD, channel_id=5, host_id=3, min_rating=800, max_rating=1700, count=0,
         duration_seconds=3600, mode="replace", size=4,
     )  # fmt: skip
+
+
+async def test_replace_never_goes_above_max_rating(env):
+    svc, store, cf, clock = env
+    view = await bingo(svc, 2, mode="replace", min_rating=800, max_rating=1300)
+    top = next(c for c in view.cells if c.rating == 1300)
+    sub(cf, "h1", top.key, 1010)
+    clock.t = 1020
+    after = await svc.check(view.mashup.id, 1)
+    newest = [c for c in after.cells if c.cell == top.cell][-1]
+    assert newest.rating == 1300 and newest.key != top.key  # the cap: the same rating again
+
+
+async def test_solve_log_names_the_team_and_the_player(env):
+    svc, store, cf, clock = env
+    lobby = await svc.create(
+        guild_id=GUILD, channel_id=5, host_id=1, min_rating=800, max_rating=1700, count=0,
+        duration_seconds=7200, mode="classic", size=3, teams=2, team_size=2,
+    )  # fmt: skip
+    await svc.join(lobby.mashup.id, 2, 1)
+    await svc.join(lobby.mashup.id, 3, 2)
+    view = await svc.start(lobby.mashup.id, 1)
+    cells_by = {c.cell: c for c in view.cells}
+    sub(cf, "h2", cells_by[0].key, 1010)  # team 1, the second member
+    sub(cf, "h3", cells_by[1].key, 1020)  # team 2
+    sub(cf, "h1", cells_by[1].key, 1030)  # team 1, too late for the square
+    clock.t = 1040
+    for uid in (1, 2, 3):
+        view = await svc.check(lobby.mashup.id, uid)
+    assert view.log == [
+        (1010, 1, cells_by[0].key, cells_by[0].rating, 2),
+        (1020, 2, cells_by[1].key, cells_by[1].rating, 3),
+    ]
+    field = next(f for f in mashup_embed(view, {}).fields if f.name == "Solve log")
+    lines = field.value.splitlines()
+    assert lines[0].endswith("- Team 2 (<@3>)") and lines[1].endswith("- Team 1 (<@2>)")
+
+
+def test_a_full_size_bingo_embed_fits_discords_limit():
+    from src.db.store import MashupCell, MashupPlayer, MashupRow
+
+    m = MashupRow(
+        1, 1, 5, 9, 1000, 800, 1500, 49, 7200, 0, "active", 0, 0, 7200, teams=10, max_players=50,
+        team_size=5, mode="replace", size=7, tags="implementation,math", exclude_tags="geometry",
+    )  # fmt: skip
+    cells = [MashupCell(i, f"{1000 + i}B2", 3500, i, 0) for i in range(49)]
+    players = [MashupPlayer(1000 + i, f"handle{i}_long_name", i, i % 10 + 1) for i in range(50)]
+    solves = {1000 + i: {cells[i].key: (100 + i, 0)} for i in range(49)}
+    view = MashupView(m, [], players, solves, None, cells)
+    by_key = {c.key: Problem(1000 + i, "B2", "x" * 40, 3500, ()) for i, c in enumerate(cells)}
+    assert len(mashup_embed(view, by_key)) <= 6000
+    assert len(mashup_embed(view, by_key).description) <= 4096

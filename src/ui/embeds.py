@@ -440,6 +440,20 @@ def _mashup_setup(view: MashupView) -> str:
     )
 
 
+def _bingo_log(view: MashupView) -> str:
+    """The newest claims, newest first, that fit a field: when, problem, team and who solved."""
+    out: list[str] = []
+    size = 0
+    for at, team, key, rating, user in reversed(view.log):
+        who = f"<@{user}>" if view.mashup.team_size == 1 else f"Team {team} (<@{user}>)"
+        line = f"<t:{at}:T> {key} ({rating}) - {who}"
+        if len(out) == 12 or size + len(line) + 1 > 1000:
+            break
+        out.append(line)
+        size += len(line) + 1
+    return "\n".join(out)
+
+
 def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
     """The board (a classic claimed square shows [team] instead of its problem; a replace one
     shows its problem and the holder), the open problems by row and the standings."""
@@ -481,6 +495,9 @@ def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
         description="\n".join(lines),
         colour=discord.Colour.green() if finished else discord.Colour.gold(),
     )
+    log = _bingo_log(view)
+    if log:
+        embed.add_field(name="Solve log", value=log, inline=False)
     if not finished:
         for r in range(m.size):  # open problems by row, linked (a field holds 1024 characters)
             row = []

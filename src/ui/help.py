@@ -49,9 +49,9 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "solves a problem first claims its square. With `win: line` (default) the first team to "
         "hold a full row, column or diagonal wins; `win: continuous` runs to the end and ranks by "
         "lines. `mode: classic` (default) keeps a claimed square for good. `mode: replace` gives "
-        "a claimed square a new problem rated 100 higher, and another team that solves it takes "
+        "a claimed square a new problem rated 100 higher (never above `max_rating`), and another team that solves it takes "
         "the square over. It also has `min_rating`, `max_rating`, `hour`, `minute`, `teams`, "
-        "`players`, `tags`, `exclude_tags` and `rated`.",
+        "`players`, `tags`, `exclude_tags` and `rated`. The message lists who solved each square.",
     ),
     "ratings": (
         "Ratings and stats",
