@@ -34,13 +34,13 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
     ),
     "contests": (
         "Timed contests",
-        "`/host-rated contest` makes a timed contest of several problems with a live "
-        "scoreboard and changes match ratings. `/host-unrated contest` is the same without "
-        "rating changes.\n"
+        "`/host contest` makes a timed contest of several problems with a live scoreboard. "
+        "It changes match ratings unless you set `rated` to False.\n"
         "Options: `min_rating`, `max_rating`, `count` (up to 10), `hour` and `minute` (length), "
         "`penalty` (minutes per wrong attempt), `teams`, `players` (per team), `tags`, "
-        "`exclude_tags`.\n"
-        "`virtual <contest_id>` replays a finished Codeforces contest with its problems and length.\n"
+        "`exclude_tags`, `rated`.\n"
+        "`/host virtual <contest_id>` replays a finished Codeforces contest with its problems "
+        "and length (it also has `rated`).\n"
         "Press Join in the lobby (10 minutes), the host presses Start. Solve on Codeforces; "
         "the scoreboard updates, Check reads you at once, Give Up leaves. A finished contest "
         "has a Rematch button.",

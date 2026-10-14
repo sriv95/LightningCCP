@@ -206,9 +206,12 @@ def test_rating_plot_renders_png():
 
 
 def test_mashup_group_commands_and_button_template():
-    for group in (MashupCog.host_rated, MashupCog.host_unrated):
-        assert {c.name for c in group.commands} == {"contest", "virtual"}
-        assert group.guild_only
+    group = MashupCog.host
+    assert {c.name for c in group.commands} == {"contest", "virtual"}
+    assert group.guild_only
+    for command in group.commands:
+        rated = next(p for p in command.parameters if p.name == "rated")
+        assert rated.default is True and not rated.required
     template = MashupButton.__discord_ui_compiled_template__
     for action in ("join", "start", "leave", "check", "giveup", "rematch"):
         assert template.fullmatch(f"mashup:{action}:7")
@@ -225,7 +228,7 @@ def test_help_topics_fit_and_cover_every_command():
     text = " ".join(body for _, body in HELP_TOPICS.values())
     for name in (
         "/handle link", "/gimme", "/daily", "/stalk", "/match solo", "/match duel",
-        "/match custom", "/match history", "/host-rated", "/host-unrated", "/stats",
+        "/match custom", "/match history", "/host contest", "/host virtual", "/stats",
         "/profile", "/plot rating", "/plot codeforces", "/contests upcoming", "/ranklist",
         "/channel reminder", "/channel recap",
     ):  # fmt: skip
