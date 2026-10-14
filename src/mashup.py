@@ -105,13 +105,10 @@ class MashupService:
         duration_seconds: int,
         penalty_minutes: int = 0,
         teams: int = 0,
-        host_team: int = 1,
         max_players: int = MASHUP_MAX_PLAYERS,
     ) -> MashupView:
         if min_rating > max_rating:
             raise BotError("min_rating cannot be higher than max_rating.")
-        if teams:
-            self._check_team(teams, host_team)
         if not 1 <= max_players <= MASHUP_MAX_PLAYERS:
             raise BotError(f"The player cap must be from 1 to {MASHUP_MAX_PLAYERS}.")
         if duration_seconds <= 0:
@@ -128,7 +125,7 @@ class MashupService:
             penalty_minutes=penalty_minutes,
             now=self._now(),
             teams=teams,
-            host_team=host_team if teams else None,
+            host_team=1 if teams else None,  # the host always starts in team 1
             max_players=max_players,
         )
         return await self.view(mashup_id)

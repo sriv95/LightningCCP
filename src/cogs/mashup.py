@@ -147,7 +147,6 @@ class MashupCog(commands.Cog, name="Mashup"):
     )
     @app_commands.describe(
         teams="Number of teams (default 2)",
-        team="Your own team number (default 1)",
         min_rating="Easiest problem rating (default 800)",
         max_rating="Hardest problem rating (default 1500)",
         count="Number of problems (default 5)",
@@ -159,7 +158,6 @@ class MashupCog(commands.Cog, name="Mashup"):
         self,
         interaction: discord.Interaction,
         teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = 2,
-        team: app_commands.Range[int, 1, MASHUP_MAX_TEAMS] = 1,
         min_rating: Rating = 800,
         max_rating: Rating = 1500,
         count: app_commands.Range[int, 1, MASHUP_MAX_PROBLEMS] = 5,
@@ -167,9 +165,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
     ) -> None:
-        await self._open(
-            interaction, min_rating, max_rating, count, hour, minute, penalty, teams, team
-        )
+        await self._open(interaction, min_rating, max_rating, count, hour, minute, penalty, teams)
 
     async def _open(
         self,
@@ -181,7 +177,6 @@ class MashupCog(commands.Cog, name="Mashup"):
         minute: int,
         penalty: int,
         teams: int = 0,
-        host_team: int = 1,
         max_players: int = MASHUP_MAX_PLAYERS,
     ) -> None:
         await interaction.response.defer()
@@ -195,7 +190,6 @@ class MashupCog(commands.Cog, name="Mashup"):
             duration_seconds=hour * 3600 + minute * 60,
             penalty_minutes=penalty,
             teams=teams,
-            host_team=host_team,
             max_players=max_players,
         )
         message = await interaction.followup.send(

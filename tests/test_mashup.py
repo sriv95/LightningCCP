@@ -308,21 +308,20 @@ async def test_embed_lobby_active_cancelled(env):
     assert mashup_embed(gone, by_key).title == "Mashup cancelled"
 
 
-async def team_lobby(svc, teams=2, host_team=1, **kw):
-    return await lobby(svc, teams=teams, host_team=host_team, **kw)
+async def team_lobby(svc, teams=2, **kw):
+    return await lobby(svc, teams=teams, **kw)
 
 
 async def test_team_contest_join_needs_a_valid_team(env):
     svc, store, cf, clock = env
-    view = await team_lobby(svc, teams=3, host_team=2)
-    assert [(p.user_id, p.team) for p in view.players] == [(1, 2)] and view.mashup.teams == 3
+    view = await team_lobby(svc, teams=3)
+    assert [(p.user_id, p.team) for p in view.players] == [(1, 1)]  # the host is in team 1
+    assert view.mashup.teams == 3
     mid = view.mashup.id
     for bad in (None, 0, 4):
         with pytest.raises(BotError, match="1 to 3"):
             await svc.join(mid, 2, bad)
-    assert [(p.user_id, p.team) for p in (await svc.join(mid, 2, 3)).players] == [(1, 2), (2, 3)]
-    with pytest.raises(BotError, match="1 to 2"):
-        await team_lobby(svc, host=3, teams=2, host_team=5)
+    assert [(p.user_id, p.team) for p in (await svc.join(mid, 2, 3)).players] == [(1, 1), (2, 3)]
     solo = await lobby(svc, host=4)  # an individual contest ignores the team
     assert (await svc.join(solo.mashup.id, 3, 2)).players[1].team is None
 
