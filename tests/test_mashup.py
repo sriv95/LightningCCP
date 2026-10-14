@@ -585,3 +585,20 @@ async def test_virtual_contest_replays_a_contests_rated_problems(env):
     assert started_.problems == [("500A", 900), ("500B", 1400)]
     with pytest.raises(BotError, match="no rated problems"):
         await lobby(svc, host=2, contest_id=12345)
+
+
+async def test_team_virtual_contest_and_rematch(env):
+    svc, store, cf, clock = env
+    svc._problems.problems += [
+        Problem(500, "A", "First", 900, ()),
+        Problem(500, "B", "Two", 1400, ()),
+    ]
+    view = await lobby(svc, contest_id=500, teams=2, team_size=2)
+    await svc.join(view.mashup.id, 2, 2)
+    started_ = await svc.start(view.mashup.id, 1)
+    assert [k for k, _ in started_.problems] == ["500A", "500B"] and started_.mashup.teams == 2
+    done = await finish_contest(svc, cf, clock, started_, {"h2": [(0, 1100)]})
+    assert [p.delta for p in done.players] == [-49, 49]
+    again = await svc.rematch(done.mashup.id, 2, 5)
+    assert (again.mashup.contest_id, again.mashup.teams, again.mashup.team_size) == (500, 2, 2)
+    assert [(p.user_id, p.team) for p in again.players] == [(2, 1)]

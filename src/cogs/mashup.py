@@ -295,6 +295,40 @@ class MashupCog(commands.Cog, name="Mashup"):
     ) -> None:
         await self._virtual(interaction, contest_id, penalty, players, False)
 
+    @host_rated.command(
+        name="team-virtual",
+        description="Open a rated team lobby that replays a finished Codeforces contest",
+    )
+    @app_commands.describe(**VIRTUAL, teams=TEAMS, players=TEAM_SIZE)
+    async def rated_team_virtual(
+        self,
+        interaction: discord.Interaction,
+        contest_id: int,
+        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = 2,
+        penalty: app_commands.Range[int, 0, 120] = 0,
+        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] | None = None,
+    ) -> None:
+        await self._virtual(
+            interaction, contest_id, penalty, MASHUP_MAX_PLAYERS, True, teams, players or 0
+        )
+
+    @host_unrated.command(
+        name="team-virtual",
+        description="Open an unrated team lobby that replays a finished Codeforces contest",
+    )
+    @app_commands.describe(**VIRTUAL, teams=TEAMS, players=TEAM_SIZE)
+    async def unrated_team_virtual(
+        self,
+        interaction: discord.Interaction,
+        contest_id: int,
+        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = 2,
+        penalty: app_commands.Range[int, 0, 120] = 0,
+        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] | None = None,
+    ) -> None:
+        await self._virtual(
+            interaction, contest_id, penalty, MASHUP_MAX_PLAYERS, False, teams, players or 0
+        )
+
     async def _virtual(
         self,
         interaction: discord.Interaction,
@@ -302,6 +336,8 @@ class MashupCog(commands.Cog, name="Mashup"):
         penalty: int,
         players: int,
         rated: bool,
+        teams: int = 0,
+        team_size: int = 0,
     ) -> None:
         contest = next((c for c in self.bot.services.contests.contests if c.id == contest_id), None)
         if contest is None:
@@ -316,8 +352,10 @@ class MashupCog(commands.Cog, name="Mashup"):
             contest.duration // 3600,
             contest.duration % 3600 // 60,
             penalty,
+            teams,
             max_players=players,
             rated=rated,
+            team_size=team_size,
             contest_id=contest_id,
         )
 
