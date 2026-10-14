@@ -18,7 +18,7 @@ from src.logic import (
     tag_suggestions,
 )
 from src.mashup import MashupView
-from src.ui.embeds import log_board_embed, log_message, mashup_embed
+from src.ui.embeds import final_message, log_board_embed, log_message, mashup_embed
 
 log = logging.getLogger(__name__)
 
@@ -365,6 +365,14 @@ class MashupCog(commands.Cog, name="Mashup"):
             return
         await self.svc.set_thread(view.mashup.id, thread.id)
 
+    async def _archive(self, thread_id: int) -> None:
+        """Closes the thread of a contest that is over (posting again reopens it)."""
+        try:
+            thread = await self.bot.fetch_channel(thread_id)
+            await thread.edit(archived=True)
+        except discord.HTTPException:
+            log.info("Could not archive thread %s", thread_id, exc_info=True)
+
     async def _log(self, view: MashupView) -> None:
         """Posts the solves that the thread does not have yet."""
         m = view.mashup
@@ -375,16 +383,26 @@ class MashupCog(commands.Cog, name="Mashup"):
                 m.thread_id, guild_id=m.guild_id, type=discord.ChannelType.public_thread
             )
             entries = await self.svc.claims_to_log(view)
-            if not entries:
+            final = await self.svc.final_due(view)
+            if not entries and not final:
                 return
             old = (await self.bot.services.db.get_mashup(m.id)).log_board_id
             by_key = self._by_key()
             last = None
             for i, entry in enumerate(entries):
-                # Only the newest message shows the board.
+                # Only the newest message shows the board; the closing message is the newest.
+                show = i == len(entries) - 1 and not final
                 last = await thread.send(
                     log_message(view, entry, by_key),
-                    embed=log_board_embed(view) if i == len(entries) - 1 else discord.utils.MISSING,
+                    embed=log_board_embed(view) if show else discord.utils.MISSING,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            if final:
+                last = await thread.send(
+                    final_message(view),
+                    embed=log_board_embed(view)
+                    if m.status == "finished"
+                    else discord.utils.MISSING,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             await self.svc.set_log_board(m.id, last.id)
@@ -393,6 +411,8 @@ class MashupCog(commands.Cog, name="Mashup"):
                     await thread.get_partial_message(old).edit(embeds=[])
                 except discord.HTTPException:
                     log.info("Could not clear the board of message %s", old, exc_info=True)
+            if final:
+                await self._archive(m.thread_id)
         except Exception:  # the log is a side channel: it must not break the button or the loop
             log.warning("Could not log to the thread of mashup %s", m.id, exc_info=True)
 

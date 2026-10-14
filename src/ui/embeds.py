@@ -502,7 +502,47 @@ def log_board_embed(view: MashupView) -> discord.Embed:
         text = "\n".join(_standings_lines(view, letters))
     else:
         text = f"```\n{_bingo_grid(view)}\n```"
+        if view.mashup.status == "finished":
+            text += "\n" + "\n".join(_bingo_standings(view))
     return discord.Embed(description=text, colour=discord.Colour.gold())
+
+
+def final_message(view: MashupView) -> str:
+    """The closing line of the solve log thread."""
+    m = view.mashup
+    kind = "bingo" if m.mode != "contest" else "contest"
+    if m.status == "cancelled":
+        return f"This {kind} was cancelled."
+    if not view.log:
+        return f"The {kind} is over. Nobody solved anything."
+    first = [r for r in view.standings if r.rank == 1]
+    names = [
+        next(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
+        if m.team_size == 1
+        else f"Team {r.user_id}"
+        for r in first
+    ]
+    verdict = f"Winner: {names[0]}." if len(names) == 1 else f"Tied for first: {', '.join(names)}."
+    return f"The {kind} is over. {verdict}" + (
+        " Ratings changed." if m.rated and len(view.standings) > 1 else ""
+    )
+
+
+def _bingo_standings(view: MashupView) -> list[str]:
+    m = view.mashup
+    lines = []
+    for r in view.standings:
+        who = r.handle
+        if m.team_size != 1:
+            members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
+            who = f"{r.handle} ({members})"
+        lines.append(f"{r.rank}. [{r.user_id}] {who} - {r.solved} squares, {r.lines} lines")
+        if m.status == "active" and m.team_size == 1:
+            if not next(p for p in view.players if p.team == r.user_id).active:
+                lines[-1] += " (gave up)"
+        if m.status == "finished" and (change := _mashup_change(view, r)) is not None:
+            lines[-1] += f", rating {change:+d}"
+    return lines
 
 
 def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
@@ -515,19 +555,10 @@ def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
     grid = _bingo_grid(view)
     when = f"Ended <t:{m.ends_at}:f>" if finished else f"Ends <t:{m.ends_at}:R>"
     lines = [f"Host: <@{m.host_id}> | {_mashup_setup(view)} | {when}", f"```\n{grid}\n```"]
-    lines.append("**Standings** (the number in brackets is the team on the board)")
-    for r in view.standings:
-        who = r.handle
-        if m.team_size != 1:
-            members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
-            who = f"{r.handle} ({members})"
-        score = f"{r.solved} squares, {r.lines} lines"
-        lines.append(f"{r.rank}. [{r.user_id}] {who} - {score}")
-        if m.status == "active" and m.team_size == 1:
-            if not next(p for p in view.players if p.team == r.user_id).active:
-                lines[-1] += " (gave up)"
-        if finished and (change := _mashup_change(view, r)) is not None:
-            lines[-1] += f", rating {change:+d}"
+    lines += [
+        "**Standings** (the number in brackets is the team on the board)",
+        *_bingo_standings(view),
+    ]
     embed = discord.Embed(
         title=(
             ("Team bingo" if m.team_size != 1 else "Bingo")

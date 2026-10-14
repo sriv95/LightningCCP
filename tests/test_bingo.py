@@ -429,3 +429,60 @@ async def test_claims_are_logged_to_the_thread_once_and_only_the_newest_shows_th
     assert len(sent) == 2 and sent[1][1].description.startswith("```")
     assert edits == [(101, {"embeds": []})]  # the older message loses its board
     assert (await store.get_mashup(mid)).log_board_id == 102
+
+
+async def test_a_finished_bingo_closes_its_thread_once(env):
+    from types import SimpleNamespace
+
+    import discord
+
+    from src.cogs.mashup import MashupCog
+
+    svc, store, cf, clock = env
+    view = await bingo(svc, 2)
+    mid = view.mashup.id
+    await svc.set_thread(mid, 777)
+    keys = [c.key for c in sorted(view.cells, key=lambda c: c.cell)]
+    for i, at in zip((0, 1, 2), (1010, 1020, 1030), strict=True):
+        sub(cf, "h1", keys[i], at)
+    clock.t = 1040
+    await svc.tick()
+    done = await svc.view(mid)
+    assert done.mashup.status == "finished"
+
+    sent, edits, archived = [], [], []
+
+    class Thread:
+        async def send(self, text, embed=discord.utils.MISSING, **kw):
+            sent.append((text, embed))
+            return SimpleNamespace(id=100 + len(sent))
+
+        def get_partial_message(self, message_id):
+            async def edit(**kw):
+                edits.append(message_id)
+
+            return SimpleNamespace(edit=edit)
+
+    async def fetch_channel(thread_id):
+        async def edit(**kw):
+            archived.append((thread_id, kw))
+
+        return SimpleNamespace(edit=edit)
+
+    bot = SimpleNamespace(
+        get_partial_messageable=lambda *a, **kw: Thread(),
+        fetch_channel=fetch_channel,
+        services=SimpleNamespace(
+            mashups=svc, db=store, problems=SimpleNamespace(problems=BINGO_PROBLEMS)
+        ),
+    )
+    cog = MashupCog(bot)
+    await cog._log(done)
+    await cog._log(await svc.view(mid))  # nothing twice
+    assert len(sent) == 4  # three claims, then the closing message
+    assert sent[2][1] is discord.utils.MISSING  # the claims before it carry no board
+    text, embed = sent[3]
+    assert text == "The bingo is over. Winner: <@1>. Ratings changed."
+    assert "1. [1]" in embed.description and "rating +" in embed.description
+    assert archived == [(777, {"archived": True})]
+    assert edits == [] and (await store.get_mashup(mid)).log_board_id == 104

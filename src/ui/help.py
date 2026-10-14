@@ -44,7 +44,7 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "Press Join in the lobby (10 minutes), the host presses Start. Solve on Codeforces; "
         "the scoreboard updates, Check reads you at once, Give Up leaves. A finished contest "
         "has a Rematch button. Each `/host` message gets a thread that logs every solve; the "
-        "newest thread message shows the standings.\n"
+        "newest thread message shows the standings, and a closing message ends it.\n"
         "`/host bingo [size] [mode] [win]` is a bingo: teams race for the squares of one shared "
         "size x size board (3 to 7, default 5), solved on Codeforces after Start. The team that "
         "solves a problem first claims its square. With `win: line` (default) the first team to "

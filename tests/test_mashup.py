@@ -793,3 +793,22 @@ async def test_ff_leaves_a_lobby_gives_up_a_running_contest_or_match(env):
     await ff(4)  # the host of a match lobby cancels it
     assert said[-1] == "You left the match lobby."
     assert (await store.get_match(duel.match.id)).status == "cancelled"
+
+
+async def test_final_message_names_the_winner_a_tie_or_nobody(env):
+    from src.ui.embeds import final_message
+
+    svc, store, cf, clock = env
+    view = await started(svc, 2)
+    done = await finish_contest(svc, cf, clock, view, {})
+    assert final_message(done) == "The contest is over. Nobody solved anything."
+    view = await started(svc, 3, host=4)
+    at = view.mashup.started_at + 100
+    done = await finish_contest(svc, cf, clock, view, {"h4": [(0, at)], "h3": [(0, at)]})
+    assert final_message(done).startswith("The contest is over. Tied for first: <@4>, <@3>")
+    view = await started(svc, 2, host=1)
+    done = await finish_contest(svc, cf, clock, view, {"h1": [(0, view.mashup.started_at + 100)]})
+    assert final_message(done) == "The contest is over. Winner: <@1>. Ratings changed."
+    lobby_ = await lobby(svc, host=4)
+    await svc.leave(lobby_.mashup.id, 4)
+    assert final_message(await svc.view(lobby_.mashup.id)) == "This contest was cancelled."

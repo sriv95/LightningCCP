@@ -180,6 +180,14 @@ class MashupService:
             )
         ]
 
+    async def final_due(self, view: MashupView) -> bool:
+        """True once, when a contest with a thread has ended or was cancelled."""
+        return (
+            view.mashup.thread_id is not None
+            and view.mashup.status in ("finished", "cancelled")
+            and await self._store.mark_logged(view.mashup.id, "#final")
+        )
+
     async def set_log_board(self, mashup_id: int, message_id: int) -> None:
         await self._store.set_log_board(mashup_id, message_id)
 
