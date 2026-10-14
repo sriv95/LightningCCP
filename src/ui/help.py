@@ -43,7 +43,8 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "and length (it also has `rated`).\n"
         "Press Join in the lobby (10 minutes), the host presses Start. Solve on Codeforces; "
         "the scoreboard updates, Check reads you at once, Give Up leaves. A finished contest "
-        "has a Rematch button.\n"
+        "has a Rematch button. Each `/host` message gets a thread that logs every solve; the "
+        "newest thread message shows the standings.\n"
         "`/host bingo [size] [mode] [win]` is a bingo: teams race for the squares of one shared "
         "size x size board (3 to 7, default 5), solved on Codeforces after Start. The team that "
         "solves a problem first claims its square. With `win: line` (default) the first team to "
@@ -51,7 +52,7 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "lines. `mode: classic` (default) keeps a claimed square for good. `mode: replace` gives "
         "a claimed square a new problem rated 100 higher (never above `max_rating`), and another team that solves it takes "
         "the square over. It also has `min_rating`, `max_rating`, `hour`, `minute`, `teams`, "
-        "`players`, `tags`, `exclude_tags` and `rated`. The message lists who solved each square, and a thread on it logs every claim (the newest message shows the board).",
+        "`players`, `tags`, `exclude_tags` and `rated`. The message lists who solved each square; its thread logs every claim and the newest message shows the board.",
     ),
     "ratings": (
         "Ratings and stats",

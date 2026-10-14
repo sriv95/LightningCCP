@@ -4,7 +4,7 @@ import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 
 from src.cf.models import Problem
 from src.db.store import MashupCell, MashupPlayer, MashupRow, Store
@@ -38,6 +38,17 @@ from src.logic import (
 log = logging.getLogger(__name__)
 
 
+class LogEntry(NamedTuple):
+    """A solve for the thread log: a bingo claim or a contest solve that counts for its team."""
+
+    at: int
+    team: int
+    key: str
+    rating: int
+    user: int  # the player who solved it
+    wrong: int  # wrong attempts before the solve
+
+
 @dataclass(frozen=True)
 class MashupView:
     mashup: MashupRow
@@ -52,17 +63,24 @@ class MashupView:
         return team_solves(((p.user_id, p.team) for p in self.players), self.solves)
 
     @property
-    def log(self) -> list[tuple[int, int, str, int, int]]:
-        """Bingo claims oldest first as (time, team, problem key, rating, user who solved it)."""
-        rating = {c.key: c.rating for c in self.cells}
+    def log(self) -> list[LogEntry]:
+        """The solves that count, oldest first: a contest team's solve of each problem, or a
+        bingo claim."""
+        rating = {c.key: c.rating for c in self.cells} | dict(self.problems)
+        solves = self.team_solves
+        if self.mashup.mode != "contest":
+            solves = {}
+            for key, (team, _) in self.board.claims.items():
+                solves.setdefault(team, {})[key] = self.team_solves[team][key]
         out = []
-        for key, (team, at) in self.board.claims.items():
-            user = next(
-                p.user_id
-                for p in self.players
-                if p.team == team and self.solves.get(p.user_id, {}).get(key, (None,))[0] == at
-            )
-            out.append((at, team, key, rating[key], user))
+        for team, mine in solves.items():
+            for key, found_at in mine.items():
+                user = next(
+                    p.user_id
+                    for p in self.players
+                    if p.team == team and self.solves.get(p.user_id, {}).get(key) == found_at
+                )
+                out.append(LogEntry(found_at[0], team, key, rating[key], user, found_at[1]))
         return sorted(out)
 
     @property
@@ -148,11 +166,19 @@ class MashupService:
             )
         return records
 
-    async def claims_to_log(self, view: MashupView) -> list[tuple[int, int, str, int, int]]:
-        """The claims of a bingo not yet posted to its thread (each is returned once)."""
+    async def claims_to_log(self, view: MashupView) -> list[LogEntry]:
+        """The solves not yet posted to the thread (each is returned once). A bingo problem is
+        claimed once; a contest problem is solved once per team."""
         if view.mashup.thread_id is None:
             return []
-        return [e for e in view.log if await self._store.mark_logged(view.mashup.id, e[2])]
+        bingo = view.mashup.mode != "contest"
+        return [
+            e
+            for e in view.log
+            if await self._store.mark_logged(
+                view.mashup.id, e.key if bingo else f"{e.team}:{e.key}"
+            )
+        ]
 
     async def set_log_board(self, mashup_id: int, message_id: int) -> None:
         await self._store.set_log_board(mashup_id, message_id)

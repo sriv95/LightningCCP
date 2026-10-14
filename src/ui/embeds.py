@@ -14,7 +14,7 @@ from src.logic import (
     ordinal,
     placement,
 )
-from src.mashup import MashupRecord, MashupView
+from src.mashup import LogEntry, MashupRecord, MashupView
 from src.matches import MatchView
 
 
@@ -440,17 +440,22 @@ def _mashup_setup(view: MashupView) -> str:
     )
 
 
-def _bingo_who(view: MashupView, team: int, user: int) -> str:
+def _log_who(view: MashupView, team: int, user: int) -> str:
     return f"<@{user}>" if view.mashup.team_size == 1 else f"Team {team} (<@{user}>)"
 
 
-def bingo_claim_message(view: MashupView, entry: tuple, by_key: dict[str, Problem]) -> str:
-    """One claim for the solve log thread; a replace bingo adds the cell's new problem."""
-    at, team, key, rating, user = entry
-    problem = by_key.get(key)
-    text = f"<t:{at}:T> {_bingo_who(view, team, user)} claimed "
-    text += (f"[{key}](<{problem.url}>)" if problem else key) + f" ({rating})"
-    cell = next(c for c in view.cells if c.key == key)
+def log_message(view: MashupView, entry: LogEntry, by_key: dict[str, Problem]) -> str:
+    """One solve for the thread log; a replace bingo adds the cell's new problem."""
+    m = view.mashup
+    problem = by_key.get(entry.key)
+    name = f"[{entry.key}](<{problem.url}>)" if problem else entry.key
+    who = _log_who(view, entry.team, entry.user)
+    if m.mode == "contest":
+        letter = chr(ord("A") + [k for k, _ in view.problems].index(entry.key))
+        text = f"<t:{entry.at}:T> {who} solved {letter}. {name} ({entry.rating})"
+        return text + (f", {entry.wrong} wrong before" if entry.wrong else "")
+    text = f"<t:{entry.at}:T> {who} claimed {name} ({entry.rating})"
+    cell = next(c for c in view.cells if c.key == entry.key)
     new = next((c for c in view.cells if c.cell == cell.cell and c.idx > cell.idx), None)
     if new is not None:
         other = by_key.get(new.key)
@@ -463,8 +468,8 @@ def _bingo_log(view: MashupView) -> str:
     """The newest claims, newest first, that fit a field: when, problem, team and who solved."""
     out: list[str] = []
     size = 0
-    for at, team, key, rating, user in reversed(view.log):
-        line = f"<t:{at}:T> {key} ({rating}) - {_bingo_who(view, team, user)}"
+    for e in reversed(view.log):
+        line = f"<t:{e.at}:T> {e.key} ({e.rating}) - {_log_who(view, e.team, e.user)}"
         if len(out) == 12 or size + len(line) + 1 > 1000:
             break
         out.append(line)
@@ -489,9 +494,15 @@ def _bingo_grid(view: MashupView) -> str:
     )
 
 
-def bingo_board_embed(view: MashupView) -> discord.Embed:
-    """The current board for the newest message of the solve log thread."""
-    return discord.Embed(description=f"```\n{_bingo_grid(view)}\n```", colour=discord.Colour.gold())
+def log_board_embed(view: MashupView) -> discord.Embed:
+    """The current board (a bingo's grid, a contest's standings) for the newest message of the
+    solve log thread."""
+    if view.mashup.mode == "contest":
+        letters = {key: chr(ord("A") + i) for i, (key, _) in enumerate(view.problems)}
+        text = "\n".join(_standings_lines(view, letters))
+    else:
+        text = f"```\n{_bingo_grid(view)}\n```"
+    return discord.Embed(description=text, colour=discord.Colour.gold())
 
 
 def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
@@ -540,6 +551,31 @@ def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
     return embed
 
 
+def _standings_lines(view: MashupView, letters: dict[str, str]) -> list[str]:
+    m = view.mashup
+    finished = m.status == "finished"
+    lines: list[str] = []
+    for r in view.standings:
+        done = sorted(r.times.items(), key=lambda kt: kt[1])
+        solved = ", ".join(
+            f"{letters[k]} {t // 60}m" + (f" ({r.wrong[k]} wrong)" if r.wrong[k] else "")
+            for k, t in done
+        )
+        detail = f" ({solved})" if solved else ""
+        who = r.handle
+        if m.team_size != 1:
+            members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
+            who = f"{r.handle} ({members})"
+        lines.append(f"{r.rank}. {who} - {r.solved} solved, {format_hm(r.total_seconds)}{detail}")
+        if m.status == "active" and m.team_size == 1:
+            me = next(p for p in view.players if p.team == r.user_id)
+            if not me.active:
+                lines[-1] += " (gave up)"
+        if finished and (change := _mashup_change(view, r)) is not None:
+            lines[-1] += f", rating {change:+d}"
+    return lines
+
+
 def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
     m = view.mashup
     players = f"{len(view.players)}/{m.max_players} players"
@@ -579,25 +615,7 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
         problem = by_key.get(key)
         name = f"[{key} {problem.name}]({problem.url})" if problem else key
         lines.append(f"{letters[key]}. {name} ({rating})")
-    lines += ["", "**Standings**"]
-    for r in view.standings:
-        done = sorted(r.times.items(), key=lambda kt: kt[1])
-        solved = ", ".join(
-            f"{letters[k]} {t // 60}m" + (f" ({r.wrong[k]} wrong)" if r.wrong[k] else "")
-            for k, t in done
-        )
-        detail = f" ({solved})" if solved else ""
-        who = r.handle
-        if m.team_size != 1:
-            members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
-            who = f"{r.handle} ({members})"
-        lines.append(f"{r.rank}. {who} - {r.solved} solved, {format_hm(r.total_seconds)}{detail}")
-        if m.status == "active" and m.team_size == 1:
-            me = next(p for p in view.players if p.team == r.user_id)
-            if not me.active:
-                lines[-1] += " (gave up)"
-        if finished and (change := _mashup_change(view, r)) is not None:
-            lines[-1] += f", rating {change:+d}"
+    lines += ["", "**Standings**", *_standings_lines(view, letters)]
     return discord.Embed(
         title=(
             ("Mashup contest" if m.team_size == 1 else "Team mashup")

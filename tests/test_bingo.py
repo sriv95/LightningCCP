@@ -350,8 +350,8 @@ async def test_solve_log_names_the_team_and_the_player(env):
     for uid in (1, 2, 3):
         view = await svc.check(lobby.mashup.id, uid)
     assert view.log == [
-        (1010, 1, cells_by[0].key, cells_by[0].rating, 2),
-        (1020, 2, cells_by[1].key, cells_by[1].rating, 3),
+        (1010, 1, cells_by[0].key, cells_by[0].rating, 2, 0),
+        (1020, 2, cells_by[1].key, cells_by[1].rating, 3, 0),
     ]
     field = next(f for f in mashup_embed(view, {}).fields if f.name == "Solve log")
     lines = field.value.splitlines()

@@ -706,3 +706,33 @@ async def test_contest_ends_when_everyone_gave_up(env):
     done = await svc.view(view.mashup.id)
     assert done.mashup.status == "finished"
     assert [p.delta for p in done.players] == [0, 0]  # nobody solved: a tie
+
+
+async def test_contest_log_has_every_teams_solve_once_with_the_solver(env):
+    from src.ui.embeds import log_board_embed, log_message
+
+    svc, store, cf, clock = env
+    view = await started(svc, 2, 3)
+    mid = view.mashup.id
+    keys = [k for k, _ in view.problems]
+    sub(cf, "h1", keys[0], 1100)
+    sub(cf, "h2", keys[0], 1200, verdict="WRONG_ANSWER")
+    sub(cf, "h2", keys[0], 1300)
+    sub(cf, "h2", keys[1], 1400)
+    clock.t = 1500
+    for uid in (1, 2, 3):
+        view = await svc.check(mid, uid)
+    assert await svc.claims_to_log(view) == []  # no thread yet: nothing is marked
+    await svc.set_thread(mid, 5)
+    view = await svc.view(mid)
+    entries = await svc.claims_to_log(view)
+    assert [(e.at, e.team, e.key, e.user, e.wrong) for e in entries] == [
+        (1100, 1, keys[0], 1, 0),
+        (1300, 2, keys[0], 2, 1),  # team 2 solves the same problem: logged for its own team
+        (1400, 2, keys[1], 2, 0),
+    ]
+    assert await svc.claims_to_log(await svc.view(mid)) == []  # once each
+    by_key = {p.key: p for p in PROBLEMS}
+    assert log_message(view, entries[0], by_key).startswith("<t:1100:T> <@1> solved A. [")
+    assert log_message(view, entries[1], by_key).endswith(", 1 wrong before")
+    assert "h2" in log_board_embed(view).description  # the standings

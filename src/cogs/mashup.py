@@ -18,7 +18,7 @@ from src.logic import (
     tag_suggestions,
 )
 from src.mashup import MashupView
-from src.ui.embeds import bingo_board_embed, bingo_claim_message, mashup_embed
+from src.ui.embeds import log_board_embed, log_message, mashup_embed
 
 log = logging.getLogger(__name__)
 
@@ -343,16 +343,17 @@ class MashupCog(commands.Cog, name="Mashup"):
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view), wait=True
         )
         await self.svc.set_message(view.mashup.id, interaction.channel_id, message.id)
-        if view.mashup.mode != "contest":
-            await self._open_thread(interaction, view, message)
+        await self._open_thread(interaction, view, message)
 
     async def _open_thread(
         self, interaction: discord.Interaction, view: MashupView, message: discord.Message
     ) -> None:
-        """A bingo gets a thread on its message where every claim is logged."""
+        """The message gets a thread where every solve is logged."""
+        m = view.mashup
+        kind = "Bingo" if m.mode != "contest" else "Virtual contest" if m.contest_id else "Contest"
         try:
             thread = await interaction.channel.get_partial_message(message.id).create_thread(
-                name=f"Bingo {view.mashup.id} solve log"
+                name=f"{kind} {view.mashup.id} solve log"
             )
         except (discord.HTTPException, AttributeError, ValueError):
             log.warning("Could not create the thread of mashup %s", view.mashup.id, exc_info=True)
@@ -365,7 +366,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         await self.svc.set_thread(view.mashup.id, thread.id)
 
     async def _log(self, view: MashupView) -> None:
-        """Posts the claims of a bingo that the thread does not have yet."""
+        """Posts the solves that the thread does not have yet."""
         m = view.mashup
         if m.thread_id is None:
             return
@@ -382,10 +383,8 @@ class MashupCog(commands.Cog, name="Mashup"):
             for i, entry in enumerate(entries):
                 # Only the newest message shows the board.
                 last = await thread.send(
-                    bingo_claim_message(view, entry, by_key),
-                    embed=bingo_board_embed(view)
-                    if i == len(entries) - 1
-                    else discord.utils.MISSING,
+                    log_message(view, entry, by_key),
+                    embed=log_board_embed(view) if i == len(entries) - 1 else discord.utils.MISSING,
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             await self.svc.set_log_board(m.id, last.id)
