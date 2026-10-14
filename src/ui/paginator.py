@@ -7,7 +7,17 @@ class PaginatorView(discord.ui.View):
         self.pages = pages
         self.author_id = author_id
         self.index = 0
+        self.message: discord.WebhookMessage | None = None  # set by send_pages
         self._sync_buttons()
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass  # the message is gone or too old to edit
 
     def _sync_buttons(self) -> None:
         self.prev.disabled = self.index == 0
@@ -41,6 +51,7 @@ async def send_pages(interaction: discord.Interaction, pages: list[discord.Embed
     if len(pages) == 1:
         await interaction.followup.send(embed=pages[0], ephemeral=True)
     else:
-        await interaction.followup.send(
-            embed=pages[0], view=PaginatorView(pages, interaction.user.id), ephemeral=True
+        view = PaginatorView(pages, interaction.user.id)
+        view.message = await interaction.followup.send(
+            embed=pages[0], view=view, ephemeral=True, wait=True
         )
