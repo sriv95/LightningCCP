@@ -2,6 +2,7 @@ import contextlib
 import logging
 import re
 import time
+from typing import Literal
 
 import discord
 from discord import app_commands
@@ -197,7 +198,12 @@ class MatchCog(commands.Cog, name="Match"):
 
     @app_commands.command(name="stats", description="Top match players in this server")
     @app_commands.guild_only()
-    async def stats(self, interaction: discord.Interaction) -> None:
+    @app_commands.describe(sort="Rank by match rating (default) or by daily streak")
+    async def stats(
+        self,
+        interaction: discord.Interaction,
+        sort: Literal["rating", "streak"] = "rating",
+    ) -> None:
         db = self.bot.services.db
         rows = await db.stats(interaction.guild_id)
         today = utc_day(int(time.time()))
@@ -206,7 +212,7 @@ class MatchCog(commands.Cog, name="Match"):
             for uid, days in (await db.daily_days_by_user(interaction.guild_id)).items()
         }
         await interaction.response.send_message(
-            embed=stats_embed(rows, interaction.user.id, streaks), ephemeral=True
+            embed=stats_embed(rows, interaction.user.id, streaks, sort == "streak"), ephemeral=True
         )
 
     async def on_button(self, interaction: discord.Interaction, action: str, match_id: int) -> None:

@@ -105,6 +105,18 @@ def test_stats_embed_shows_daily_streak_with_fire():
     assert lines[1].endswith("850 (2 matches)")
 
 
+def test_stats_embed_sorts_by_streak():
+    rows = [(1, "a", 900, 3), (2, "b", 850, 2), (3, "c", 800, 1), (4, "d", 790, 1)]
+    e = stats_embed(rows, 4, {2: 5, 3: 5, 4: 1}, by_streak=True)
+    lines = e.description.splitlines()
+    assert e.title == "Daily streaks" and len(lines) == 3  # player 1 has no streak
+    assert "<@2>" in lines[0] and "<@3>" in lines[1]  # equal streaks keep the rating order
+    assert lines[2].startswith("**3. <@4>") and lines[2].endswith("\U0001f5251**")
+    nobody = stats_embed(rows, 1, {2: 5}, by_streak=True)
+    assert nobody.footer.text == "You have no daily streak."
+    assert stats_embed(rows, 1, {}, by_streak=True).description == "No daily streaks yet."
+
+
 def test_ranklist_pages_lines_and_paging():
     entries = [(i, i, f"h{i}", 100.0 - i, 0) for i in range(1, 13)]
     entries[1] = (2, 2, "h2", 90.0, 45)

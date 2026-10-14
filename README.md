@@ -32,7 +32,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/match custom players [rating]` | Match for 2-10 players; ranked by solve time |
 | `/match history [member]` | Your last 100 finished matches; with a member, also your record and matches against them (private) |
 | `/mashup contest [min_rating] [max_rating] [count] [hour] [minute] [penalty]` | Timed contest of several problems (default 5 problems, 800-1500, 2h, no penalty) with a live scoreboard |
-| `/stats` | Top 10 by match rating, plus your own rank; a fire emoji and number marks a daily streak (private) |
+| `/stats [sort]` | Top 10 by match rating (`sort: streak` ranks by daily streak instead), plus your own rank; a fire emoji and number marks a daily streak (private) |
 | `/plot rating [member] [handle]` | Graph of a member's match rating in this server (private; default: you) |
 | `/plot codeforces [member] [handle]` | Graph of a Codeforces rating history, any handle works (private; default: you) |
 | `/contests upcoming\|running\|recent` | Paginated contest lists |
