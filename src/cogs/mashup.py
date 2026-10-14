@@ -436,19 +436,21 @@ class MashupCog(commands.Cog, name="Mashup"):
             return
         self.tick_loop.change_interval(seconds=self.svc.interval)
         for view in views:
-            m = view.mashup
-            if m.message_id is not None:
-                try:
-                    await (
-                        self.bot.get_partial_messageable(m.channel_id)
-                        .get_partial_message(m.message_id)
-                        .edit(
-                            embed=mashup_embed(view, self._by_key()), view=mashup_components(view)
-                        )
-                    )
-                except discord.HTTPException:
-                    log.warning("Could not edit mashup message %s", m.message_id, exc_info=True)
+            await self.edit_message(view)
             await self._log(view)
+
+    async def edit_message(self, view: MashupView) -> None:
+        """Brings the stored contest message up to date."""
+        m = view.mashup
+        if m.message_id is not None:
+            try:
+                await (
+                    self.bot.get_partial_messageable(m.channel_id)
+                    .get_partial_message(m.message_id)
+                    .edit(embed=mashup_embed(view, self._by_key()), view=mashup_components(view))
+                )
+            except discord.HTTPException:
+                log.warning("Could not edit mashup message %s", m.message_id, exc_info=True)
 
     @tick_loop.before_loop
     async def _before_tick_loop(self) -> None:

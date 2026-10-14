@@ -183,6 +183,10 @@ class MashupService:
     async def set_log_board(self, mashup_id: int, message_id: int) -> None:
         await self._store.set_log_board(mashup_id, message_id)
 
+    async def current(self, guild_id: int, user_id: int) -> MashupView | None:
+        mashup_id = await self._store.active_mashup_for(guild_id, user_id)
+        return await self.view(mashup_id) if mashup_id is not None else None
+
     async def set_thread(self, mashup_id: int, thread_id: int) -> None:
         await self._store.set_mashup_thread(mashup_id, thread_id)
 

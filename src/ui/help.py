@@ -30,7 +30,7 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "appears with Check (look for your solve now) and Give Up. Solve on Codeforces, then "
         "press Check.\n"
         "`tags` and `exclude_tags` limit the problem. You can be in one unfinished match or "
-        "contest per server.",
+        "contest per server. `/ff` leaves or gives up whichever one you are stuck in.",
     ),
     "contests": (
         "Timed contests",

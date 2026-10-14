@@ -1019,6 +1019,16 @@ class Store:
         row = await self._one("SELECT * FROM mashups WHERE id = ?", (mashup_id,))
         return MashupRow(**dict(row)) if row else None
 
+    async def active_mashup_for(self, guild_id: int, user_id: int) -> int | None:
+        """The unfinished contest (lobby or running) the user is in, if any."""
+        row = await self._one(
+            "SELECT mp.mashup_id FROM mashup_players mp JOIN mashups m ON m.id = mp.mashup_id "
+            "WHERE mp.guild_id = ? AND mp.user_id = ? AND mp.active = 1 "
+            "AND m.status IN ('lobby', 'active')",
+            (guild_id, user_id),
+        )
+        return row["mashup_id"] if row else None
+
     async def mashups_in(self, *statuses: str) -> list[MashupRow]:
         marks = ",".join("?" * len(statuses))
         rows = await self._all(

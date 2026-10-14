@@ -264,6 +264,30 @@ class MatchCog(commands.Cog, name="Match"):
             )
         await send_pages(interaction, number_pages(pages))
 
+    @app_commands.command(
+        name="ff", description="Leave or give up your unfinished match or contest"
+    )
+    @app_commands.guild_only()
+    async def ff(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        s = self.bot.services
+        guild_id, user_id = interaction.guild_id, interaction.user.id
+        if (current := await s.matches.current(guild_id, user_id)) is not None:
+            lobby = current.match.status == "lobby"
+            act = s.matches.leave if lobby else s.matches.give_up
+            await self._edit_stored_message(await act(current.match.id, user_id))
+            kind = "match"
+        elif (contest := await s.mashups.current(guild_id, user_id)) is not None:
+            lobby = contest.mashup.status == "lobby"
+            act = s.mashups.leave if lobby else s.mashups.give_up
+            await self.bot.get_cog("Mashup").edit_message(await act(contest.mashup.id, user_id))
+            kind = "contest"
+        else:
+            raise BotError("You are not in an unfinished match or contest.")
+        await interaction.followup.send(
+            f"You left the {kind} lobby." if lobby else f"You gave up the {kind}.", ephemeral=True
+        )
+
     @app_commands.command(name="stats", description="Top match players in this server")
     @app_commands.guild_only()
     @app_commands.describe(

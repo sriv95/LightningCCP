@@ -736,3 +736,60 @@ async def test_contest_log_has_every_teams_solve_once_with_the_solver(env):
     assert log_message(view, entries[0], by_key).startswith("<t:1100:T> <@1> solved A. [")
     assert log_message(view, entries[1], by_key).endswith(", 1 wrong before")
     assert "h2" in log_board_embed(view).description  # the standings
+
+
+async def test_ff_leaves_a_lobby_gives_up_a_running_contest_or_match(env):
+    from types import SimpleNamespace
+
+    from src.cogs.match import MatchCog
+
+    svc, store, cf, clock = env
+    edited, said = [], []
+
+    class Mashups:
+        async def edit_message(self, view):
+            edited.append(view.mashup.status)
+
+    bot = SimpleNamespace(
+        services=SimpleNamespace(matches=svc.matches, mashups=svc, db=store),
+        get_cog=lambda name: Mashups(),
+        get_partial_messageable=lambda *a, **kw: None,
+    )
+    cog = MatchCog(bot)
+
+    async def ff(uid):
+        async def defer(**kw):
+            pass
+
+        async def send(text, **kw):
+            said.append(text)
+
+        interaction = SimpleNamespace(
+            guild_id=GUILD,
+            user=SimpleNamespace(id=uid),
+            response=SimpleNamespace(defer=defer),
+            followup=SimpleNamespace(send=send),
+        )
+        await MatchCog.ff.callback(cog, interaction)
+
+    with pytest.raises(BotError):
+        await ff(1)  # in nothing
+    view = await lobby(svc, host=1)
+    await svc.join(view.mashup.id, 2)
+    await ff(2)  # leaves the contest lobby
+    assert said[-1] == "You left the contest lobby." and edited == ["lobby"]
+    assert [p.user_id for p in (await svc.view(view.mashup.id)).players] == [1]
+    await svc.join(view.mashup.id, 3)
+    await svc.start(view.mashup.id, 1)
+    await ff(3)  # gives up the running contest
+    assert said[-1] == "You gave up the contest." and edited[-1] == "active"
+    assert await store.active_mashup_for(GUILD, 3) is None
+    await ff(1)
+    await svc.tick()
+    assert (await svc.view(view.mashup.id)).mashup.status == "finished"  # everyone is out
+    duel = await svc.matches.create(
+        guild_id=GUILD, channel_id=5, host_id=4, mode="duel", max_players=2
+    )
+    await ff(4)  # the host of a match lobby cancels it
+    assert said[-1] == "You left the match lobby."
+    assert (await store.get_match(duel.match.id)).status == "cancelled"

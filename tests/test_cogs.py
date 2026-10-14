@@ -233,7 +233,7 @@ def test_help_topics_fit_and_cover_every_command():
     text = " ".join(body for _, body in HELP_TOPICS.values())
     for name in (
         "/handle link", "/gimme", "/daily", "/stalk", "/match solo", "/match duel",
-        "/match custom", "/match history", "/host contest", "/host virtual", "/host bingo", "/stats",
+        "/match custom", "/match history", "/ff", "/host contest", "/host virtual", "/host bingo", "/stats",
         "/profile", "/plot rating", "/plot codeforces", "/contests upcoming", "/ranklist",
         "/channel reminder", "/channel recap",
     ):  # fmt: skip
