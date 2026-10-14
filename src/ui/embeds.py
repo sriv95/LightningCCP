@@ -181,17 +181,19 @@ def stats_embed(
     me_id: int,
     streaks: Mapping[int, int] | None = None,
     by_streak: bool = False,
+    kind: str = "all",
 ) -> discord.Embed:
     """Top 10, plus the caller's own row when they are ranked lower. streaks: daily streak by
     user id, shown as a fire emoji and the day count. by_streak ranks players with a streak by
     it, longest first, keeping the rating order among equal streaks."""
     streaks = streaks or {}
+    noun = {"matches": "matches", "contests": "contests"}.get(kind, "games")
     if by_streak:
         rows = sorted((r for r in rows if streaks.get(r[0])), key=lambda r: -streaks[r[0]])
 
     def line(rank: int, row: tuple[int, str, int, int]) -> str:
         user_id, handle, total, played = row
-        text = f"{rank}. <@{user_id}> ({handle}) {total} ({played} matches)"
+        text = f"{rank}. <@{user_id}> ({handle}) {total} ({played} {noun})"
         if streaks.get(user_id):
             text += f" \U0001f525{streaks[user_id]}"
         return f"**{text}**" if user_id == me_id else text
@@ -200,13 +202,17 @@ def stats_embed(
     mine = next(((i, r) for i, r in enumerate(rows, 1) if r[0] == me_id), None)
     footer = None
     if mine is None:
-        footer = "You have no daily streak." if by_streak else "You have no finished matches yet."
+        footer = "You have no daily streak." if by_streak else f"You have no finished {noun} yet."
     elif mine[0] > STATS_SIZE:
         lines += ["...", line(*mine)]
     embed = discord.Embed(
-        title="Daily streaks" if by_streak else "Match stats",
+        title="Daily streaks"
+        if by_streak
+        else "Contest stats"
+        if kind == "contests"
+        else "Match stats",
         description="\n".join(lines)
-        or ("No daily streaks yet." if by_streak else "No finished matches yet."),
+        or ("No daily streaks yet." if by_streak else f"No finished {noun} yet."),
         colour=discord.Colour.gold(),
     )
     if footer and lines:

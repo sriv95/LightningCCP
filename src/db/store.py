@@ -820,12 +820,19 @@ class Store:
         )
         return START_RATING + row[0]
 
-    async def stats(self, guild_id: int) -> list[tuple[int, str, int, int]]:
-        """(user_id, handle, match rating, games played), best rated first. Finished matches and
-        mashups count."""
+    async def stats(self, guild_id: int, kind: str = "all") -> list[tuple[int, str, int, int]]:
+        """(user_id, handle, match rating, games played), best rated first. kind picks finished
+        matches ("matches"), finished mashups ("contests") or both ("all"); the rating counts
+        only the changes of that kind."""
+        source = {
+            "matches": "SELECT guild_id, user_id, handle, delta FROM match_players "
+            "WHERE delta IS NOT NULL",
+            "contests": "SELECT guild_id, user_id, handle, delta FROM mashup_players "
+            "WHERE delta IS NOT NULL",
+        }.get(kind, self._CHANGES)
         rows = await self._all(
             "SELECT c.user_id, COALESCE(uh.handle, MAX(c.handle)) AS handle, "
-            f"? + SUM(c.delta) AS total, COUNT(*) AS played FROM ({self._CHANGES}) c "
+            f"? + SUM(c.delta) AS total, COUNT(*) AS played FROM ({source}) c "
             "LEFT JOIN user_handle uh ON uh.guild_id = c.guild_id AND uh.user_id = c.user_id "
             "WHERE c.guild_id = ? "
             "GROUP BY c.user_id ORDER BY total DESC, played DESC, handle",

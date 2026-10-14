@@ -91,18 +91,27 @@ def test_stats_embed_shows_caller_below_top_ten():
     rows = [(i, f"h{i}", 100 - i, 1) for i in range(1, 13)]
     desc = stats_embed(rows, 12).description
     assert desc.count("\n") == 11 and "1. <@1>" in desc and "10. <@10>" in desc
-    assert "11." not in desc and desc.endswith("**12. <@12> (h12) 88 (1 matches)**")
+    assert "11." not in desc and desc.endswith("**12. <@12> (h12) 88 (1 games)**")
     in_top = stats_embed(rows, 2)
     assert "..." not in in_top.description and "**2. <@2>" in in_top.description
-    assert stats_embed(rows, 99).footer.text == "You have no finished matches yet."
-    assert stats_embed([], 1).description == "No finished matches yet."
+    assert stats_embed(rows, 99).footer.text == "You have no finished games yet."
+    assert stats_embed([], 1).description == "No finished games yet."
+
+
+def test_stats_embed_names_the_kind():
+    rows = [(1, "a", 900, 2)]
+    assert "(2 matches)" in stats_embed(rows, 1, kind="matches").description
+    assert stats_embed(rows, 1, kind="matches").title == "Match stats"
+    assert "(2 contests)" in stats_embed(rows, 1, kind="contests").description
+    assert stats_embed(rows, 1, kind="contests").title == "Contest stats"
+    assert stats_embed([], 1, kind="contests").description == "No finished contests yet."
 
 
 def test_stats_embed_shows_daily_streak_with_fire():
     rows = [(1, "a", 900, 3), (2, "b", 850, 2)]
     lines = stats_embed(rows, 9, {1: 4, 2: 0}).description.splitlines()
-    assert lines[0].endswith("900 (3 matches) \U0001f5254")
-    assert lines[1].endswith("850 (2 matches)")
+    assert lines[0].endswith("900 (3 games) \U0001f5254")
+    assert lines[1].endswith("850 (2 games)")
 
 
 def test_stats_embed_sorts_by_streak():

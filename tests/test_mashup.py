@@ -473,6 +473,8 @@ async def test_finished_mashup_moves_match_ratings(env):
     assert [await store.rating(GUILD, u) for u in (1, 2, 3)] == [800, 849, 751]
     assert dict((u, n) for u, _, _, n in await store.stats(GUILD)) == {1: 1, 2: 1, 3: 1}
     assert [d for _, d in await store.rating_changes(GUILD, 2)] == [49]
+    assert await store.stats(GUILD, "matches") == []
+    assert {u: r for u, _, r, _ in await store.stats(GUILD, "contests")} == {1: 800, 2: 849, 3: 751}
     text = mashup_embed(done, {}).description
     assert "1. h2 - 2 solved" in text and text.count("rating +49") == 1
     clock.t += 5000

@@ -253,21 +253,26 @@ class MatchCog(commands.Cog, name="Match"):
 
     @app_commands.command(name="stats", description="Top match players in this server")
     @app_commands.guild_only()
-    @app_commands.describe(sort="Rank by match rating (default) or by daily streak")
+    @app_commands.describe(
+        sort="Rank by match rating (default) or by daily streak",
+        kind="Count matches and contests (default), only matches, or only contests",
+    )
     async def stats(
         self,
         interaction: discord.Interaction,
         sort: Literal["rating", "streak"] = "rating",
+        kind: Literal["all", "matches", "contests"] = "all",
     ) -> None:
         db = self.bot.services.db
-        rows = await db.stats(interaction.guild_id)
+        rows = await db.stats(interaction.guild_id, kind)
         today = utc_day(int(time.time()))
         streaks = {
             uid: daily_streak(days, today)
             for uid, days in (await db.daily_days_by_user(interaction.guild_id)).items()
         }
         await interaction.response.send_message(
-            embed=stats_embed(rows, interaction.user.id, streaks, sort == "streak"), ephemeral=True
+            embed=stats_embed(rows, interaction.user.id, streaks, sort == "streak", kind),
+            ephemeral=True,
         )
 
     async def on_button(self, interaction: discord.Interaction, action: str, match_id: int) -> None:
