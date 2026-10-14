@@ -642,3 +642,68 @@ async def test_interval_shrinks_with_fewer_players_waiting(env):
     assert (svc.interval, cf.calls) == (10, ["h1", "h2"])
     await svc.tick()
     assert cf.calls == ["h1", "h2"] * 2  # 10 s pay for 5 reads, so both are read again
+
+
+async def test_give_up_keeps_the_place_but_frees_the_player(env):
+    svc, store, cf, clock = env
+    view = await started(svc, 2, 3)
+    mid = view.mashup.id
+    keys = [k for k, _ in view.problems]
+    sub(cf, "h2", keys[0], 1100)
+    await svc.check(mid, 2)
+    with pytest.raises(BotError, match="not playing"):
+        await svc.give_up(mid, 4)
+    gone = await svc.give_up(mid, 2)
+    assert [p.active for p in gone.players] == [True, False, True]
+    assert (
+        "2. h2" in mashup_embed(gone, {}).description
+        or "1. h2" in mashup_embed(gone, {}).description
+    )
+    assert "(gave up)" in mashup_embed(gone, {}).description
+    with pytest.raises(BotError, match="not playing"):
+        await svc.give_up(mid, 2)
+    with pytest.raises(BotError, match="gave up"):
+        await svc.check(mid, 2)
+    with pytest.raises(MatchClosed):
+        await svc.leave(mid, 3)  # an active contest is left with Give Up
+    other = await lobby(svc, host=2)  # free for another contest
+    assert other.mashup.status == "lobby"
+    cf.calls.clear()
+    sub(cf, "h2", keys[1], 1150)  # solved after giving up: not read, not counted
+    clock.t = 1060
+    await svc.tick()
+    assert "h2" not in cf.calls
+    done = await finish_contest(svc, cf, clock, await svc.view(mid), {})
+    assert done.mashup.status == "finished"
+    by_user = {p.user_id: p.delta for p in done.players}
+    assert by_user[2] > 0 and by_user[1] < 0 and by_user[3] < 0  # h2 still wins with 1 solve
+    assert "1. h2 - 1 solved" in mashup_embed(done, {}).description
+    assert await store.rating(GUILD, 2) == 800 + by_user[2]
+
+
+async def test_contest_ends_when_everyone_still_in_solved_everything(env):
+    svc, store, cf, clock = env
+    view = await started(svc, 2, 3)
+    mid, ends_at = view.mashup.id, view.mashup.ends_at
+    keys = [k for k, _ in view.problems]
+    for handle in ("h1", "h2"):
+        for key in keys:
+            sub(cf, handle, key, 1100)
+    await svc.give_up(mid, 3)
+    clock.t = 1060
+    await svc.tick()
+    done = await svc.view(mid)
+    assert done.mashup.status == "finished" and done.mashup.ends_at == 1060 < ends_at
+    assert {p.user_id: p.delta for p in done.players}[3] < 0  # the one who left is ranked last
+
+
+async def test_contest_ends_when_everyone_gave_up(env):
+    svc, store, cf, clock = env
+    view = await started(svc, 2)
+    await svc.give_up(view.mashup.id, 1)
+    await svc.give_up(view.mashup.id, 2)
+    clock.t = 1060
+    await svc.tick()
+    done = await svc.view(view.mashup.id)
+    assert done.mashup.status == "finished"
+    assert [p.delta for p in done.players] == [0, 0]  # nobody solved: a tie

@@ -259,7 +259,7 @@ class MashupService:
         if user_id not in {p.user_id for p in players}:
             raise BotError("You are not in this contest.")
         if mashup.status != "lobby":
-            raise MatchClosed("The contest already started.")
+            raise MatchClosed("The contest already started. Use Give Up instead.")
         if user_id == mashup.host_id:
             if not await self._store.cancel_mashup(mashup_id):
                 raise MatchClosed()
@@ -318,8 +318,34 @@ class MashupService:
         )
         if player is None:
             raise BotError("You are not in this contest.")
+        if not player.active:
+            raise BotError("You gave up this contest.")
         await self._refresh(mashup, player)
         return await self.view(mashup_id)
+
+    async def give_up(self, mashup_id: int, user_id: int) -> MashupView:
+        """Leave a running contest: the place and rating change stay (from the solves so far, no
+        more are read) but the player is free to join another match or contest."""
+        mashup = await self._mashup(mashup_id)
+        if mashup.status != "active" or self._now() >= mashup.ends_at:
+            raise MatchClosed("This contest is not running.")
+        me = next(
+            (p for p in await self._store.mashup_players(mashup_id) if p.user_id == user_id), None
+        )
+        if me is None or not me.active:
+            raise BotError("You are not playing in this contest.")
+        if not await self._store.mark_mashup_gave_up(mashup_id, user_id):
+            raise MatchClosed()
+        return await self.view(mashup_id)
+
+    async def _everyone_done(self, mashup: MashupRow) -> bool:
+        """Every player still in has a team that solved every problem (true when all gave up)."""
+        total = len(await self._store.mashup_problems(mashup.id))
+        players = await self._store.mashup_players(mashup.id)
+        solves = team_solves(
+            ((p.user_id, p.team) for p in players), await self._store.mashup_solves(mashup.id)
+        )
+        return all(len(solves.get(p.team, {})) >= total for p in players if p.active)
 
     async def _refresh(self, mashup: MashupRow, player: MashupPlayer) -> int:
         """Reads the player's recent submissions; returns how many new solves it stored."""
@@ -357,10 +383,10 @@ class MashupService:
         )
         for mashup in running:
             try:
-                ended = now >= mashup.ends_at
+                ended = now >= mashup.ends_at or await self._everyone_done(mashup)
                 if ended:
                     await self._store.finish_mashup(
-                        mashup.id, await self._rating_changes(await self.view(mashup.id))
+                        mashup.id, await self._rating_changes(await self.view(mashup.id)), now
                     )
                     self._read_at = {k: t for k, t in self._read_at.items() if k[0] != mashup.id}
                 if changed.get(mashup.id) or ended:
@@ -407,7 +433,7 @@ class MashupService:
                 continue
             last = -1 if now >= mashup.ends_at else 0  # out of time: before everyone, no budget
             for p in players:
-                if len(solves.get(p.team, {})) < total:
+                if p.active and len(solves.get(p.team, {})) < total:
                     due.append((last or self._read_at.get((mashup.id, p.user_id), 0), mashup, p))
         due.sort(key=lambda d: d[0])  # stable: equal staleness keeps contest and joining order
         budget = max(1, round(MASHUP_READS_PER_SECOND * self.interval))

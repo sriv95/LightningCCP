@@ -26,6 +26,7 @@ BUTTONS = {
     "start": ("Start", discord.ButtonStyle.primary),
     "leave": ("Leave", discord.ButtonStyle.secondary),
     "check": ("Check", discord.ButtonStyle.primary),
+    "giveup": ("Give Up", discord.ButtonStyle.danger),
     "rematch": ("Rematch", discord.ButtonStyle.primary),
 }
 TEAMS = "Number of teams (default 10)"
@@ -50,14 +51,14 @@ VIRTUAL = {
 }
 ACTIONS = {
     "lobby": ("join", "start", "leave"),
-    "active": ("check",),
+    "active": ("check", "giveup"),
     "finished": ("rematch",),
 }
 
 
 class MashupButton(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"mashup:(?P<action>join|start|leave|check|rematch):(?P<id>\d+)",
+    template=r"mashup:(?P<action>join|start|leave|check|giveup|rematch):(?P<id>\d+)",
 ):
     """Persistent button keyed by contest id, so contests keep working across restarts."""
 
@@ -360,6 +361,7 @@ class MashupCog(commands.Cog, name="Mashup"):
             "start": self.svc.start,
             "leave": self.svc.leave,
             "check": self.svc.check,
+            "giveup": self.svc.give_up,
         }
         view = await handlers[action](mashup_id, interaction.user.id)
         await interaction.edit_original_response(

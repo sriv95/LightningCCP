@@ -418,6 +418,10 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
             members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
             who = f"{r.handle} ({members})"
         lines.append(f"{r.rank}. {who} - {r.solved} solved, {format_hm(r.total_seconds)}{detail}")
+        if m.status == "active" and m.team_size == 1:
+            me = next(p for p in view.players if p.team == r.user_id)
+            if not me.active:
+                lines[-1] += " (gave up)"
         if finished and (change := _mashup_change(view, r)) is not None:
             lines[-1] += f", rating {change:+d}"
     return discord.Embed(

@@ -346,6 +346,7 @@ class MashupPlayer:
     joined_at: int
     team: int | None = None
     delta: int | None = None
+    active: bool = True  # False once the player gave up (or the contest ended)
 
 
 def _match(row: aiosqlite.Row) -> MatchRow:
@@ -969,12 +970,14 @@ class Store:
 
     async def mashup_players(self, mashup_id: int) -> list[MashupPlayer]:
         rows = await self._all(
-            "SELECT user_id, handle, joined_at, team, delta FROM mashup_players "
+            "SELECT user_id, handle, joined_at, team, delta, active FROM mashup_players "
             "WHERE mashup_id = ? ORDER BY joined_at, rowid",
             (mashup_id,),
         )
         return [
-            MashupPlayer(r["user_id"], r["handle"], r["joined_at"], r["team"], r["delta"])
+            MashupPlayer(
+                r["user_id"], r["handle"], r["joined_at"], r["team"], r["delta"], bool(r["active"])
+            )
             for r in rows
         ]
 
@@ -1116,13 +1119,26 @@ class Store:
             out.setdefault(r["user_id"], {})[r["problem_key"]] = (r["solved_at"], r["wrong"])
         return out
 
-    async def finish_mashup(self, mashup_id: int, deltas: Mapping[int, int] | None = None) -> bool:
-        """Ends an active contest and stores each player's rating change. False when another
-        request already ended it, so ratings are never applied twice."""
+    async def mark_mashup_gave_up(self, mashup_id: int, user_id: int) -> bool:
+        """Frees a player of a running contest for other activities; they keep their place."""
+        n = await self._write(
+            "UPDATE mashup_players SET active = 0 WHERE mashup_id = ? AND user_id = ? "
+            "AND active = 1 AND EXISTS (SELECT 1 FROM mashups WHERE id = ? AND status = 'active')",
+            (mashup_id, user_id, mashup_id),
+        )
+        return n > 0
+
+    async def finish_mashup(
+        self, mashup_id: int, deltas: Mapping[int, int] | None = None, now: int | None = None
+    ) -> bool:
+        """Ends an active contest (at `now` if that is before its scheduled end) and stores each
+        player's rating change. False when another request already ended it, so ratings are never
+        applied twice."""
         async with self._tx() as db:
             cur = await db.execute(
-                "UPDATE mashups SET status = 'finished' WHERE id = ? AND status = 'active'",
-                (mashup_id,),
+                "UPDATE mashups SET status = 'finished', ends_at = MIN(ends_at, COALESCE(?, ends_at)) "
+                "WHERE id = ? AND status = 'active'",
+                (now, mashup_id),
             )
             if cur.rowcount == 0:
                 return False
