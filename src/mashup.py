@@ -132,6 +132,7 @@ class MashupService:
         penalty_minutes: int = 0,
         teams: int = 0,
         max_players: int = MASHUP_MAX_PLAYERS,
+        rated: bool = True,
     ) -> MashupView:
         if min_rating > max_rating:
             raise BotError("min_rating cannot be higher than max_rating.")
@@ -153,6 +154,7 @@ class MashupService:
             teams=teams,
             host_team=1 if teams else None,  # the host always starts in team 1
             max_players=max_players,
+            rated=rated,
         )
         return await self.view(mashup_id)
 
@@ -278,9 +280,9 @@ class MashupService:
     async def _rating_changes(self, view: MashupView) -> dict[int, int]:
         """Match rating change per player: every pair of entrants (players, or teams rated at
         their members' average) is a duel decided by the standings, as in a custom match. Empty
-        for a single entrant."""
+        for a single entrant or an unrated contest."""
         ranks = view.standings
-        if len(ranks) < 2:
+        if len(ranks) < 2 or not view.mashup.rated:
             return {}
         guild_id = view.mashup.guild_id
         ratings = {p.user_id: await self._store.rating(guild_id, p.user_id) for p in view.players}

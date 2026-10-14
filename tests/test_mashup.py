@@ -493,3 +493,13 @@ async def test_nothing_solved_or_one_entrant_changes_no_rating(env):
     assert [p.delta for p in alone.players] == [None]  # one entrant: not rated
     assert await store.rating(GUILD, 3) == 800
     assert {u for u, *_ in await store.stats(GUILD)} == {1, 2}  # player 3 played nothing rated
+
+
+async def test_unrated_contest_changes_no_rating(env):
+    svc, store, cf, clock = env
+    view = await started(svc, 2, rated=False)
+    assert "unrated" in mashup_embed(view, {}).description
+    done = await finish_contest(svc, cf, clock, view, {"h2": [(0, 1100)]})
+    assert [p.delta for p in done.players] == [None, None]
+    assert [await store.rating(GUILD, u) for u in (1, 2)] == [800, 800]
+    assert "rating" not in mashup_embed(done, {}).description.split("**Standings**")[1]

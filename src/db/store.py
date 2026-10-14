@@ -229,6 +229,8 @@ MIGRATIONS = [
     # A finished mashup moves match ratings: the change is stored per player (NULL before it ends,
     # and for contests that ended earlier or had a single entrant).
     "ALTER TABLE mashup_players ADD COLUMN delta INTEGER;",
+    # The host can open an unrated contest (rated = 0), which never changes ratings.
+    "ALTER TABLE mashups ADD COLUMN rated INTEGER NOT NULL DEFAULT 1;",
 ]
 
 
@@ -310,6 +312,7 @@ class MashupRow:
     ends_at: int | None
     teams: int = 0
     max_players: int = 20
+    rated: int = 1
 
 
 @dataclass(frozen=True)
@@ -860,6 +863,7 @@ class Store:
         teams: int = 0,
         host_team: int | None = None,
         max_players: int = 20,
+        rated: bool = True,
     ) -> int:
         try:
             async with self._tx() as db:
@@ -868,7 +872,7 @@ class Store:
                 cur = await db.execute(
                     "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, "
                     "count, duration_seconds, penalty_minutes, status, created_at, teams, "
-                    "max_players) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?)",
+                    "max_players, rated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?, ?)",
                     (
                         guild_id,
                         channel_id,
@@ -881,6 +885,7 @@ class Store:
                         now,
                         teams,
                         max_players,
+                        int(rated),
                     ),
                 )
                 mashup_id = cur.lastrowid

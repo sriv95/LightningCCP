@@ -360,6 +360,7 @@ def _mashup_setup(view: MashupView) -> str:
         f"{m.count} problems rated {m.min_rating}-{m.max_rating}, "
         f"{format_hm(m.duration_seconds)} long, {penalty}"
         + (f", {m.teams} teams" if m.teams else "")
+        + ("" if m.rated else ", unrated")
     )
 
 

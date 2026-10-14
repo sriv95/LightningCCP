@@ -20,6 +20,16 @@ BUTTONS = {
     "leave": ("Leave", discord.ButtonStyle.secondary),
     "check": ("Check", discord.ButtonStyle.primary),
 }
+OPTIONS = {
+    "min_rating": "Easiest problem rating (default 800)",
+    "max_rating": "Hardest problem rating (default 1500)",
+    "count": "Number of problems (default 5)",
+    "hour": "Hours the contest lasts (default 2)",
+    "minute": "Extra minutes (default 0)",
+    "penalty": "Minutes added per wrong attempt before a solve (default 0)",
+}
+PLAYERS = "Maximum number of players (default 20)"
+TEAMS = "Number of teams (default 2)"
 ACTIONS = {"lobby": ("join", "start", "leave"), "active": ("check",)}
 
 
@@ -88,8 +98,15 @@ class TeamModal(discord.ui.Modal):
 
 
 class MashupCog(commands.Cog, name="Mashup"):
-    mashup = app_commands.Group(
-        name="mashup", description="Timed multi-problem contests", guild_only=True
+    host_rated = app_commands.Group(
+        name="host-rated",
+        description="Host a timed multi-problem contest that changes ratings",
+        guild_only=True,
+    )
+    host_unrated = app_commands.Group(
+        name="host-unrated",
+        description="Host a timed multi-problem contest that leaves ratings alone",
+        guild_only=True,
     )
 
     def __init__(self, bot: commands.Bot):
@@ -110,17 +127,48 @@ class MashupCog(commands.Cog, name="Mashup"):
         self.tick_loop.cancel()
         self.bot.remove_dynamic_items(MashupButton)
 
-    @mashup.command(name="contest", description="Open a timed contest lobby with a live scoreboard")
-    @app_commands.describe(
-        min_rating="Easiest problem rating (default 800)",
-        max_rating="Hardest problem rating (default 1500)",
-        count="Number of problems (default 5)",
-        hour="Hours the contest lasts (default 2)",
-        minute="Extra minutes (default 0)",
-        penalty="Minutes added per wrong attempt before a solve (default 0)",
-        players="Maximum number of players (default 20)",
+    @host_rated.command(
+        name="contest", description="Open a rated timed contest lobby with a live scoreboard"
     )
-    async def contest(
+    @app_commands.describe(**OPTIONS, players=PLAYERS)
+    async def rated_contest(
+        self,
+        interaction: discord.Interaction,
+        min_rating: Rating = 800,
+        max_rating: Rating = 1500,
+        count: app_commands.Range[int, 1, MASHUP_MAX_PROBLEMS] = 5,
+        hour: app_commands.Range[int, 0, 24] = 2,
+        minute: app_commands.Range[int, 0, 59] = 0,
+        penalty: app_commands.Range[int, 0, 120] = 0,
+        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] = MASHUP_MAX_PLAYERS,
+    ) -> None:
+        await self._open(
+            interaction, min_rating, max_rating, count, hour, minute, penalty, max_players=players
+        )
+
+    @host_rated.command(
+        name="team-contest",
+        description="Open a rated team contest lobby; Join asks for a team number",
+    )
+    @app_commands.describe(teams=TEAMS, **OPTIONS)
+    async def rated_team_contest(
+        self,
+        interaction: discord.Interaction,
+        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = 2,
+        min_rating: Rating = 800,
+        max_rating: Rating = 1500,
+        count: app_commands.Range[int, 1, MASHUP_MAX_PROBLEMS] = 5,
+        hour: app_commands.Range[int, 0, 24] = 2,
+        minute: app_commands.Range[int, 0, 59] = 0,
+        penalty: app_commands.Range[int, 0, 120] = 0,
+    ) -> None:
+        await self._open(interaction, min_rating, max_rating, count, hour, minute, penalty, teams)
+
+    @host_unrated.command(
+        name="contest", description="Open an unrated timed contest lobby with a live scoreboard"
+    )
+    @app_commands.describe(**OPTIONS, players=PLAYERS)
+    async def unrated_contest(
         self,
         interaction: discord.Interaction,
         min_rating: Rating = 800,
@@ -140,21 +188,15 @@ class MashupCog(commands.Cog, name="Mashup"):
             minute,
             penalty,
             max_players=players,
+            rated=False,
         )
 
-    @mashup.command(
-        name="team-contest", description="Open a team contest lobby; Join asks for a team number"
+    @host_unrated.command(
+        name="team-contest",
+        description="Open an unrated team contest lobby; Join asks for a team number",
     )
-    @app_commands.describe(
-        teams="Number of teams (default 2)",
-        min_rating="Easiest problem rating (default 800)",
-        max_rating="Hardest problem rating (default 1500)",
-        count="Number of problems (default 5)",
-        hour="Hours the contest lasts (default 2)",
-        minute="Extra minutes (default 0)",
-        penalty="Minutes added per wrong attempt before a solve (default 0)",
-    )
-    async def team_contest(
+    @app_commands.describe(teams=TEAMS, **OPTIONS)
+    async def unrated_team_contest(
         self,
         interaction: discord.Interaction,
         teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = 2,
@@ -165,7 +207,9 @@ class MashupCog(commands.Cog, name="Mashup"):
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
     ) -> None:
-        await self._open(interaction, min_rating, max_rating, count, hour, minute, penalty, teams)
+        await self._open(
+            interaction, min_rating, max_rating, count, hour, minute, penalty, teams, rated=False
+        )
 
     async def _open(
         self,
@@ -178,6 +222,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         penalty: int,
         teams: int = 0,
         max_players: int = MASHUP_MAX_PLAYERS,
+        rated: bool = True,
     ) -> None:
         await interaction.response.defer()
         view = await self.svc.create(
@@ -191,6 +236,7 @@ class MashupCog(commands.Cog, name="Mashup"):
             penalty_minutes=penalty,
             teams=teams,
             max_players=max_players,
+            rated=rated,
         )
         message = await interaction.followup.send(
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view), wait=True
