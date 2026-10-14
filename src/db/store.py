@@ -1,6 +1,8 @@
+import asyncio
 import json
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -68,6 +70,41 @@ MIGRATIONS = [
         PRIMARY KEY (contest_id, idx)
     );
     """,
+    """
+    DROP TABLE challenge;
+    CREATE TABLE matches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        channel_id INTEGER NOT NULL,
+        message_id INTEGER,
+        host_id INTEGER NOT NULL,
+        mode TEXT NOT NULL CHECK (mode IN ('solo', 'duel', 'custom')),
+        max_players INTEGER NOT NULL,
+        invited_id INTEGER,
+        rating_arg INTEGER,
+        rating INTEGER,
+        problem_key TEXT,
+        status TEXT NOT NULL CHECK (status IN ('lobby', 'active', 'finished', 'cancelled')),
+        created_at INTEGER NOT NULL,
+        started_at INTEGER,
+        expires_at INTEGER,
+        finished_at INTEGER
+    );
+    CREATE INDEX matches_status ON matches (status);
+    CREATE TABLE match_players (
+        match_id INTEGER NOT NULL REFERENCES matches (id),
+        guild_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        handle TEXT NOT NULL,
+        joined_at INTEGER NOT NULL,
+        solved_at INTEGER,
+        gave_up INTEGER NOT NULL DEFAULT 0,
+        delta INTEGER,
+        active INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (match_id, user_id)
+    );
+    CREATE UNIQUE INDEX one_active_match ON match_players (guild_id, user_id) WHERE active = 1;
+    """,
 ]
 
 
@@ -102,6 +139,7 @@ class Store:
     def __init__(self, path: Path):
         self._path = path
         self._db: aiosqlite.Connection
+        self._lock = asyncio.Lock()
 
     async def connect(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,10 +157,21 @@ class Store:
             await self._db.executescript(f"{script}\nPRAGMA user_version = {number};")
         await self._db.commit()
 
+    @asynccontextmanager
+    async def _tx(self) -> AsyncIterator[aiosqlite.Connection]:
+        """One serialized transaction: commit on success, roll back and re-raise on any error."""
+        async with self._lock:
+            try:
+                yield self._db
+                await self._db.commit()
+            except BaseException:
+                await self._db.rollback()
+                raise
+
     async def _write(self, sql: str, params: Sequence[Any] = ()) -> int:
-        cur = await self._db.execute(sql, params)
-        await self._db.commit()
-        return cur.rowcount
+        async with self._tx() as db:
+            cur = await db.execute(sql, params)
+            return cur.rowcount
 
     async def _one(self, sql: str, params: Sequence[Any] = ()) -> aiosqlite.Row | None:
         async with self._db.execute(sql, params) as cur:
@@ -224,16 +273,12 @@ class Store:
 
     # --- caches ---
     async def replace_contests(self, contests: Sequence[Contest]) -> None:
-        try:
-            await self._db.execute("DELETE FROM contest")
-            await self._db.executemany(
+        async with self._tx() as db:
+            await db.execute("DELETE FROM contest")
+            await db.executemany(
                 "INSERT INTO contest (id, name, type, phase, start_time, duration) VALUES (?, ?, ?, ?, ?, ?)",
                 [(c.id, c.name, c.type, c.phase, c.start_time, c.duration) for c in contests],
             )
-            await self._db.commit()
-        except Exception:
-            await self._db.rollback()
-            raise
 
     async def load_contests(self) -> list[Contest]:
         rows = await self._all("SELECT * FROM contest")
@@ -243,19 +288,15 @@ class Store:
         ]
 
     async def replace_problems(self, problems: Sequence[Problem]) -> None:
-        try:
-            await self._db.execute("DELETE FROM problem")
-            await self._db.executemany(
+        async with self._tx() as db:
+            await db.execute("DELETE FROM problem")
+            await db.executemany(
                 "INSERT INTO problem (contest_id, idx, name, rating, tags) VALUES (?, ?, ?, ?, ?)",
                 [
                     (p.contest_id, p.index, p.name, p.rating, json.dumps(list(p.tags)))
                     for p in problems
                 ],
             )
-            await self._db.commit()
-        except Exception:
-            await self._db.rollback()
-            raise
 
     async def load_problems(self) -> list[Problem]:
         rows = await self._all("SELECT * FROM problem")

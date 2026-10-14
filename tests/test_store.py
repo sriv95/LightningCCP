@@ -1,9 +1,11 @@
+import asyncio
 import sqlite3
 
+import aiosqlite
 import pytest
 
 from src.cf.models import Contest, Problem
-from src.db.store import Store
+from src.db.store import MIGRATIONS, Store
 from src.errors import HandleTaken
 
 
@@ -136,3 +138,32 @@ async def test_failed_problem_replace_keeps_cache(store):
         await store.replace_problems([p, p])  # duplicate (contest_id, idx)
     await store.link_handle(1, 1, "a", None)  # unrelated write must not commit the DELETE
     assert sorted(await store.load_problems(), key=lambda x: x.key) == [p, q]
+
+
+async def test_migration_2_drops_challenge_and_adds_match_tables(tmp_path):
+    path = tmp_path / "t.db"
+    db = await aiosqlite.connect(path)
+    await db.executescript(MIGRATIONS[0] + "\nPRAGMA user_version = 1;")
+    await db.execute(
+        "INSERT INTO challenge (guild_id, user_id, problem_key, rating, issued_at) "
+        "VALUES (1, 1, '1A', 800, 1)"
+    )
+    await db.commit()
+    await db.close()
+    s = Store(path)
+    await s.connect()
+    names = {r["name"] for r in await s._all("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "challenge" not in names
+    assert {"matches", "match_players"} <= names
+    assert (await s._one("PRAGMA user_version"))[0] == 2
+    await s.close()
+
+
+async def test_failed_replace_does_not_discard_concurrent_write(store):
+    dup = [Problem(1, "A", "x", 800, ()), Problem(1, "A", "y", 800, ())]
+    results = await asyncio.gather(
+        store.replace_problems(dup), store.link_handle(1, 1, "a", None), return_exceptions=True
+    )
+    assert isinstance(results[0], sqlite3.IntegrityError)
+    assert results[1] is None
+    assert (await store.get_handle(1, 1)).handle == "a"
