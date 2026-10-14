@@ -5,7 +5,7 @@ import discord
 import pytest
 
 from src.cogs.handles import VerifyButton
-from src.cogs.match import MatchButton, MatchCog
+from src.cogs.match import MatchButton, MatchCog, match_components
 from src.errors import BotError
 from src.matches import MatchView
 from tests.test_match_embeds import player, row
@@ -108,3 +108,35 @@ async def test_check_without_finish_gives_presser_feedback(solved_at, expected):
     await cog.on_button(interaction, "check", 1)
     (msg,), kwargs = interaction.followup.send.await_args
     assert msg.startswith(expected) and kwargs == {"ephemeral": True}
+
+
+def test_rematch_button_only_on_a_finished_duel():
+    def actions(**kw):
+        ui = match_components(MatchView(row(**kw), [player(10), player(11)]))
+        return None if ui is None else [item.action for item in ui.children]
+
+    assert actions(status="finished", mode="duel") == ["rematch"]
+    assert actions(status="finished", mode="solo") is None
+    assert actions(status="finished", mode="custom") is None
+    assert actions(status="cancelled", mode="duel") is None
+
+
+async def test_rematch_button_posts_a_new_lobby():
+    lobby = MatchView(row(id=9, message_id=None, channel_id=6), [player(10)])
+    svc = FakeSvc(lobby)
+    svc.rematch = AsyncMock(return_value=lobby)
+    cog = make_cog(svc)
+    new = SimpleNamespace(id=222, jump_url="x")
+    interaction = SimpleNamespace(
+        guild_id=1,
+        channel_id=6,
+        user=SimpleNamespace(id=10),
+        response=SimpleNamespace(defer=AsyncMock()),
+        edit_original_response=AsyncMock(),
+        followup=SimpleNamespace(send=AsyncMock(return_value=new)),
+    )
+    await cog.on_button(interaction, "rematch", 3)
+    svc.rematch.assert_awaited_once_with(3, 10, 6)
+    svc.set_message.assert_awaited_once_with(9, 6, 222)
+    interaction.edit_original_response.assert_not_awaited()  # the finished result stays as it is
+    assert MatchButton.__discord_ui_compiled_template__.fullmatch("match:rematch:3")

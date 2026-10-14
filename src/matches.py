@@ -112,6 +112,25 @@ class MatchService:
             await self._store.cancel_match(match_id, self._now())
             raise
 
+    async def rematch(self, match_id: int, user_id: int, channel_id: int) -> MatchView:
+        """New duel lobby against the same opponent, hosted by whoever pressed Rematch."""
+        match = await self._match(match_id)
+        if match.status != "finished" or match.mode != "duel":
+            raise MatchClosed("Only a finished duel can be rematched.")
+        ids = [p.user_id for p in await self._store.get_players(match_id)]
+        if user_id not in ids:
+            raise BotError("Only the players of this duel can ask for a rematch.")
+        opponent = next(uid for uid in ids if uid != user_id)
+        return await self.create(
+            guild_id=match.guild_id,
+            channel_id=channel_id,
+            host_id=user_id,
+            mode="duel",
+            max_players=2,
+            invited_id=opponent,
+            rating_arg=match.rating_arg,
+        )
+
     async def join(self, match_id: int, user_id: int) -> MatchView:
         match = await self._match(match_id)
         if match.status != "lobby":

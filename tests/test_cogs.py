@@ -81,7 +81,7 @@ def test_match_group_commands():
 
 def test_match_button_template_matches_all_actions():
     template = MatchButton.__discord_ui_compiled_template__
-    for action in ("join", "start", "leave", "check", "giveup"):
+    for action in ("join", "start", "leave", "check", "giveup", "rematch"):
         assert template.fullmatch(f"match:{action}:42")
     assert not template.fullmatch("match:other:42")
 

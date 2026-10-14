@@ -532,3 +532,39 @@ async def test_check_tolerates_another_players_failing_lookup(env):
     view = await svc.check(lobby.match.id, 2)
     assert view.match.status == "finished"
     assert deltas(view) == {1: -49, 2: 49}
+
+
+async def finished_duel(svc, **kw):
+    lobby = await make(svc, 1, "duel", 2, **kw)
+    await svc.join(lobby.match.id, 2)
+    await svc.start(lobby.match.id, 1)
+    return await svc.give_up(lobby.match.id, 1)  # player 2 wins by forfeit
+
+
+async def test_rematch_opens_a_duel_lobby_hosted_by_the_presser(env):
+    svc, store, cf, clock = env
+    done = await finished_duel(svc, rating_arg=800)
+    new = await svc.rematch(done.match.id, 1, 77)  # the loser asks
+    assert new.match.status == "lobby" and new.match.mode == "duel"
+    assert (new.match.host_id, new.match.invited_id, new.match.channel_id) == (1, 2, 77)
+    assert new.match.rating_arg == 800 and new.match.id != done.match.id
+    with pytest.raises(BotError):
+        await svc.join(new.match.id, 3)  # reserved for the old opponent
+    assert (await svc.join(new.match.id, 2)).match.status == "lobby"
+
+
+async def test_rematch_rules(env):
+    svc, store, cf, clock = env
+    done = await finished_duel(svc)
+    with pytest.raises(BotError):
+        await svc.rematch(done.match.id, 3, 5)  # not a player
+    await svc.rematch(done.match.id, 1, 5)
+    with pytest.raises(AlreadyInMatch):
+        await svc.rematch(done.match.id, 1, 5)  # still in the new lobby
+    lobby = await make(svc, 3, "duel", 2)
+    with pytest.raises(MatchClosed):
+        await svc.rematch(lobby.match.id, 3, 5)  # not finished
+    solo = await make(svc, 4, "solo", 1)
+    solo = await svc.give_up(solo.match.id, 4)
+    with pytest.raises(MatchClosed):
+        await svc.rematch(solo.match.id, 4, 5)  # only duels

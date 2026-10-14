@@ -29,14 +29,16 @@ BUTTONS = {
     "leave": ("Leave", discord.ButtonStyle.secondary),
     "check": ("Check", discord.ButtonStyle.success),
     "giveup": ("Give Up", discord.ButtonStyle.danger),
+    "rematch": ("Rematch", discord.ButtonStyle.primary),
 }
 LOBBY_ACTIONS = ("join", "start", "leave")
 ACTIVE_ACTIONS = ("check", "giveup")
+FINISHED_DUEL_ACTIONS = ("rematch",)
 
 
 class MatchButton(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"match:(?P<action>join|start|leave|check|giveup):(?P<id>\d+)",
+    template=r"match:(?P<action>join|start|leave|check|giveup|rematch):(?P<id>\d+)",
 ):
     """Persistent button keyed by match id, so matches keep working across restarts."""
 
@@ -65,6 +67,8 @@ class MatchButton(
 
 def match_components(view: MatchView) -> discord.ui.View | None:
     actions = {"lobby": LOBBY_ACTIONS, "active": ACTIVE_ACTIONS}.get(view.match.status)
+    if view.match.status == "finished" and view.match.mode == "duel":
+        actions = FINISHED_DUEL_ACTIONS
     if actions is None:
         return None
     ui = discord.ui.View(timeout=None)
@@ -112,6 +116,10 @@ class MatchCog(commands.Cog, name="Match"):
                 invited_id=invited_id,
                 rating_arg=rating,
             )
+        await self._post(interaction, view)
+
+    async def _post(self, interaction: discord.Interaction, view: MatchView) -> None:
+        """Send the match as a new message and remember it; retire the old one on a re-post."""
         ui = match_components(view)
         message = await interaction.followup.send(
             embed=match_embed(view), view=ui if ui is not None else discord.utils.MISSING, wait=True
@@ -197,6 +205,13 @@ class MatchCog(commands.Cog, name="Match"):
     async def on_button(self, interaction: discord.Interaction, action: str, match_id: int) -> None:
         await interaction.response.defer()
         svc = self.svc
+        if action == "rematch":
+            # A new lobby in a new message; the finished result stays as it is.
+            await self._post(
+                interaction,
+                await svc.rematch(match_id, interaction.user.id, interaction.channel_id),
+            )
+            return
         handlers = {
             "join": svc.join,
             "start": svc.start,
