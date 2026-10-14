@@ -1,5 +1,5 @@
 import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from src.cf.models import Contest, Problem, Submission
 from src.errors import BotError
@@ -13,6 +13,8 @@ CHOICE_MAX_LEN = 100
 LOBBY_TTL_SECONDS = 600
 MATCH_TTL_SECONDS = 7200
 MATCH_MAX_PLAYERS = 10
+START_RATING = 800
+ELO_K = 32
 
 
 def parse_tags(raw: str | None) -> frozenset[str]:
@@ -80,10 +82,6 @@ def round_rating(rating: int | None) -> int:
     return max(800, min(3500, (rating + 50) // 100 * 100))
 
 
-def problem_points(rating: int) -> int:
-    return max(1, (rating - 500) // 100)
-
-
 def earliest_solve(subs: Iterable[Submission], problem_key: str, since: int) -> int | None:
     times = [
         s.created
@@ -93,11 +91,11 @@ def earliest_solve(subs: Iterable[Submission], problem_key: str, since: int) -> 
     return min(times) if times else None
 
 
-def match_rating(rating_arg: int | None, ratings: Sequence[int | None]) -> int:
+def match_rating(rating_arg: int | None, ratings: Sequence[int]) -> int:
+    """Problem rating for a match: the host's choice, else the players' average match rating."""
     if rating_arg is not None:
         return rating_arg
-    known = [800 if r is None else r for r in ratings]
-    return round_rating(sum(known) // len(known))
+    return round_rating(sum(ratings) // len(ratings))
 
 
 def rank_groups(entries: Sequence[tuple[int, int | None]]) -> list[list[int]]:
@@ -114,30 +112,32 @@ def _round_away(x: float) -> int:
     return int(math.copysign(math.floor(abs(x) + 0.5), x))
 
 
-def placement_deltas(groups: Sequence[Sequence[int]], points: int) -> dict[int, int]:
-    """Top half gains points (1st gets all), bottom half loses (last loses all), middle gets 0.
+def _expected(rating: float, opponent: float) -> float:
+    return 1 / (1 + 10 ** ((opponent - rating) / 400))
 
-    Players in the same group share the average of the positions they occupy.
+
+def solo_delta(rating: int, problem_rating: int, solved: bool) -> int:
+    """Elo against the problem. Failing a solo match never costs rating."""
+    return _round_away(ELO_K * (1 - _expected(rating, problem_rating))) if solved else 0
+
+
+def elo_deltas(groups: Sequence[Sequence[int]], ratings: Mapping[int, int]) -> dict[int, int]:
+    """Pairwise Elo: each player is scored against every other player, then averaged.
+
+    groups is ordered best first; players in one group tie.
     """
     n = sum(len(g) for g in groups)
     if n < 2:
-        raise ValueError("a placement needs at least 2 players")
-    h = n // 2
-
-    def at(k: int) -> float:  # k is the 1-based position
-        if k <= h:
-            return points * (h - k + 1) / h
-        if k > n - h:
-            return -points * (k - (n - h)) / h
-        return 0.0
-
+        raise ValueError("a rated match needs at least 2 players")
+    place = {uid: i for i, g in enumerate(groups) for uid in g}
     out: dict[int, int] = {}
-    pos = 1
-    for group in groups:
-        avg = sum(at(k) for k in range(pos, pos + len(group))) / len(group)
-        for uid in group:
-            out[uid] = _round_away(avg)
-        pos += len(group)
+    for uid, mine in place.items():
+        total = 0.0
+        for other, theirs in place.items():
+            if other != uid:
+                result = 1.0 if mine < theirs else 0.5 if mine == theirs else 0.0
+                total += result - _expected(ratings[uid], ratings[other])
+        out[uid] = _round_away(ELO_K * total / (n - 1))
     return out
 
 

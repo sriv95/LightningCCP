@@ -102,13 +102,13 @@ def match_embed(view: MatchView) -> discord.Embed:
         embed.add_field(name="Players", value=status, inline=False)
         embed.add_field(name="Ends", value=f"<t:{m.expires_at}:R>", inline=False)
         return embed
-    totals = view.totals or {}
+    ratings = view.ratings or {}
     if all(p.solved_at is None for p in players) and all(not p.delta for p in players):
-        results = "Nobody solved it. No points changed."
+        results = "Nobody solved it. No ratings changed."
     else:
         ordered = sorted(players, key=lambda p: -(p.delta or 0))
         results = "\n".join(
-            f"{i}. <@{p.user_id}> {p.delta or 0:+d} (total {totals.get(p.user_id, 0)})"
+            f"{i}. <@{p.user_id}> {p.delta or 0:+d} (rating {ratings.get(p.user_id, 0)})"
             for i, p in enumerate(ordered, start=1)
         )
     embed.colour = discord.Colour.green()
@@ -126,7 +126,7 @@ def stats_embed(rows: Sequence[tuple[int, str, int, int]], me_id: int) -> discor
 
     def line(rank: int, row: tuple[int, str, int, int]) -> str:
         user_id, handle, total, played = row
-        text = f"{rank}. <@{user_id}> ({handle}) {total:+d} ({played} matches)"
+        text = f"{rank}. <@{user_id}> ({handle}) {total} ({played} matches)"
         return f"**{text}**" if user_id == me_id else text
 
     lines = [line(i, r) for i, r in enumerate(rows[:STATS_SIZE], 1)]

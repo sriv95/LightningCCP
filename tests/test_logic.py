@@ -5,18 +5,18 @@ from src.errors import BotError
 from src.logic import (
     chunked,
     earliest_solve,
+    elo_deltas,
     filter_problems,
     has_compile_error,
     match_rating,
     parse_minutes,
     parse_tags,
-    placement_deltas,
-    problem_points,
     rank_groups,
     refresh_minutes,
     reminders_due,
     round_rating,
     select_contests,
+    solo_delta,
     solved_keys,
     tag_suggestions,
     unsolved_keys,
@@ -87,12 +87,6 @@ def test_round_rating():
     assert round_rating(1850) == 1900
     assert round_rating(100) == 800
     assert round_rating(9999) == 3500
-
-
-def test_problem_points():
-    assert problem_points(800) == 3
-    assert problem_points(1400) == 9
-    assert problem_points(0) == 1
 
 
 def test_has_compile_error_in_window():
@@ -189,8 +183,8 @@ def test_match_rating():
     assert match_rating(1400, [800, 3000]) == 1400
     assert match_rating(None, [1000]) == 1000
     assert match_rating(None, [1000, 1900]) == 1500  # average 1450 rounds up to the nearest 100
-    assert match_rating(None, [None, 1000]) == 900  # unrated counts as 800
-    assert match_rating(None, [None]) == 800
+    assert match_rating(None, [800]) == 800
+    assert match_rating(None, [740]) == 800  # never below the lowest problem rating
     assert match_rating(None, [3500, 3500, 3500]) == 3500
 
 
@@ -201,44 +195,40 @@ def test_rank_groups_orders_by_solve_time_then_ties_non_solvers():
     assert rank_groups([(1, None), (2, None)]) == [[1, 2]]
 
 
-def test_placement_deltas_duel():
-    assert placement_deltas([[1], [2]], 9) == {1: 9, 2: -9}
+def test_solo_delta_elo_against_the_problem():
+    assert solo_delta(800, 800, True) == 16  # even odds: half of K
+    assert solo_delta(800, 1000, True) == 24  # harder problem pays more
+    assert solo_delta(1200, 800, True) == 3  # an easy problem pays little
+    assert solo_delta(800, 800, False) == 0  # failing never costs rating
 
 
-def test_placement_deltas_four_players_round_half_away_from_zero():
-    assert placement_deltas([[1], [2], [3], [4]], 9) == {1: 9, 2: 5, 3: -5, 4: -9}
+def test_elo_deltas_duel():
+    assert elo_deltas([[1], [2]], {1: 800, 2: 800}) == {1: 16, 2: -16}
+    assert elo_deltas([[1], [2]], {1: 800, 2: 1200}) == {1: 29, 2: -29}  # upset pays more
+    assert elo_deltas([[1], [2]], {1: 1200, 2: 800}) == {1: 3, 2: -3}
 
 
-def test_placement_deltas_odd_count_middle_gets_zero():
-    assert placement_deltas([[1], [2], [3]], 9) == {1: 9, 2: 0, 3: -9}
-    assert placement_deltas([[1], [2], [3], [4], [5]], 9) == {1: 9, 2: 5, 3: 0, 4: -5, 5: -9}
+def test_elo_deltas_three_players_equal_ratings():
+    r = {1: 800, 2: 800, 3: 800}
+    assert elo_deltas([[1], [2], [3]], r) == {1: 16, 2: 0, 3: -16}
 
 
-def test_placement_deltas_ties_share_average():
-    # Review Focus 4
-    assert placement_deltas([[1], [2, 3, 4]], 9) == {1: 9, 2: -3, 3: -3, 4: -3}
-    assert placement_deltas([[1], [2, 3]], 9) == {1: 9, 2: -5, 3: -5}  # (0 + -9) / 2 = -4.5
+def test_elo_deltas_ties_score_half():
+    r = {1: 800, 2: 800, 3: 800}
+    assert elo_deltas([[1], [2, 3]], r) == {1: 16, 2: -8, 3: -8}
+    assert elo_deltas([[1, 2]], {1: 800, 2: 800}) == {1: 0, 2: 0}
 
 
-def test_placement_deltas_sum_to_zero():
-    # Review Focus 4: without ties the top and bottom halves mirror exactly, so rounding keeps the sum at 0.
+def test_elo_deltas_equal_ratings_sum_to_zero():
     for n in range(2, 11):
-        groups = [[i] for i in range(n)]
-        for points in (1, 5, 9, 30):
-            deltas = placement_deltas(groups, points)
-            assert len(deltas) == n
-            assert sum(deltas.values()) == 0
-            assert deltas[0] == points and deltas[n - 1] == -points
+        deltas = elo_deltas([[i] for i in range(n)], dict.fromkeys(range(n), 1500))
+        assert len(deltas) == n and sum(deltas.values()) == 0
+        assert deltas[0] == 16 and deltas[n - 1] == -16
 
 
-def test_placement_deltas_ten_players_exact():
-    deltas = placement_deltas([[i] for i in range(10)], 10)
-    assert [deltas[i] for i in range(10)] == [10, 8, 6, 4, 2, -2, -4, -6, -8, -10]
-
-
-def test_placement_deltas_needs_two_players():
+def test_elo_deltas_needs_two_players():
     with pytest.raises(ValueError):
-        placement_deltas([[1]], 5)
+        elo_deltas([[1]], {1: 800})
 
 
 def test_unsolved_keys_attempted_not_solved_newest_first():

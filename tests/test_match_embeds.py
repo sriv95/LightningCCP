@@ -81,16 +81,16 @@ def test_active_embed_without_cached_problem_still_renders():
     assert "1700A" in text(match_embed(view))
 
 
-def test_finished_embed_lists_signed_deltas_and_totals():
+def test_finished_embed_lists_signed_deltas_and_ratings():
     view = MatchView(
         row(status="finished", problem_key="1700A", rating=1000),
         [player(10, solved_at=2100, delta=5), player(11, delta=-5)],
         problem=PROBLEM,
-        totals={10: 12, 11: -3},
+        ratings={10: 812, 11: 797},
     )
     out = text(match_embed(view))
     assert "+5" in out and "-5" in out
-    assert "total 12" in out and "total -3" in out
+    assert "rating 812" in out and "rating 797" in out
     assert "1. <@10> +5" in out and "2. <@11> -5" in out
 
 
@@ -99,7 +99,7 @@ def test_finished_embed_nobody_solved():
         row(status="finished", problem_key="1700A", rating=1000),
         [player(10, delta=0), player(11, delta=0)],
         problem=PROBLEM,
-        totals={10: 0, 11: 0},
+        ratings={10: 800, 11: 800},
         note="Time is up.",
     )
     out = text(match_embed(view))

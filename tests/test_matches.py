@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from src.cf.models import Problem, Submission, User
+from src.cf.models import Problem, Submission
 from src.db.store import Store
 from src.errors import (
     AlreadyInMatch,
@@ -16,19 +16,15 @@ from src.errors import (
 from src.logic import LOBBY_TTL_SECONDS, MATCH_TTL_SECONDS
 from src.matches import MatchService
 
-PROBLEM = Problem(1700, "A", "Foo", 1000, ())
+PROBLEM = Problem(1700, "A", "Foo", 800, ())
 GUILD = 1
 
 
 class FakeCF:
     def __init__(self):
-        self.ratings: dict[str, int | None] = {}
         self.subs: dict[str, list[Submission]] = {}
         self.errors: dict[str, Exception] = {}
         self.before_status = None  # optional async callable(handle), runs mid-fetch
-
-    async def user_info(self, handle):
-        return User(handle, self.ratings.get(handle, 1000), None, None)
 
     async def user_status(self, handle, count=None):
         await asyncio.sleep(0)  # yield, so concurrent requests interleave like real network calls
@@ -97,18 +93,18 @@ def deltas(view):
     return {p.user_id: p.delta for p in view.players}
 
 
-async def test_solo_solve_awards_points(env):
+async def test_solo_solve_raises_rating(env):
     svc, store, cf, clock = env
     view = await make(svc, 1, "solo", 1)
     assert view.match.status == "active"
-    assert (view.match.problem_key, view.match.rating) == ("1700A", 1000)
+    assert (view.match.problem_key, view.match.rating) == ("1700A", 800)
     assert view.problem == PROBLEM
     assert (await svc.check(view.match.id, 1)).match.status == "active"
     solve(cf, "h1", 1100)
     done = await svc.check(view.match.id, 1)
     assert done.match.status == "finished"
-    assert deltas(done) == {1: 5}
-    assert done.totals == {1: 5}
+    assert deltas(done) == {1: 16}  # even odds against an 800 problem
+    assert done.ratings == {1: 816}
     with pytest.raises(MatchClosed):
         await svc.check(view.match.id, 1)
     assert await svc.current(GUILD, 1) is None
@@ -269,8 +265,8 @@ async def test_duel_winner_is_earliest_solve_not_first_click(env):
     solve(cf, "h2", 1100)
     solve(cf, "h1", 1200)
     done = await svc.check(lobby.match.id, 1)  # player 1 clicks, player 2 solved first
-    assert deltas(done) == {2: 5, 1: -5}
-    assert done.totals == {2: 5, 1: -5}
+    assert deltas(done) == {2: 16, 1: -16}
+    assert done.ratings == {2: 816, 1: 784}
 
 
 async def test_duel_check_without_solves_keeps_running(env):
@@ -297,7 +293,7 @@ async def test_duel_give_up_is_a_forfeit(env):
     await svc.start(lobby.match.id, 1)
     done = await svc.give_up(lobby.match.id, 1)
     assert done.match.status == "finished"
-    assert deltas(done) == {1: -5, 2: 5}
+    assert deltas(done) == {1: -16, 2: 16}
 
 
 async def test_give_up_errors(env):
@@ -332,11 +328,11 @@ async def test_custom_ranks_by_solve_time_and_ties_non_solvers(env):
     assert (await svc.give_up(lobby.match.id, 3)).match.status == "active"
     done = await svc.give_up(lobby.match.id, 4)
     assert done.match.status == "finished"
-    assert deltas(done) == {2: 5, 1: 3, 3: -4, 4: -4}
-    assert done.totals == {1: 3, 2: 5, 3: -4, 4: -4}
+    assert deltas(done) == {2: 16, 1: 5, 3: -11, 4: -11}
+    assert done.ratings == {1: 805, 2: 816, 3: 789, 4: 789}
 
 
-async def test_custom_everyone_gave_up_moves_no_points(env):
+async def test_custom_everyone_gave_up_moves_no_ratings(env):
     svc, store, cf, clock = env
     lobby = await make(svc, 1, "custom", 3)
     await svc.join(lobby.match.id, 2)
@@ -346,7 +342,7 @@ async def test_custom_everyone_gave_up_moves_no_points(env):
     assert done.match.status == "finished" and deltas(done) == {1: 0, 2: 0}
 
 
-async def test_expiry_without_solvers_moves_no_points(env):
+async def test_expiry_without_solvers_moves_no_ratings(env):
     # Review Focus 3
     svc, store, cf, clock = env
     lobby = await make(svc, 1, "custom", 3)
@@ -373,7 +369,7 @@ async def test_expiry_ranks_solvers(env):
     solve(cf, "h2", 1500)
     clock.t += MATCH_TTL_SECONDS
     (view,) = await svc.expire_due()
-    assert deltas(view) == {2: 5, 1: -3, 3: -3}
+    assert deltas(view) == {2: 16, 1: -8, 3: -8}
 
 
 async def test_lobby_expiry_cancels(env):
@@ -400,8 +396,8 @@ async def test_concurrent_checks_score_once(env, monkeypatch):
     )
     assert not any(isinstance(r, Exception) and not isinstance(r, MatchClosed) for r in results)
     assert sorted(finishes) == [False, True]  # both reached finish; the guard let one through
-    assert await store.points_total(GUILD, 1) == 5
-    assert await store.points_total(GUILD, 2) == -5
+    assert await store.rating(GUILD, 1) == 816
+    assert await store.rating(GUILD, 2) == 784
 
 
 async def test_expiry_racing_check_scores_once(env, monkeypatch):
@@ -418,8 +414,8 @@ async def test_expiry_racing_check_scores_once(env, monkeypatch):
     )
     assert not any(isinstance(r, Exception) and not isinstance(r, MatchClosed) for r in results)
     assert sorted(finishes) == [False, True]
-    assert await store.points_total(GUILD, 1) == 5
-    assert await store.points_total(GUILD, 2) == -5
+    assert await store.rating(GUILD, 1) == 816
+    assert await store.rating(GUILD, 2) == 784
 
 
 async def test_concurrent_starts_start_once(env):
@@ -502,7 +498,7 @@ async def test_expiry_survives_a_failing_handle_lookup(env):
     clock.t += MATCH_TTL_SECONDS
     (view,) = await svc.expire_due()
     assert view.match.status == "finished"
-    assert deltas(view) == {2: 5, 1: -3, 3: -3}
+    assert deltas(view) == {2: 16, 1: -8, 3: -8}
     for uid in (1, 2, 3):
         assert await svc.current(GUILD, uid) is None
 
@@ -535,4 +531,4 @@ async def test_check_tolerates_another_players_failing_lookup(env):
     solve(cf, "h2", 1500)
     view = await svc.check(lobby.match.id, 2)
     assert view.match.status == "finished"
-    assert deltas(view) == {1: -5, 2: 5}
+    assert deltas(view) == {1: -16, 2: 16}

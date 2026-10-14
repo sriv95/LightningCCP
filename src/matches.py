@@ -12,11 +12,11 @@ from src.logic import (
     LOBBY_TTL_SECONDS,
     MATCH_TTL_SECONDS,
     earliest_solve,
+    elo_deltas,
     filter_problems,
     match_rating,
-    placement_deltas,
-    problem_points,
     rank_groups,
+    solo_delta,
     solved_keys,
 )
 
@@ -28,7 +28,7 @@ class MatchView:
     match: MatchRow
     players: list[MatchPlayer]
     problem: Problem | None = None
-    totals: dict[int, int] | None = None  # set only for finished matches
+    ratings: dict[int, int] | None = None  # new match ratings; set only for finished matches
     note: str | None = None
 
 
@@ -59,13 +59,12 @@ class MatchService:
         problem = None
         if match.problem_key:
             problem = next((p for p in self._problems.problems if p.key == match.problem_key), None)
-        totals = None
+        ratings = None
         if match.status == "finished":
-            totals = {
-                p.user_id: await self._store.points_total(match.guild_id, p.user_id)
-                for p in players
+            ratings = {
+                p.user_id: await self._store.rating(match.guild_id, p.user_id) for p in players
             }
-        return MatchView(match, players, problem, totals, note)
+        return MatchView(match, players, problem, ratings, note)
 
     async def _linked_handle(self, guild_id: int, user_id: int) -> str:
         linked = await self._store.get_handle(guild_id, user_id)
@@ -156,10 +155,9 @@ class MatchService:
         if match.mode != "solo" and len(players) < 2:
             raise BotError("You need at least 2 players to start.")
         problems = self._problems.require()
-        ratings: list[int | None] = []
+        ratings = [await self._store.rating(match.guild_id, p.user_id) for p in players]
         solved: set[str] = set()
         for p in players:
-            ratings.append((await self._cf.user_info(p.handle)).rating)
             solved |= solved_keys(await self._cf.user_status(p.handle))
         rating = match_rating(match.rating_arg, ratings)
         pool = filter_problems(
@@ -285,18 +283,19 @@ class MatchService:
         groups: list[list[int]] | None = None,
         note: str | None = None,
     ) -> MatchView:
-        points = problem_points(match.rating)
+        ratings = {p.user_id: await self._store.rating(match.guild_id, p.user_id) for p in players}
         any_solved = any(p.solved_at is not None for p in players)
         if match.mode == "solo":
-            deltas = {p.user_id: points if p.solved_at is not None else 0 for p in players}
+            (p,) = players
+            deltas = {
+                p.user_id: solo_delta(ratings[p.user_id], match.rating, p.solved_at is not None)
+            }
         elif groups is not None:
-            deltas = placement_deltas(groups, points)
+            deltas = elo_deltas(groups, ratings)
         elif not any_solved:
             deltas = {p.user_id: 0 for p in players}
         else:
-            deltas = placement_deltas(
-                rank_groups([(p.user_id, p.solved_at) for p in players]), points
-            )
+            deltas = elo_deltas(rank_groups([(p.user_id, p.solved_at) for p in players]), ratings)
         # False means another request already finished this match; show its result.
         await self._store.finish_match(match.id, self._now(), deltas)
         return await self._view(match.id, note=note)

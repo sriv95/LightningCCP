@@ -11,6 +11,7 @@ import aiosqlite
 
 from src.cf.models import Contest, Problem
 from src.errors import AlreadyInMatch, HandleTaken, MatchClosed, MatchFull
+from src.logic import START_RATING
 
 MIGRATIONS = [
     """
@@ -105,6 +106,8 @@ MIGRATIONS = [
     );
     CREATE UNIQUE INDEX one_active_match ON match_players (guild_id, user_id) WHERE active = 1;
     """,
+    # Points became Elo ratings: zero the old point changes so everyone restarts at 800.
+    "UPDATE match_players SET delta = 0 WHERE delta IS NOT NULL;",
 ]
 
 
@@ -449,24 +452,25 @@ class Store:
             await db.execute("UPDATE match_players SET active = 0 WHERE match_id = ?", (match_id,))
             return True
 
-    async def points_total(self, guild_id: int, user_id: int) -> int:
+    async def rating(self, guild_id: int, user_id: int) -> int:
+        """Match rating: the start rating plus every stored rating change."""
         row = await self._one(
             "SELECT COALESCE(SUM(delta), 0) FROM match_players "
             "WHERE guild_id = ? AND user_id = ? AND delta IS NOT NULL",
             (guild_id, user_id),
         )
-        return row[0]
+        return START_RATING + row[0]
 
     async def stats(self, guild_id: int) -> list[tuple[int, str, int, int]]:
-        """(user_id, handle, total points, finished matches), best first. Finished matches only."""
+        """(user_id, handle, match rating, finished matches), best rated first. Finished matches only."""
         rows = await self._all(
             "SELECT mp.user_id, COALESCE(uh.handle, MAX(mp.handle)) AS handle, "
-            "SUM(mp.delta) AS total, COUNT(*) AS played "
+            "? + SUM(mp.delta) AS total, COUNT(*) AS played "
             "FROM match_players mp "
             "LEFT JOIN user_handle uh ON uh.guild_id = mp.guild_id AND uh.user_id = mp.user_id "
             "WHERE mp.guild_id = ? AND mp.delta IS NOT NULL "
             "GROUP BY mp.user_id ORDER BY total DESC, played DESC, handle",
-            (guild_id,),
+            (START_RATING, guild_id),
         )
         return [(r["user_id"], r["handle"], r["total"], r["played"]) for r in rows]
 

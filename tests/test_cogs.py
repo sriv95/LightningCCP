@@ -89,7 +89,7 @@ def test_stats_embed_shows_caller_below_top_ten():
     rows = [(i, f"h{i}", 100 - i, 1) for i in range(1, 13)]
     desc = stats_embed(rows, 12).description
     assert desc.count("\n") == 11 and "1. <@1>" in desc and "10. <@10>" in desc
-    assert "11." not in desc and desc.endswith("**12. <@12> (h12) +88 (1 matches)**")
+    assert "11." not in desc and desc.endswith("**12. <@12> (h12) 88 (1 matches)**")
     in_top = stats_embed(rows, 2)
     assert "..." not in in_top.description and "**2. <@2>" in in_top.description
     assert stats_embed(rows, 99).footer.text == "You have no finished matches yet."

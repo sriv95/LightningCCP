@@ -121,14 +121,14 @@ class MatchCog(commands.Cog, name="Match"):
                 )
 
     @match.command(name="solo", description="Practice alone for points")
-    @app_commands.describe(rating="Problem rating (default: your rating)")
+    @app_commands.describe(rating="Problem rating (default: your match rating)")
     async def solo(self, interaction: discord.Interaction, rating: Rating | None = None) -> None:
         await self._create(interaction, "solo", 1, None, rating)
 
     @match.command(name="duel", description="Duel one other player for points")
     @app_commands.describe(
         opponent="Challenge this member (default: anyone can join)",
-        rating="Problem rating (default: average of the players)",
+        rating="Problem rating (default: average match rating of the players)",
     )
     async def duel(
         self,
@@ -143,7 +143,7 @@ class MatchCog(commands.Cog, name="Match"):
     @match.command(name="custom", description="A match for several players")
     @app_commands.describe(
         players="Maximum number of players",
-        rating="Problem rating (default: average of the players)",
+        rating="Problem rating (default: average match rating of the players)",
     )
     async def custom(
         self, interaction: discord.Interaction, players: Players, rating: Rating | None = None

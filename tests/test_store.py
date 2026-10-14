@@ -155,7 +155,7 @@ async def test_migration_2_drops_challenge_and_adds_match_tables(tmp_path):
     names = {r["name"] for r in await s._all("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert "challenge" not in names
     assert {"matches", "match_players"} <= names
-    assert (await s._one("PRAGMA user_version"))[0] == 2
+    assert (await s._one("PRAGMA user_version"))[0] == len(MIGRATIONS)
     await s.close()
 
 
@@ -323,12 +323,12 @@ async def test_finish_match_is_once(store):
     assert await store.finish_match(mid, 501, {1: 50, 2: -50}) is False
     assert {p.user_id: p.delta for p in await store.get_players(mid)} == {1: 5, 2: -5}
     assert (await store.get_match(mid)).status == "finished"
-    assert await store.points_total(1, 1) == 5
-    assert await store.points_total(1, 2) == -5
+    assert await store.rating(1, 1) == 805
+    assert await store.rating(1, 2) == 795
     assert await store.active_match_for(1, 1) is None
 
 
-async def test_points_total_sums_across_matches_and_guilds(store):
+async def test_rating_sums_across_matches_and_guilds(store):
     for _ in range(2):
         mid = await make_match(store, mode="solo", max_players=1)
         await store.start_match(mid, 1000, "1700A", 200, 7400, [1])
@@ -336,9 +336,9 @@ async def test_points_total_sums_across_matches_and_guilds(store):
     other = await make_match(store, guild=2, mode="solo", max_players=1)
     await store.start_match(other, 1000, "1700A", 200, 7400, [1])
     await store.finish_match(other, 500, {1: 7})
-    assert await store.points_total(1, 1) == 10
-    assert await store.points_total(2, 1) == 7
-    assert await store.points_total(1, 99) == 0
+    assert await store.rating(1, 1) == 810
+    assert await store.rating(2, 1) == 807
+    assert await store.rating(1, 99) == 800  # everyone starts at 800
 
 
 async def test_matches_due(store):
@@ -383,7 +383,7 @@ async def test_stats_orders_and_counts_finished_only(store):
         await store.start_match(mid, 1000, "1700A", 200, 7400, [1, 2])
         await store.finish_match(mid, 500, deltas)
     await make_match(store, host=3)  # lobby: not counted
-    assert await store.stats(1) == [(1, "h1", 3, 2), (2, "linked2", -3, 2)]
+    assert await store.stats(1) == [(1, "h1", 803, 2), (2, "linked2", 797, 2)]
     assert await store.stats(9) == []
 
 
@@ -392,3 +392,24 @@ async def test_linked_handles_lists_one_guild(store):
     await store.link_handle(1, 1, "a", None)
     await store.link_handle(2, 3, "c", None)
     assert sorted(await store.linked_handles(1)) == [(1, "a"), (2, "b")]
+
+
+async def test_migration_3_resets_old_points_to_start_rating(tmp_path):
+    path = tmp_path / "t.db"
+    db = await aiosqlite.connect(path)
+    await db.executescript(MIGRATIONS[0] + MIGRATIONS[1] + "\nPRAGMA user_version = 2;")
+    await db.execute(
+        "INSERT INTO matches (id, guild_id, channel_id, host_id, mode, max_players, status, "
+        "created_at) VALUES (1, 1, 1, 1, 'solo', 1, 'finished', 1)"
+    )
+    await db.execute(
+        "INSERT INTO match_players (match_id, guild_id, user_id, handle, joined_at, delta, active) "
+        "VALUES (1, 1, 1, 'h1', 1, 9, 0)"
+    )
+    await db.commit()
+    await db.close()
+    s = Store(path)
+    await s.connect()
+    assert await s.rating(1, 1) == 800
+    assert await s.stats(1) == [(1, "h1", 800, 1)]  # still counted as a finished match
+    await s.close()

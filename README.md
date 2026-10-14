@@ -26,17 +26,17 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/handle link <handle>` | Link a Codeforces handle; prove it by submitting a compile error |
 | `/handle show [member] [handle]` | Profile of a member (default: you) or of whoever linked a handle |
 | `/handle unlink` | Remove your link |
-| `/gimme [rating] [min_rating] [max_rating] [tags] [exclude_tags]` | Random problem, hides ones you solved |
-| `/match solo [rating]` | Practice alone with points |
+| `/gimme [rating] [min_rating] [max_rating] [tags] [exclude_tags]` | Random problem, hides ones you solved; with no rating arguments it aims at your match rating |
+| `/match solo [rating]` | Practice alone; solving raises your match rating |
 | `/match duel [opponent] [rating]` | 1v1 duel; name an opponent or let anyone join |
 | `/match custom players [rating]` | Match for 2-10 players; ranked by solve time |
-| `/stats` | Top 10 by match points, plus your own rank (private) |
+| `/stats` | Top 10 by match rating, plus your own rank (private) |
 | `/contests upcoming\|running\|recent` | Paginated contest lists |
 | `/stalk [handle] [member]` | Problems someone tried but never solved (private; default: you) |
 | `/ranklist contest_id` | Official standings of this server's linked members in a contest (private) |
 | `/remind set\|show\|clear` | Contest reminders (needs Manage Server) |
 
-A match is a public message. The lobby has Join, Start and Leave buttons; once the host presses Start, the problem appears with Check and Give Up buttons. Points are placement based and zero-sum for duels and custom matches.
+A match is a public message. The lobby has Join, Start and Leave buttons; once the host presses Start, the problem appears with Check and Give Up buttons. Everyone starts at a match rating of 800. With no `rating` argument, `/gimme` and `/match` pick a problem at your match rating (rounded to 100; the players' average for duel and custom). After a match, ratings change by Elo (K = 32): solo is you against the problem and only solving counts, while duel and custom compare every pair of players by solve time. Giving up or running out of time in solo never lowers your rating.
 
 ## Development
 

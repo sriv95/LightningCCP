@@ -8,6 +8,7 @@ from src.errors import BotError, NotLinked
 from src.logic import (
     filter_problems,
     parse_tags,
+    round_rating,
     solved_keys,
     tag_suggestions,
     unsolved_keys,
@@ -51,6 +52,12 @@ class ProblemsCog(commands.Cog, name="Problems"):
         solved = frozenset()
         if linked:
             solved = solved_keys(await s.cf.user_status(linked.handle))
+        footer = None if linked else "Link your handle with /handle link to hide solved problems."
+        if rating is None and min_rating is None and max_rating is None:
+            # No range given: aim at the caller's match rating.
+            mine = await s.db.rating(interaction.guild_id, interaction.user.id)
+            rating = round_rating(mine)
+            footer = f"Rating {rating} (from your match rating)." if linked else footer
         if rating is not None:
             min_rating = max_rating = rating
         pool = filter_problems(
@@ -63,7 +70,6 @@ class ProblemsCog(commands.Cog, name="Problems"):
         )
         if not pool:
             raise BotError("No problems match those filters.")
-        footer = None if linked else "Link your handle with /handle link to hide solved problems."
         await interaction.followup.send(embed=problem_embed(random.choice(pool), footer=footer))
 
     @gimme.autocomplete("tags")
