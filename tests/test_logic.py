@@ -10,8 +10,10 @@ from src.logic import (
     has_compile_error,
     match_deltas,
     match_rating,
+    ordinal,
     parse_minutes,
     parse_tags,
+    placement,
     rank_groups,
     rating_series,
     refresh_minutes,
@@ -262,3 +264,26 @@ def test_unsolved_keys_attempted_not_solved_newest_first():
 def test_rating_series_accumulates_from_the_start_rating():
     assert rating_series([(10, 49), (20, -16), (30, 0)]) == [(10, 849), (20, 833), (30, 833)]
     assert rating_series([]) == []
+
+
+def test_ordinal():
+    assert [ordinal(n) for n in (1, 2, 3, 4, 11, 12, 13, 21, 22, 102, 111)] == [
+        "1st",
+        "2nd",
+        "3rd",
+        "4th",
+        "11th",
+        "12th",
+        "13th",
+        "21st",
+        "22nd",
+        "102nd",
+        "111th",
+    ]
+
+
+def test_placement_by_rating_change():
+    deltas = [49, 16, -16, -49]
+    assert [placement(deltas, d) for d in deltas] == [1, 2, 3, 4]
+    assert placement([-25, 49, -25], -25) == 2  # ties share a place
+    assert placement([0, 0], 0) is None  # nobody solved

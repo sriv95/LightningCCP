@@ -3,8 +3,8 @@ from collections.abc import Sequence
 import discord
 
 from src.cf.models import Contest, Problem, User
-from src.db.store import MatchPlayer
-from src.logic import LOBBY_TTL_SECONDS, chunked
+from src.db.store import MatchPlayer, MatchRow
+from src.logic import LOBBY_TTL_SECONDS, chunked, ordinal, placement
 from src.matches import MatchView
 
 
@@ -191,4 +191,74 @@ def stalk_pages(
         )
         embed.set_footer(text=f"Page {i}/{len(groups)} - {len(items)} problems")
         pages.append(embed)
+    return pages
+
+
+MatchRecord = tuple[MatchRow, list[MatchPlayer]]
+
+
+def _history_line(
+    record: MatchRecord, me_id: int, by_key: dict[str, Problem], *, versus: bool = True
+) -> str:
+    match, players = record
+    me = next(p for p in players if p.user_id == me_id)
+    problem = by_key.get(match.problem_key or "")
+    name = f"[{problem.key}]({problem.url})" if problem else str(match.problem_key)
+    head = (
+        f"<t:{match.finished_at}:d> {_MODE_LABEL.get(match.mode, 'Custom')} {name} ({match.rating})"
+    )
+    if match.mode == "solo":
+        return f"{head} - {'solved' if me.solved_at is not None else 'not solved'}, {me.delta:+d}"
+    place = placement([p.delta or 0 for p in players], me.delta or 0)
+    result = "no result" if place is None else f"{ordinal(place)} of {len(players)}"
+    others = [f"<@{p.user_id}>" for p in players if p.user_id != me_id]
+    vs = f" vs {', '.join(others[:3])}{f' +{len(others) - 3}' if len(others) > 3 else ''}"
+    return f"{head}{vs if versus else ''} - {result}, {me.delta:+d}"
+
+
+def _line_pages(title: str, lines: Sequence[str], colour: discord.Colour) -> list[discord.Embed]:
+    return [
+        discord.Embed(title=title, description="\n".join(group), colour=colour)
+        for group in chunked(lines, 10)
+    ]
+
+
+def history_pages(
+    title: str, records: Sequence[MatchRecord], user_id: int, by_key: dict[str, Problem]
+) -> list[discord.Embed]:
+    """Newest first. Empty when there are no records."""
+    lines = [_history_line(r, user_id, by_key) for r in records]
+    return _line_pages(title, lines, discord.Colour.purple())
+
+
+def head_to_head_pages(
+    title: str,
+    records: Sequence[MatchRecord],
+    me_id: int,
+    other_id: int,
+    by_key: dict[str, Problem],
+) -> list[discord.Embed]:
+    """Matches both players finished, with the win/loss record by rating change. Never empty."""
+    shared = [r for r in records if any(p.user_id == other_id for p in r[1])]
+    if not shared:
+        return [discord.Embed(title=title, description="No matches against each other yet.")]
+    wins = losses = ties = 0
+    for _, players in shared:
+        mine = next(p for p in players if p.user_id == me_id).delta or 0
+        theirs = next(p for p in players if p.user_id == other_id).delta or 0
+        wins, losses, ties = (
+            wins + (mine > theirs),
+            losses + (mine < theirs),
+            ties + (mine == theirs),
+        )
+    summary = f"**Wins {wins}, losses {losses}, ties {ties}** ({len(shared)} matches)"
+    lines = [_history_line(r, me_id, by_key, versus=False) for r in shared]
+    pages = _line_pages(title, lines, discord.Colour.purple())
+    pages[0].description = f"{summary}\n{pages[0].description}"
+    return pages
+
+
+def number_pages(pages: list[discord.Embed]) -> list[discord.Embed]:
+    for i, page in enumerate(pages, start=1):
+        page.set_footer(text=f"Page {i}/{len(pages)}")
     return pages

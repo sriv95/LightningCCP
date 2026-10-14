@@ -9,7 +9,14 @@ from discord.ext import commands, tasks
 from src.errors import BotError, report_error
 from src.logic import MATCH_MAX_PLAYERS
 from src.matches import MatchView
-from src.ui.embeds import match_embed, stats_embed
+from src.ui.embeds import (
+    head_to_head_pages,
+    history_pages,
+    match_embed,
+    number_pages,
+    stats_embed,
+)
+from src.ui.paginator import send_pages
 
 log = logging.getLogger(__name__)
 
@@ -149,6 +156,35 @@ class MatchCog(commands.Cog, name="Match"):
         self, interaction: discord.Interaction, players: Players, rating: Rating | None = None
     ) -> None:
         await self._create(interaction, "custom", players, None, rating)
+
+    @match.command(name="history", description="Show finished matches")
+    @app_commands.describe(member="Defaults to you; also shows your matches against them")
+    async def history(
+        self, interaction: discord.Interaction, member: discord.Member | None = None
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        s = self.bot.services
+        me, guild_id = interaction.user, interaction.guild_id
+        by_key = {p.key: p for p in s.problems.problems}
+        mine = await s.db.finished_matches(guild_id, me.id)
+        if member is None or member.id == me.id:
+            pages = history_pages(f"Match history - {me.display_name}", mine, me.id, by_key)
+            if not pages:
+                raise BotError("You have no finished matches yet.")
+        else:
+            theirs = await s.db.finished_matches(guild_id, member.id)
+            pages = head_to_head_pages(
+                f"You vs {member.display_name}", mine, me.id, member.id, by_key
+            ) + (
+                history_pages(f"Match history - {member.display_name}", theirs, member.id, by_key)
+                or [
+                    discord.Embed(
+                        title=f"Match history - {member.display_name}",
+                        description="No finished matches yet.",
+                    )
+                ]
+            )
+        await send_pages(interaction, number_pages(pages))
 
     @app_commands.command(name="stats", description="Top match players in this server")
     @app_commands.guild_only()

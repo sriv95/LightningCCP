@@ -73,6 +73,19 @@ def solved_keys(subs: Iterable[Submission]) -> frozenset[str]:
     return frozenset(s.problem_key for s in subs if s.verdict == "OK")
 
 
+def ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def placement(deltas: Sequence[int], mine: int) -> int | None:
+    """1-based place of a player among a match's rating changes (ties share a place); None when
+    nobody's rating moved, which means nobody solved."""
+    if not any(deltas):
+        return None
+    return 1 + sum(d > mine for d in deltas)
+
+
 def rating_series(changes: Iterable[tuple[int, int]]) -> list[tuple[int, int]]:
     """(time, rating change) pairs, oldest first, to (time, rating after) from the start rating."""
     rating = START_RATING

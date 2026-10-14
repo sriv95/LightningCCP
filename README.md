@@ -30,6 +30,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/match solo [rating]` | Practice alone; solving raises your match rating |
 | `/match duel [opponent] [rating]` | 1v1 duel; name an opponent or let anyone join |
 | `/match custom players [rating]` | Match for 2-10 players; ranked by solve time |
+| `/match history [member]` | Your last 100 finished matches; with a member, also your record and matches against them (private) |
 | `/stats` | Top 10 by match rating, plus your own rank (private) |
 | `/plot rating [member] [handle]` | Graph of a member's match rating in this server (private; default: you) |
 | `/plot codeforces [member] [handle]` | Graph of a Codeforces rating history, any handle works (private; default: you) |

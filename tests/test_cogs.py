@@ -75,7 +75,7 @@ def test_contests_groups():
 
 
 def test_match_group_commands():
-    assert {c.name for c in MatchCog.match.commands} == {"solo", "duel", "custom"}
+    assert {c.name for c in MatchCog.match.commands} == {"solo", "duel", "custom", "history"}
     assert MatchCog.match.guild_only
 
 

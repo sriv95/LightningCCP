@@ -485,6 +485,28 @@ class Store:
         )
         return [(r["finished_at"], r["delta"]) for r in rows]
 
+    async def finished_matches(
+        self, guild_id: int, user_id: int, limit: int = 100
+    ) -> list[tuple[MatchRow, list[MatchPlayer]]]:
+        """The player's newest finished matches with all their players."""
+        rows = await self._all(
+            "SELECT m.* FROM matches m JOIN match_players mp ON mp.match_id = m.id "
+            "WHERE m.guild_id = ? AND mp.user_id = ? AND m.status = 'finished' "
+            "ORDER BY m.finished_at DESC, m.id DESC LIMIT ?",
+            (guild_id, user_id, limit),
+        )
+        if not rows:
+            return []
+        marks = ",".join("?" * len(rows))
+        players = await self._all(
+            f"SELECT * FROM match_players WHERE match_id IN ({marks}) ORDER BY joined_at, rowid",
+            [r["id"] for r in rows],
+        )
+        by_match: dict[int, list[MatchPlayer]] = {}
+        for row in players:
+            by_match.setdefault(row["match_id"], []).append(_player(row))
+        return [(_match(r), by_match.get(r["id"], [])) for r in rows]
+
     async def matches_due(self, lobby_before: int, now: int) -> list[MatchRow]:
         rows = await self._all(
             "SELECT * FROM matches WHERE (status = 'lobby' AND created_at <= ?) "

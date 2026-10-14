@@ -423,3 +423,22 @@ async def test_rating_changes_lists_finished_matches_oldest_first(store):
     await make_match(store, host=1)  # lobby: not counted
     assert await store.rating_changes(1, 1) == [(500, -2), (900, 5)]
     assert await store.rating_changes(1, 2) == [] and await store.rating_changes(2, 1) == []
+
+
+async def test_finished_matches_newest_first_with_players(store):
+    ids = []
+    for finished, delta in ((500, 10), (900, -3)):
+        mid = await make_match(store, mode="solo", max_players=1)
+        await store.start_match(mid, 100, "1700A", 200, 7400, [1])
+        await store.finish_match(mid, finished, {1: delta})
+        ids.append(mid)
+    duel = await make_match(store, host=2)
+    await store.add_player(duel, 1, 1, "h1", 101)
+    await store.start_match(duel, 100, "1700A", 200, 7400, [1, 2])
+    await store.finish_match(duel, 700, {1: 49, 2: -49})
+    await make_match(store, host=1)  # lobby: not listed
+    records = await store.finished_matches(1, 1)
+    assert [m.id for m, _ in records] == [ids[1], duel, ids[0]]
+    assert sorted((p.user_id, p.delta) for p in records[1][1]) == [(1, 49), (2, -49)]
+    assert len(await store.finished_matches(1, 1, limit=2)) == 2
+    assert await store.finished_matches(1, 3) == [] and await store.finished_matches(2, 1) == []

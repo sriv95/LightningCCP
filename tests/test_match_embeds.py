@@ -1,7 +1,7 @@
 from src.cf.models import Problem
 from src.db.store import MatchPlayer, MatchRow
 from src.matches import MatchView
-from src.ui.embeds import match_embed
+from src.ui.embeds import head_to_head_pages, history_pages, match_embed, number_pages
 
 PROBLEM = Problem(1700, "A", "Foo", 1000, ("dp",))
 
@@ -112,3 +112,50 @@ def test_cancelled_embed():
     assert "cancelled" in embed.title.lower()
     assert "host left" in embed.description
     assert "Host: <@10> | Duel" in embed.description
+
+
+def record(mode, finished, deltas, *, solved=()):
+    """(match, players) as the store returns them; deltas maps user id to rating change."""
+    match = row(status="finished", mode=mode, problem_key="1700A", rating=800, finished_at=finished)
+    players = [
+        player(uid, delta=delta, solved_at=100 if uid in solved else None)
+        for uid, delta in deltas.items()
+    ]
+    return match, players
+
+
+def test_history_pages_lines():
+    records = [
+        record("solo", 2000, {1: 10}, solved={1}),
+        record("solo", 1900, {1: 0}),
+        record("duel", 1800, {1: 49, 2: -49}, solved={1}),
+        record("custom", 1700, {1: -16, 2: 49, 3: 16}, solved={2, 3}),
+        record("duel", 1600, {1: 0, 2: 0}),
+    ]
+    pages = number_pages(history_pages("T", records, 1, {PROBLEM.key: PROBLEM}))
+    lines = pages[0].description.splitlines()
+    assert (
+        lines[0].endswith("- solved, +10") and f"[{PROBLEM.key}]({PROBLEM.url}) (800)" in lines[0]
+    )
+    assert lines[1].endswith("- not solved, +0")
+    assert lines[2].endswith("vs <@2> - 1st of 2, +49")
+    assert lines[3].endswith("vs <@2>, <@3> - 3rd of 3, -16")
+    assert lines[4].endswith("vs <@2> - no result, +0")
+    assert pages[0].footer.text == "Page 1/1"
+    assert history_pages("T", [], 1, {}) == []
+
+
+def test_head_to_head_record_and_lines():
+    records = [
+        record("duel", 3000, {1: 49, 2: -49}, solved={1}),
+        record("duel", 2000, {1: -16, 2: 16}, solved={2}),
+        record("custom", 1500, {1: 16, 2: -16, 3: 0}, solved={1}),
+        record("custom", 1400, {1: 5, 3: -5}, solved={1}),  # player 2 not in it
+        record("duel", 1300, {1: 0, 2: 0}),
+    ]
+    (page,) = head_to_head_pages("T", records, 1, 2, {})
+    lines = page.description.splitlines()
+    assert lines[0] == "**Wins 2, losses 1, ties 1** (4 matches)"
+    assert len(lines) == 5 and "vs" not in page.description
+    empty = head_to_head_pages("T", records[3:4], 1, 2, {})
+    assert empty[0].description == "No matches against each other yet."
