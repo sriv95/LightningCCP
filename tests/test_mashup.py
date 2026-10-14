@@ -609,3 +609,24 @@ async def test_team_virtual_contest_and_rematch(env):
     again = await svc.rematch(done.mashup.id, 2, 5)
     assert (again.mashup.contest_id, again.mashup.teams, again.mashup.team_size) == (500, 2, 2)
     assert [(p.user_id, p.team) for p in again.players] == [(2, 1)]
+
+
+async def test_tick_reads_the_stalest_players_within_the_budget(env, monkeypatch):
+    monkeypatch.setattr("src.mashup.MASHUP_READS_PER_TICK", 2)
+    svc, store, cf, clock = env
+    view = await started(svc, 2, 3, 4)
+    cf.calls.clear()
+    clock.t = 1060
+    await svc.tick()
+    assert cf.calls == ["h1", "h2"]  # nobody read yet: joining order
+    clock.t = 1120
+    await svc.tick()
+    assert cf.calls == ["h1", "h2", "h3", "h4"]  # the two read longest ago come next
+    clock.t = 1180
+    await svc.tick()
+    assert cf.calls[4:] == ["h1", "h2"]
+    cf.calls.clear()
+    clock.t = view.mashup.ends_at  # out of time: everyone is read, whatever the budget
+    await svc.tick()
+    assert sorted(cf.calls) == ["h1", "h2", "h3", "h4"]
+    assert (await svc.view(view.mashup.id)).mashup.status == "finished"

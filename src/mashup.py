@@ -13,6 +13,7 @@ from src.logic import (
     MASHUP_MAX_PROBLEMS,
     MASHUP_MAX_TEAM_SIZE,
     MASHUP_MAX_TEAMS,
+    MASHUP_READS_PER_TICK,
     MashupRank,
     first_solve,
     mashup_standings,
@@ -79,6 +80,7 @@ class MashupService:
         self._cf = cf
         self._problems = problems
         self._clock = clock
+        self._read_at: dict[tuple[int, int], int] = {}  # (contest, user) -> last read, in memory
 
     def _now(self) -> int:
         return int(self._clock())
@@ -327,25 +329,32 @@ class MashupService:
         return await self._store.record_mashup_solves(mashup.id, player.user_id, solves)
 
     async def tick(self) -> list[MashupView]:
-        """Cancels expired lobbies, refreshes active contests and ends the ones out of time.
-        Returns the contests whose message needs an update."""
+        """Cancels expired lobbies, reads the stalest players of running contests (at most
+        MASHUP_READS_PER_TICK, everyone in a contest that is out of time) and ends the contests
+        out of time. Returns the contests whose message needs an update."""
         now = self._now()
         views: list[MashupView] = []
+        running: list[MashupRow] = []
         for mashup in await self._store.mashups_in("lobby", "active"):
             try:
-                if mashup.status == "lobby":
-                    if now - mashup.created_at >= LOBBY_TTL_SECONDS and (
-                        await self._store.cancel_mashup(mashup.id)
-                    ):
-                        views.append(await self.view(mashup.id, note="The lobby expired."))
-                    continue
-                changed = await self._refresh_everyone(mashup)
+                if mashup.status == "active":
+                    running.append(mashup)
+                elif now - mashup.created_at >= LOBBY_TTL_SECONDS and (
+                    await self._store.cancel_mashup(mashup.id)
+                ):
+                    views.append(await self.view(mashup.id, note="The lobby expired."))
+            except Exception:
+                log.exception("Could not update mashup %s", mashup.id)
+        changed = await self._read_players(running, now)
+        for mashup in running:
+            try:
                 ended = now >= mashup.ends_at
                 if ended:
                     await self._store.finish_mashup(
                         mashup.id, await self._rating_changes(await self.view(mashup.id))
                     )
-                if changed or ended:
+                    self._read_at = {k: t for k, t in self._read_at.items() if k[0] != mashup.id}
+                if changed.get(mashup.id) or ended:
                     views.append(await self.view(mashup.id))
             except Exception:
                 log.exception("Could not update mashup %s", mashup.id)
@@ -370,18 +379,36 @@ class MashupService:
         changes = match_deltas([groups[k] for k in sorted(groups)], entrant_ratings)
         return {p.user_id: changes[p.team] for p in view.players}
 
-    async def _refresh_everyone(self, mashup: MashupRow) -> int:
-        changed = 0
-        total = len(await self._store.mashup_problems(mashup.id))
-        solves = await self._store.mashup_solves(mashup.id)
-        players = await self._store.mashup_players(mashup.id)
-        # a team that solved everything needs no more reads from any member
-        solves = team_solves(((p.user_id, p.team) for p in players), solves)
-        for player in players:
-            if len(solves.get(player.team, {})) >= total:
-                continue  # solved everything: nothing left to read, saves a Codeforces call
+    async def _read_players(self, running: list[MashupRow], now: int) -> dict[int, int]:
+        """Reads submissions and returns the new solves per contest. A contest out of time is read
+        in full (its last solves count); the others share the per-minute budget, the player read
+        longest ago first. A team that solved everything is not read."""
+        due: list[tuple[int, MashupRow, MashupPlayer]] = []
+        for mashup in running:
             try:
-                changed += await self._refresh(mashup, player)
+                total = len(await self._store.mashup_problems(mashup.id))
+                players = await self._store.mashup_players(mashup.id)
+                solves = team_solves(
+                    ((p.user_id, p.team) for p in players),
+                    await self._store.mashup_solves(mashup.id),
+                )
+            except Exception:
+                log.exception("Could not list the players of mashup %s", mashup.id)
+                continue
+            last = -1 if now >= mashup.ends_at else 0  # out of time: before everyone, no budget
+            for p in players:
+                if len(solves.get(p.team, {})) < total:
+                    due.append((last or self._read_at.get((mashup.id, p.user_id), 0), mashup, p))
+        due.sort(key=lambda d: d[0])  # stable: equal staleness keeps contest and joining order
+        budget = MASHUP_READS_PER_TICK
+        changed: dict[int, int] = {}
+        for stale, mashup, player in due:
+            if stale >= 0 and budget <= 0:
+                break
+            budget -= stale >= 0
+            self._read_at[(mashup.id, player.user_id)] = now
+            try:
+                changed[mashup.id] = changed.get(mashup.id, 0) + await self._refresh(mashup, player)
             except Exception:
                 # One unreachable handle must not stall the others or the ending.
                 log.warning("Skipping %s in mashup %s", player.handle, mashup.id, exc_info=True)
