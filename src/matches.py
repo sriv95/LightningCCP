@@ -128,8 +128,10 @@ class MatchService:
         players = await self._store.get_players(match_id)
         if user_id not in {p.user_id for p in players}:
             raise BotError("You are not in this match.")
-        if match.status != "lobby":
+        if match.status == "active":
             raise MatchClosed("The match already started. Use Give Up instead.")
+        if match.status != "lobby":
+            raise MatchClosed()
         if user_id == match.host_id:
             if not await self._store.cancel_match(match_id, self._now()):
                 raise MatchClosed()
@@ -188,7 +190,7 @@ class MatchService:
         me = next((p for p in players if p.user_id == user_id), None)
         if me is None or me.gave_up:
             raise BotError("You are not playing in this match.")
-        players = await self._refresh_solves(match, players)
+        players = await self._refresh_solves(match, players, tolerant=True, strict_user=user_id)
         return await self._maybe_finish(match, players)
 
     async def give_up(self, match_id: int, user_id: int) -> MatchView:
@@ -231,7 +233,12 @@ class MatchService:
         return views
 
     async def _refresh_solves(
-        self, match: MatchRow, players: list[MatchPlayer], *, tolerant: bool = False
+        self,
+        match: MatchRow,
+        players: list[MatchPlayer],
+        *,
+        tolerant: bool = False,
+        strict_user: int | None = None,
     ) -> list[MatchPlayer]:
         found: dict[int, int] = {}
         for p in players:
@@ -240,9 +247,9 @@ class MatchService:
             try:
                 subs = await self._cf.user_status(p.handle, count=100)
             except Exception:
-                if not tolerant:
+                if not tolerant or p.user_id == strict_user:
                     raise
-                # Expiry must still finish when one handle is persistently unreachable.
+                # One unreachable handle (e.g. renamed) must not block expiry or other players' Check.
                 log.warning(
                     "Skipping %s while expiring match %s", p.handle, match.id, exc_info=True
                 )

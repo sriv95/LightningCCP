@@ -246,6 +246,20 @@ async def test_leave_after_start_is_rejected(env):
         await svc.leave(lobby.match.id, 2)
 
 
+async def test_leave_message_depends_on_status(env):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "duel", 2)
+    await svc.join(lobby.match.id, 2)
+    await svc.start(lobby.match.id, 1)
+    with pytest.raises(MatchClosed, match="Give Up"):
+        await svc.leave(lobby.match.id, 2)
+    solve(cf, "h2", 1500)
+    await svc.check(lobby.match.id, 2)  # finished
+    with pytest.raises(MatchClosed) as exc:
+        await svc.leave(lobby.match.id, 2)
+    assert "Give Up" not in exc.value.user_message
+
+
 async def test_duel_winner_is_earliest_solve_not_first_click(env):
     # Review Focus 4
     svc, store, cf, clock = env
@@ -510,3 +524,15 @@ async def test_set_message_is_reflected(env):
     await svc.set_message(lobby.match.id, 77, 88)
     current = await svc.current(GUILD, 1)
     assert (current.match.channel_id, current.match.message_id) == (77, 88)
+
+
+async def test_check_tolerates_another_players_failing_lookup(env):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "duel", 2)
+    await svc.join(lobby.match.id, 2)
+    await svc.start(lobby.match.id, 1)
+    cf.errors["h1"] = HandleNotFound()  # the opponent renamed their handle
+    solve(cf, "h2", 1500)
+    view = await svc.check(lobby.match.id, 2)
+    assert view.match.status == "finished"
+    assert deltas(view) == {1: -5, 2: 5}

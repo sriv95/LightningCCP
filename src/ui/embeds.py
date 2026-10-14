@@ -75,7 +75,10 @@ def match_embed(view: MatchView) -> discord.Embed:
     if m.status == "cancelled":
         return discord.Embed(
             title="Match cancelled",
-            description=view.note or "The match was cancelled.",
+            description=(
+                f"{view.note or 'The match was cancelled.'}\n"
+                f"Host: <@{m.host_id}> | {_mode_label(view)}"
+            ),
             colour=discord.Colour.red(),
         )
     if m.status == "lobby":
@@ -105,7 +108,8 @@ def match_embed(view: MatchView) -> discord.Embed:
     else:
         ordered = sorted(players, key=lambda p: -(p.delta or 0))
         results = "\n".join(
-            f"<@{p.user_id}> {p.delta or 0:+d} (total {totals.get(p.user_id, 0)})" for p in ordered
+            f"{i}. <@{p.user_id}> {p.delta or 0:+d} (total {totals.get(p.user_id, 0)})"
+            for i, p in enumerate(ordered, start=1)
         )
     embed.colour = discord.Colour.green()
     embed.add_field(name="Results", value=results, inline=False)

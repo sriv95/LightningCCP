@@ -91,6 +91,7 @@ def test_finished_embed_lists_signed_deltas_and_totals():
     out = text(match_embed(view))
     assert "+5" in out and "-5" in out
     assert "total 12" in out and "total -3" in out
+    assert "1. <@10> +5" in out and "2. <@11> -5" in out
 
 
 def test_finished_embed_nobody_solved():
@@ -110,3 +111,4 @@ def test_cancelled_embed():
     embed = match_embed(view)
     assert "cancelled" in embed.title.lower()
     assert "host left" in embed.description
+    assert "Host: <@10> | Duel" in embed.description
