@@ -392,3 +392,64 @@ async def test_player_cap_is_chosen_by_the_host(env):
         with pytest.raises(BotError, match="1 to 20"):
             await lobby(svc, host=4, max_players=bad)
     assert (await lobby(svc, host=3)).mashup.max_players == MASHUP_MAX_PLAYERS  # default
+
+
+async def finish_contest(svc, cf, clock, view, solves):
+    """solves: {handle: [(problem index, time)]}; then run past the end."""
+    keys = [k for k, _ in view.problems]
+    for handle, found in solves.items():
+        for index, at in found:
+            sub(cf, handle, keys[index], at)
+    clock.t = view.mashup.ends_at
+    await svc.tick()
+    return await svc.view(view.mashup.id)
+
+
+async def test_history_lists_finished_contests_with_the_users_place(env):
+    from src.ui.embeds import history_pages
+
+    svc, store, cf, clock = env
+    view = await started(svc, 2, 3)
+    done = await finish_contest(
+        svc, cf, clock, view, {"h1": [(0, 1100)], "h2": [(0, 1100), (1, 1200)]}
+    )
+    assert done.mashup.status == "finished"
+    records = await svc.history(GUILD, 1)
+    assert [(r.rank, r.entrants, r.solved, r.team) for r in records] == [(2, 3, 1, None)]
+    assert [r.rank for r in await svc.history(GUILD, 3)] == [3]  # nothing solved ranks last
+    assert await svc.history(GUILD, 4) == []
+    page = history_pages("t", [], 1, {}, records)[0].description
+    assert page.endswith("Mashup - 2nd of 3, 1/3 solved")
+    nothing = history_pages("t", [], 3, {}, await svc.history(GUILD, 3))[0].description
+    assert nothing.endswith("Mashup - nothing solved, 0/3 solved")
+
+
+async def test_history_of_a_team_contest_shows_the_team_place(env):
+    from src.ui.embeds import history_pages
+
+    svc, store, cf, clock = env
+    lobby_view = await team_lobby(svc)
+    mid = lobby_view.mashup.id
+    await svc.join(mid, 2, 2)
+    await svc.join(mid, 3, 2)
+    view = await svc.start(mid, 1)
+    await finish_contest(svc, cf, clock, view, {"h3": [(0, 1100)]})
+    (record,) = await svc.history(GUILD, 2)
+    assert (record.rank, record.entrants, record.solved, record.team) == (1, 2, 1, 2)
+    line = history_pages("t", [], 2, {}, [record])[0].description
+    assert line.endswith("Team mashup (team 2) - 1st of 2, 1/3 solved")
+
+
+def test_history_pages_merges_matches_and_mashups_newest_first():
+    from src.db.store import MashupRow
+    from src.mashup import MashupRecord
+    from src.ui.embeds import history_pages
+    from tests.test_match_embeds import player, row
+
+    match = row(mode="solo", status="finished", rating=800, problem_key="1A", finished_at=2000)
+    solo = [player(10, solved_at=1500, delta=10)]
+    mashup = MashupRow(1, 1, 5, None, 10, 800, 1200, 3, 7200, 0, "finished", 0, 0, 3000)
+    new = MashupRecord(mashup, 1, 4, 3, None)
+    pages = history_pages("t", [(match, solo)], 10, {}, [new])
+    lines = pages[0].description.splitlines()
+    assert "Mashup - 1st of 4" in lines[0] and "Solo" in lines[1]

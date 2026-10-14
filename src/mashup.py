@@ -50,6 +50,17 @@ class MashupView:
         )
 
 
+@dataclass(frozen=True)
+class MashupRecord:
+    """How one player (or their team) did in a finished contest."""
+
+    mashup: MashupRow
+    rank: int
+    entrants: int  # players, or teams in a team contest
+    solved: int
+    team: int | None
+
+
 class MashupService:
     """Timed multi-problem contests: a lobby, then a start by the host (no late joiners). Solves
     come from Codeforces submissions made between the start and the end; the standings rank by
@@ -77,6 +88,17 @@ class MashupService:
             await self._store.mashup_solves(mashup_id),
             note,
         )
+
+    async def history(self, guild_id: int, user_id: int, limit: int = 50) -> list[MashupRecord]:
+        """The user's newest finished contests with their place, newest first."""
+        records = []
+        for mashup in await self._store.finished_mashups(guild_id, user_id, limit):
+            view = await self.view(mashup.id)
+            me = next(p for p in view.players if p.user_id == user_id)
+            ranks = view.standings
+            mine = next(r for r in ranks if r.user_id == (me.team if mashup.teams else user_id))
+            records.append(MashupRecord(mashup, mine.rank, len(ranks), mine.solved, me.team))
+        return records
 
     async def set_message(self, mashup_id: int, channel_id: int, message_id: int) -> None:
         await self._store.set_mashup_message(mashup_id, channel_id, message_id)

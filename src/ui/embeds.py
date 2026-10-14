@@ -13,7 +13,7 @@ from src.logic import (
     ordinal,
     placement,
 )
-from src.mashup import MashupView
+from src.mashup import MashupRecord, MashupView
 from src.matches import MatchView
 
 
@@ -290,12 +290,25 @@ def _line_pages(title: str, lines: Sequence[str], colour: discord.Colour) -> lis
     ]
 
 
+def _mashup_history_line(record: MashupRecord) -> str:
+    m = record.mashup
+    kind = f"Team mashup (team {record.team})" if m.teams else "Mashup"
+    place = f"{ordinal(record.rank)} of {record.entrants}" if record.solved else "nothing solved"
+    return f"<t:{m.ends_at}:d> {kind} - {place}, {record.solved}/{m.count} solved"
+
+
 def history_pages(
-    title: str, records: Sequence[MatchRecord], user_id: int, by_key: dict[str, Problem]
+    title: str,
+    records: Sequence[MatchRecord],
+    user_id: int,
+    by_key: dict[str, Problem],
+    mashups: Sequence[MashupRecord] = (),
 ) -> list[discord.Embed]:
-    """Newest first. Empty when there are no records."""
-    lines = [_history_line(r, user_id, by_key) for r in records]
-    return _line_pages(title, lines, discord.Colour.purple())
+    """Matches and finished mashups together, newest first. Empty when there are none."""
+    entries = [(r[0].finished_at, _history_line(r, user_id, by_key)) for r in records]
+    entries += [(r.mashup.ends_at, _mashup_history_line(r)) for r in mashups]
+    entries.sort(key=lambda e: -e[0])  # stable: equal times keep matches first
+    return _line_pages(title, [line for _, line in entries], discord.Colour.purple())
 
 
 def head_to_head_pages(

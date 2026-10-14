@@ -30,7 +30,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/match solo [rating] [tags] [exclude_tags]` | Practice alone; solving raises your match rating |
 | `/match duel [opponent] [rating] [tags] [exclude_tags]` | 1v1 duel; name an opponent or let anyone join |
 | `/match custom players [rating] [tags] [exclude_tags]` | Match for 2-10 players; ranked by solve time |
-| `/match history [member]` | Your last 100 finished matches; with a member, also your record and matches against them (private) |
+| `/match history [member]` | Your last 100 finished matches and your last 50 finished mashups, newest first, with your place; with a member, also your record and matches against them (private) |
 | `/mashup contest [min_rating] [max_rating] [count] [hour] [minute] [penalty] [players]` | Timed contest of several problems (default 5 problems, 800-1500, 2h, no penalty, up to 20 players) with a live scoreboard |
 | `/mashup team-contest [teams] [min_rating] [max_rating] [count] [hour] [minute] [penalty]` | The same contest for teams (`teams` 2-10, default 2; the host starts in team 1). Join opens a form asking for a team number |
 | `/stats [sort]` | Top 10 by match rating (`sort: streak` ranks by daily streak instead), plus your own rank; a fire emoji and number marks a daily streak (private) |

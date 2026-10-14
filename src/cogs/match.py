@@ -221,19 +221,31 @@ class MatchCog(commands.Cog, name="Match"):
         by_key = {p.key: p for p in s.problems.problems}
         mine = await s.db.finished_matches(guild_id, me.id)
         if member is None or member.id == me.id:
-            pages = history_pages(f"Match history - {me.display_name}", mine, me.id, by_key)
+            pages = history_pages(
+                f"Match history - {me.display_name}",
+                mine,
+                me.id,
+                by_key,
+                await s.mashups.history(guild_id, me.id),
+            )
             if not pages:
-                raise BotError("You have no finished matches yet.")
+                raise BotError("You have no finished matches or mashups yet.")
         else:
             theirs = await s.db.finished_matches(guild_id, member.id)
             pages = head_to_head_pages(
                 f"You vs {member.display_name}", mine, me.id, member.id, by_key
             ) + (
-                history_pages(f"Match history - {member.display_name}", theirs, member.id, by_key)
+                history_pages(
+                    f"Match history - {member.display_name}",
+                    theirs,
+                    member.id,
+                    by_key,
+                    await s.mashups.history(guild_id, member.id),
+                )
                 or [
                     discord.Embed(
                         title=f"Match history - {member.display_name}",
-                        description="No finished matches yet.",
+                        description="No finished matches or mashups yet.",
                     )
                 ]
             )

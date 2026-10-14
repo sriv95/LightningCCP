@@ -893,6 +893,18 @@ class Store:
             (channel_id, message_id, mashup_id),
         )
 
+    async def finished_mashups(
+        self, guild_id: int, user_id: int, limit: int = 50
+    ) -> list[MashupRow]:
+        """The newest finished contests the user played in."""
+        rows = await self._all(
+            "SELECT m.* FROM mashups m JOIN mashup_players mp ON mp.mashup_id = m.id "
+            "WHERE m.guild_id = ? AND mp.user_id = ? AND m.status = 'finished' "
+            "ORDER BY m.ends_at DESC, m.id DESC LIMIT ?",
+            (guild_id, user_id, limit),
+        )
+        return [MashupRow(**dict(r)) for r in rows]
+
     async def mashup_problems(self, mashup_id: int) -> list[tuple[str, int]]:
         rows = await self._all(
             "SELECT problem_key, rating FROM mashup_problems WHERE mashup_id = ? ORDER BY idx",
