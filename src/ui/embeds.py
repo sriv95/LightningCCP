@@ -272,29 +272,54 @@ def number_pages(pages: list[discord.Embed]) -> list[discord.Embed]:
     return pages
 
 
+def _mashup_setup(view: MashupView) -> str:
+    m = view.mashup
+    penalty = f"{m.penalty_minutes} min per wrong attempt" if m.penalty_minutes else "no penalty"
+    return (
+        f"{m.count} problems rated {m.min_rating}-{m.max_rating}, "
+        f"{format_hm(m.duration_seconds)} long, {penalty}"
+    )
+
+
 def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
     m = view.mashup
+    players = f"{len(view.players)}/{MASHUP_MAX_PLAYERS} players"
+    if m.status == "cancelled":
+        return discord.Embed(
+            title="Mashup cancelled",
+            description=f"{view.note or 'The contest was cancelled.'}\nHost: <@{m.host_id}>",
+            colour=discord.Colour.red(),
+        )
+    if m.status == "lobby":
+        names = "\n".join(f"<@{p.user_id}> ({p.handle})" for p in view.players)
+        return discord.Embed(
+            title="Mashup lobby",
+            description=(
+                f"Host: <@{m.host_id}>\n{_mashup_setup(view)}\n{players}:\n{names}\n"
+                f"Expires <t:{m.created_at + LOBBY_TTL_SECONDS}:R>. "
+                "The host presses Start; nobody can join after that."
+            ),
+            colour=discord.Colour.blurple(),
+        )
     letters = {key: chr(ord("A") + i) for i, (key, _) in enumerate(view.problems)}
-    when = f"Ended <t:{m.ends_at}:f>" if m.status == "finished" else f"Ends <t:{m.ends_at}:R>"
-    lines = [
-        f"Started by <@{m.host_id}> | {len(view.players)}/{MASHUP_MAX_PLAYERS} players | {when}",
-        "",
-        "**Problems**",
-    ]
+    finished = m.status == "finished"
+    when = f"Ended <t:{m.ends_at}:f>" if finished else f"Ends <t:{m.ends_at}:R>"
+    lines = [f"Host: <@{m.host_id}> | {_mashup_setup(view)} | {when}", "", "**Problems**"]
     for key, rating in view.problems:
         problem = by_key.get(key)
         name = f"[{key} {problem.name}]({problem.url})" if problem else key
         lines.append(f"{letters[key]}. {name} ({rating})")
     lines += ["", "**Standings**"]
     for r in view.standings:
+        done = sorted(r.times.items(), key=lambda kt: kt[1])
         solved = ", ".join(
-            f"{letters[k]} {t // 60}m" for k, t in sorted(r.times.items(), key=lambda kt: kt[1])
+            f"{letters[k]} {t // 60}m" + (f" ({r.wrong[k]} wrong)" if r.wrong[k] else "")
+            for k, t in done
         )
         detail = f" ({solved})" if solved else ""
         lines.append(
             f"{r.rank}. {r.handle} - {r.solved} solved, {format_hm(r.total_seconds)}{detail}"
         )
-    finished = m.status == "finished"
     return discord.Embed(
         title="Mashup contest - final standings" if finished else "Mashup contest",
         description="\n".join(lines),

@@ -41,7 +41,7 @@ class CacheNotReady(BotError):
 class AlreadyInMatch(BotError):
     def __init__(self):
         super().__init__(
-            "You are already in a match. Finish it, give up, or leave the lobby first."
+            "You are already in a match or contest. Finish it, give up, or leave the lobby first."
         )
 
 

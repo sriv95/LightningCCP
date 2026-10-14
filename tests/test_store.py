@@ -442,3 +442,32 @@ async def test_finished_matches_newest_first_with_players(store):
     assert sorted((p.user_id, p.delta) for p in records[1][1]) == [(1, 49), (2, -49)]
     assert len(await store.finished_matches(1, 1, limit=2)) == 2
     assert await store.finished_matches(1, 3) == [] and await store.finished_matches(2, 1) == []
+
+
+async def test_migration_5_rebuilds_the_mashup_tables(tmp_path):
+    path = tmp_path / "t.db"
+    db = await aiosqlite.connect(path)
+    await db.executescript("\n".join(MIGRATIONS[:4]) + "\nPRAGMA user_version = 4;")
+    await db.execute(
+        "INSERT INTO mashups (guild_id, channel_id, host_id, started_at, ends_at, status) "
+        "VALUES (1, 1, 1, 1, 2, 'active')"
+    )
+    await db.commit()
+    await db.close()
+    s = Store(path)
+    await s.connect()
+    assert await s.mashups_in("lobby", "active", "finished", "cancelled") == []
+    mid = await s.create_mashup(
+        guild_id=1,
+        channel_id=1,
+        host_id=1,
+        host_handle="h",
+        min_rating=800,
+        max_rating=1500,
+        count=5,
+        duration_seconds=7200,
+        penalty_minutes=0,
+        now=10,
+    )
+    assert (await s.get_mashup(mid)).status == "lobby"
+    await s.close()

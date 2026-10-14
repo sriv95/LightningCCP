@@ -16,12 +16,16 @@ Rating = app_commands.Range[int, 800, 3500]
 
 BUTTONS = {
     "join": ("Join", discord.ButtonStyle.success),
+    "start": ("Start", discord.ButtonStyle.primary),
+    "leave": ("Leave", discord.ButtonStyle.secondary),
     "check": ("Check", discord.ButtonStyle.primary),
 }
+ACTIONS = {"lobby": ("join", "start", "leave"), "active": ("check",)}
 
 
 class MashupButton(
-    discord.ui.DynamicItem[discord.ui.Button], template=r"mashup:(?P<action>join|check):(?P<id>\d+)"
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"mashup:(?P<action>join|start|leave|check):(?P<id>\d+)",
 ):
     """Persistent button keyed by contest id, so contests keep working across restarts."""
 
@@ -49,10 +53,11 @@ class MashupButton(
 
 
 def mashup_components(view: MashupView) -> discord.ui.View | None:
-    if view.mashup.status != "active":
+    actions = ACTIONS.get(view.mashup.status)
+    if actions is None:
         return None
     ui = discord.ui.View(timeout=None)
-    for action in BUTTONS:
+    for action in actions:
         ui.add_item(MashupButton(action, view.mashup.id))
     return ui
 
@@ -80,13 +85,14 @@ class MashupCog(commands.Cog, name="Mashup"):
         self.tick_loop.cancel()
         self.bot.remove_dynamic_items(MashupButton)
 
-    @mashup.command(name="contest", description="Start a timed contest with a live scoreboard")
+    @mashup.command(name="contest", description="Open a timed contest lobby with a live scoreboard")
     @app_commands.describe(
         min_rating="Easiest problem rating (default 800)",
         max_rating="Hardest problem rating (default 1500)",
         count="Number of problems (default 5)",
         hour="Hours the contest lasts (default 2)",
         minute="Extra minutes (default 0)",
+        penalty="Minutes added per wrong attempt before a solve (default 0)",
     )
     async def contest(
         self,
@@ -96,6 +102,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         count: app_commands.Range[int, 1, MASHUP_MAX_PROBLEMS] = 5,
         hour: app_commands.Range[int, 0, 24] = 2,
         minute: app_commands.Range[int, 0, 59] = 0,
+        penalty: app_commands.Range[int, 0, 120] = 0,
     ) -> None:
         await interaction.response.defer()
         view = await self.svc.create(
@@ -106,6 +113,7 @@ class MashupCog(commands.Cog, name="Mashup"):
             max_rating=max_rating,
             count=count,
             duration_seconds=hour * 3600 + minute * 60,
+            penalty_minutes=penalty,
         )
         message = await interaction.followup.send(
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view), wait=True
@@ -116,8 +124,13 @@ class MashupCog(commands.Cog, name="Mashup"):
         self, interaction: discord.Interaction, action: str, mashup_id: int
     ) -> None:
         await interaction.response.defer()
-        handler = self.svc.join if action == "join" else self.svc.check
-        view = await handler(mashup_id, interaction.user.id)
+        handlers = {
+            "join": self.svc.join,
+            "start": self.svc.start,
+            "leave": self.svc.leave,
+            "check": self.svc.check,
+        }
+        view = await handlers[action](mashup_id, interaction.user.id)
         await interaction.edit_original_response(
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view)
         )

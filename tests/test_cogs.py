@@ -135,5 +135,6 @@ def test_mashup_group_commands_and_button_template():
     assert {c.name for c in MashupCog.mashup.commands} == {"contest"}
     assert MashupCog.mashup.guild_only
     template = MashupButton.__discord_ui_compiled_template__
-    assert template.fullmatch("mashup:join:7") and template.fullmatch("mashup:check:7")
+    for action in ("join", "start", "leave", "check"):
+        assert template.fullmatch(f"mashup:{action}:7")
     assert not template.fullmatch("mashup:other:7")

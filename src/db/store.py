@@ -142,6 +142,55 @@ MIGRATIONS = [
         PRIMARY KEY (mashup_id, user_id, problem_key)
     );
     """,
+    # Mashup contests got a lobby, a penalty and a one-activity-per-user rule: rebuild their tables.
+    """
+    DROP TABLE mashup_solves;
+    DROP TABLE mashup_players;
+    DROP TABLE mashup_problems;
+    DROP TABLE mashups;
+    CREATE TABLE mashups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        channel_id INTEGER NOT NULL,
+        message_id INTEGER,
+        host_id INTEGER NOT NULL,
+        min_rating INTEGER NOT NULL,
+        max_rating INTEGER NOT NULL,
+        count INTEGER NOT NULL,
+        duration_seconds INTEGER NOT NULL,
+        penalty_minutes INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('lobby', 'active', 'finished', 'cancelled')),
+        created_at INTEGER NOT NULL,
+        started_at INTEGER,
+        ends_at INTEGER
+    );
+    CREATE INDEX mashups_status ON mashups (status);
+    CREATE TABLE mashup_problems (
+        mashup_id INTEGER NOT NULL REFERENCES mashups (id),
+        idx INTEGER NOT NULL,
+        problem_key TEXT NOT NULL,
+        rating INTEGER NOT NULL,
+        PRIMARY KEY (mashup_id, idx)
+    );
+    CREATE TABLE mashup_players (
+        mashup_id INTEGER NOT NULL REFERENCES mashups (id),
+        guild_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        handle TEXT NOT NULL,
+        joined_at INTEGER NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (mashup_id, user_id)
+    );
+    CREATE UNIQUE INDEX one_active_mashup ON mashup_players (guild_id, user_id) WHERE active = 1;
+    CREATE TABLE mashup_solves (
+        mashup_id INTEGER NOT NULL REFERENCES mashups (id),
+        user_id INTEGER NOT NULL,
+        problem_key TEXT NOT NULL,
+        solved_at INTEGER NOT NULL,
+        wrong INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (mashup_id, user_id, problem_key)
+    );
+    """,
 ]
 
 
@@ -198,9 +247,15 @@ class MashupRow:
     channel_id: int
     message_id: int | None
     host_id: int
-    started_at: int
-    ends_at: int
+    min_rating: int
+    max_rating: int
+    count: int
+    duration_seconds: int
+    penalty_minutes: int
     status: str
+    created_at: int
+    started_at: int | None
+    ends_at: int | None
 
 
 @dataclass(frozen=True)
@@ -358,6 +413,8 @@ class Store:
     ) -> int:
         try:
             async with self._tx() as db:
+                if await self._in_mashup(db, guild_id, host_id):
+                    raise AlreadyInMatch()
                 cur = await db.execute(
                     "INSERT INTO matches (guild_id, channel_id, host_id, mode, max_players, "
                     "invited_id, rating_arg, status, created_at) "
@@ -415,6 +472,8 @@ class Store:
                 )
                 if (await cur.fetchone())[0] >= match["max_players"]:
                     raise MatchFull()
+                if await self._in_mashup(db, guild_id, user_id):
+                    raise AlreadyInMatch()
                 await db.execute(
                     "INSERT INTO match_players (match_id, guild_id, user_id, handle, joined_at) "
                     "VALUES (?, ?, ?, ?, ?)",
@@ -569,6 +628,22 @@ class Store:
         return [_match(r) for r in rows]
 
     # --- mashup contests ---
+    @staticmethod
+    async def _in_mashup(db: aiosqlite.Connection, guild_id: int, user_id: int) -> bool:
+        cur = await db.execute(
+            "SELECT 1 FROM mashup_players WHERE guild_id = ? AND user_id = ? AND active = 1",
+            (guild_id, user_id),
+        )
+        return await cur.fetchone() is not None
+
+    @staticmethod
+    async def _in_match(db: aiosqlite.Connection, guild_id: int, user_id: int) -> bool:
+        cur = await db.execute(
+            "SELECT 1 FROM match_players WHERE guild_id = ? AND user_id = ? AND active = 1",
+            (guild_id, user_id),
+        )
+        return await cur.fetchone() is not None
+
     async def create_mashup(
         self,
         *,
@@ -576,35 +651,52 @@ class Store:
         channel_id: int,
         host_id: int,
         host_handle: str,
-        problems: Sequence[tuple[str, int]],
-        started_at: int,
-        ends_at: int,
+        min_rating: int,
+        max_rating: int,
+        count: int,
+        duration_seconds: int,
+        penalty_minutes: int,
+        now: int,
     ) -> int:
-        async with self._tx() as db:
-            cur = await db.execute(
-                "INSERT INTO mashups (guild_id, channel_id, host_id, started_at, ends_at, status) "
-                "VALUES (?, ?, ?, ?, ?, 'active')",
-                (guild_id, channel_id, host_id, started_at, ends_at),
-            )
-            mashup_id = cur.lastrowid
-            await db.executemany(
-                "INSERT INTO mashup_problems (mashup_id, idx, problem_key, rating) "
-                "VALUES (?, ?, ?, ?)",
-                [(mashup_id, i, key, rating) for i, (key, rating) in enumerate(problems)],
-            )
-            await db.execute(
-                "INSERT INTO mashup_players (mashup_id, user_id, handle, joined_at) "
-                "VALUES (?, ?, ?, ?)",
-                (mashup_id, host_id, host_handle, started_at),
-            )
-            return mashup_id
+        try:
+            async with self._tx() as db:
+                if await self._in_match(db, guild_id, host_id):
+                    raise AlreadyInMatch()
+                cur = await db.execute(
+                    "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, "
+                    "count, duration_seconds, penalty_minutes, status, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?)",
+                    (
+                        guild_id,
+                        channel_id,
+                        host_id,
+                        min_rating,
+                        max_rating,
+                        count,
+                        duration_seconds,
+                        penalty_minutes,
+                        now,
+                    ),
+                )
+                mashup_id = cur.lastrowid
+                await db.execute(
+                    "INSERT INTO mashup_players (mashup_id, guild_id, user_id, handle, joined_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (mashup_id, guild_id, host_id, host_handle, now),
+                )
+                return mashup_id
+        except sqlite3.IntegrityError as exc:
+            raise AlreadyInMatch() from exc
 
     async def get_mashup(self, mashup_id: int) -> MashupRow | None:
         row = await self._one("SELECT * FROM mashups WHERE id = ?", (mashup_id,))
         return MashupRow(**dict(row)) if row else None
 
-    async def active_mashups(self) -> list[MashupRow]:
-        rows = await self._all("SELECT * FROM mashups WHERE status = 'active' ORDER BY id")
+    async def mashups_in(self, *statuses: str) -> list[MashupRow]:
+        marks = ",".join("?" * len(statuses))
+        rows = await self._all(
+            f"SELECT * FROM mashups WHERE status IN ({marks}) ORDER BY id", statuses
+        )
         return [MashupRow(**dict(r)) for r in rows]
 
     async def set_mashup_message(self, mashup_id: int, channel_id: int, message_id: int) -> None:
@@ -629,60 +721,118 @@ class Store:
         return [MashupPlayer(r["user_id"], r["handle"], r["joined_at"]) for r in rows]
 
     async def add_mashup_player(
-        self, mashup_id: int, user_id: int, handle: str, now: int, cap: int
-    ) -> str | None:
-        """Adds the player; returns why not ("full", "joined") or None on success."""
+        self, mashup_id: int, guild_id: int, user_id: int, handle: str, now: int, cap: int
+    ) -> None:
+        try:
+            async with self._tx() as db:
+                cur = await db.execute("SELECT status FROM mashups WHERE id = ?", (mashup_id,))
+                row = await cur.fetchone()
+                if row is None or row["status"] != "lobby":
+                    raise MatchClosed("This contest is no longer open.")
+                cur = await db.execute(
+                    "SELECT COUNT(*) FROM mashup_players WHERE mashup_id = ?", (mashup_id,)
+                )
+                if (await cur.fetchone())[0] >= cap:
+                    raise MatchFull()
+                if await self._in_match(db, guild_id, user_id):
+                    raise AlreadyInMatch()
+                await db.execute(
+                    "INSERT INTO mashup_players (mashup_id, guild_id, user_id, handle, joined_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (mashup_id, guild_id, user_id, handle, now),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise AlreadyInMatch() from exc
+
+    async def remove_mashup_player(self, mashup_id: int, user_id: int) -> bool:
+        n = await self._write(
+            "DELETE FROM mashup_players WHERE mashup_id = ? AND user_id = ? "
+            "AND EXISTS (SELECT 1 FROM mashups WHERE id = ? AND status = 'lobby')",
+            (mashup_id, user_id, mashup_id),
+        )
+        return n > 0
+
+    async def cancel_mashup(self, mashup_id: int) -> bool:
         async with self._tx() as db:
             cur = await db.execute(
-                "SELECT COUNT(*), COALESCE(SUM(user_id = ?), 0) FROM mashup_players "
-                "WHERE mashup_id = ?",
-                (user_id, mashup_id),
+                "UPDATE mashups SET status = 'cancelled' WHERE id = ? AND status = 'lobby'",
+                (mashup_id,),
             )
-            total, already = await cur.fetchone()
-            if already:
-                return "joined"
-            if total >= cap:
-                return "full"
+            if cur.rowcount == 0:
+                return False
             await db.execute(
-                "INSERT INTO mashup_players (mashup_id, user_id, handle, joined_at) "
-                "VALUES (?, ?, ?, ?)",
-                (mashup_id, user_id, handle, now),
+                "UPDATE mashup_players SET active = 0 WHERE mashup_id = ?", (mashup_id,)
             )
-            return None
+            return True
+
+    async def start_mashup(
+        self,
+        mashup_id: int,
+        problems: Sequence[tuple[str, int]],
+        started_at: int,
+        ends_at: int,
+        player_ids: Sequence[int],
+    ) -> bool:
+        """Starts the contest only if it is still a lobby with exactly these players."""
+        async with self._tx() as db:
+            cur = await db.execute("SELECT status FROM mashups WHERE id = ?", (mashup_id,))
+            row = await cur.fetchone()
+            if row is None or row["status"] != "lobby":
+                return False
+            cur = await db.execute(
+                "SELECT user_id FROM mashup_players WHERE mashup_id = ?", (mashup_id,)
+            )
+            if {r["user_id"] for r in await cur.fetchall()} != set(player_ids):
+                return False
+            await db.execute(
+                "UPDATE mashups SET status = 'active', started_at = ?, ends_at = ? WHERE id = ?",
+                (started_at, ends_at, mashup_id),
+            )
+            await db.executemany(
+                "INSERT INTO mashup_problems (mashup_id, idx, problem_key, rating) "
+                "VALUES (?, ?, ?, ?)",
+                [(mashup_id, i, key, rating) for i, (key, rating) in enumerate(problems)],
+            )
+            return True
 
     async def record_mashup_solves(
-        self, mashup_id: int, user_id: int, solves: Mapping[str, int]
+        self, mashup_id: int, user_id: int, solves: Mapping[str, tuple[int, int]]
     ) -> int:
-        """Stores new solves (the first time of each problem wins); returns how many were new."""
+        """Stores new (solve time, wrong attempts) per problem; the first record of each wins.
+        Returns how many were new."""
         async with self._tx() as db:
             new = 0
-            for key, solved_at in solves.items():
+            for key, (solved_at, wrong) in solves.items():
                 cur = await db.execute(
                     "INSERT OR IGNORE INTO mashup_solves "
-                    "(mashup_id, user_id, problem_key, solved_at) VALUES (?, ?, ?, ?)",
-                    (mashup_id, user_id, key, solved_at),
+                    "(mashup_id, user_id, problem_key, solved_at, wrong) VALUES (?, ?, ?, ?, ?)",
+                    (mashup_id, user_id, key, solved_at, wrong),
                 )
                 new += cur.rowcount
             return new
 
-    async def mashup_solves(self, mashup_id: int) -> dict[int, dict[str, int]]:
+    async def mashup_solves(self, mashup_id: int) -> dict[int, dict[str, tuple[int, int]]]:
         rows = await self._all(
-            "SELECT user_id, problem_key, solved_at FROM mashup_solves WHERE mashup_id = ?",
+            "SELECT user_id, problem_key, solved_at, wrong FROM mashup_solves WHERE mashup_id = ?",
             (mashup_id,),
         )
-        out: dict[int, dict[str, int]] = {}
+        out: dict[int, dict[str, tuple[int, int]]] = {}
         for r in rows:
-            out.setdefault(r["user_id"], {})[r["problem_key"]] = r["solved_at"]
+            out.setdefault(r["user_id"], {})[r["problem_key"]] = (r["solved_at"], r["wrong"])
         return out
 
     async def finish_mashup(self, mashup_id: int) -> bool:
-        return (
-            await self._write(
+        async with self._tx() as db:
+            cur = await db.execute(
                 "UPDATE mashups SET status = 'finished' WHERE id = ? AND status = 'active'",
                 (mashup_id,),
             )
-            > 0
-        )
+            if cur.rowcount == 0:
+                return False
+            await db.execute(
+                "UPDATE mashup_players SET active = 0 WHERE mashup_id = ?", (mashup_id,)
+            )
+            return True
 
     # --- reminders ---
     async def set_reminder(

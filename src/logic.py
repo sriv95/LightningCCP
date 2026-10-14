@@ -116,18 +116,31 @@ def round_rating(rating: int | None) -> int:
     return max(800, min(3500, (rating + 50) // 100 * 100))
 
 
-def earliest_solve(
-    subs: Iterable[Submission], problem_key: str, since: int, until: int | None = None
-) -> int | None:
+def earliest_solve(subs: Iterable[Submission], problem_key: str, since: int) -> int | None:
     times = [
         s.created
         for s in subs
-        if s.problem_key == problem_key
-        and s.verdict == "OK"
-        and s.created >= since
-        and (until is None or s.created <= until)
+        if s.problem_key == problem_key and s.verdict == "OK" and s.created >= since
     ]
     return min(times) if times else None
+
+
+def first_solve(
+    subs: Iterable[Submission], problem_key: str, since: int, until: int
+) -> tuple[int, int] | None:
+    """(time of the earliest accepted submission, wrong attempts before it) within since..until.
+
+    Compilation errors and submissions still being judged are not wrong attempts."""
+    mine = [s for s in subs if s.problem_key == problem_key and since <= s.created <= until]
+    solved_at = min((s.created for s in mine if s.verdict == "OK"), default=None)
+    if solved_at is None:
+        return None
+    wrong = sum(
+        1
+        for s in mine
+        if s.created < solved_at and s.verdict not in (None, "OK", "COMPILATION_ERROR")
+    )
+    return solved_at, wrong
 
 
 def match_rating(rating_arg: int | None, ratings: Sequence[int]) -> int:
@@ -296,27 +309,32 @@ class MashupRank:
     user_id: int
     handle: str
     solved: int
-    total_seconds: int
+    total_seconds: int  # solve times plus the penalty of every wrong attempt
     times: dict[str, int]  # problem key -> seconds after the start, for solved problems
+    wrong: dict[str, int]  # problem key -> wrong attempts before the solve
 
 
 def mashup_standings(
     players: Iterable[tuple[int, str, int]],
-    solves: dict[int, dict[str, int]],
+    solves: dict[int, dict[str, tuple[int, int]]],
     started_at: int,
+    penalty_minutes: int = 0,
 ) -> list[MashupRank]:
-    """Most problems solved first, then the lowest total solve time; equal scores share a rank.
+    """Most problems solved first, then the lowest total time; equal scores share a rank.
 
-    players are (user_id, handle, joined_at); solves maps user id to {problem key: solve time}."""
+    players are (user_id, handle, joined_at); solves maps user id to {problem key: (solve time,
+    wrong attempts)}. Every wrong attempt before a solve adds penalty_minutes to the total."""
     rows = []
     for user_id, handle, joined_at in players:
-        times = {k: max(0, t - started_at) for k, t in solves.get(user_id, {}).items()}
-        rows.append((-len(times), sum(times.values()), joined_at, user_id, handle, times))
+        mine = solves.get(user_id, {})
+        times = {k: max(0, t - started_at) for k, (t, _) in mine.items()}
+        wrong = {k: w for k, (_, w) in mine.items()}
+        total = sum(times.values()) + sum(wrong.values()) * penalty_minutes * 60
+        rows.append((-len(times), total, joined_at, user_id, handle, times, wrong))
     rows.sort(key=lambda r: r[:3])
     ranked: list[MashupRank] = []
-    for i, (neg, total, _, user_id, handle, times) in enumerate(rows):
+    for i, (neg, total, _, user_id, handle, times, wrong) in enumerate(rows):
         same = ranked and (ranked[-1].solved, ranked[-1].total_seconds) == (-neg, total)
-        ranked.append(
-            MashupRank(ranked[-1].rank if same else i + 1, user_id, handle, -neg, total, times)
-        )
+        rank = ranked[-1].rank if same else i + 1
+        ranked.append(MashupRank(rank, user_id, handle, -neg, total, times, wrong))
     return ranked

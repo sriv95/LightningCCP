@@ -7,6 +7,7 @@ from src.logic import (
     duel_gain,
     earliest_solve,
     filter_problems,
+    first_solve,
     format_hm,
     has_compile_error,
     mashup_standings,
@@ -292,11 +293,22 @@ def test_placement_by_rating_change():
     assert placement([0, 0], 0) is None  # nobody solved
 
 
-def test_earliest_solve_until_ignores_later_submissions():
-    subs = [S("1A", "OK", 500), S("1A", "OK", 900)]
-    assert earliest_solve(subs, "1A", since=600, until=800) is None
-    assert earliest_solve(subs, "1A", since=600, until=900) == 900
-    assert earliest_solve(subs, "1A", since=0) == 500
+def test_first_solve_counts_wrong_attempts_before_the_accept_inside_the_window():
+    subs = [
+        S("1A", "WRONG_ANSWER", 90),  # before the start
+        S("1A", "WRONG_ANSWER", 150),
+        S("1A", "COMPILATION_ERROR", 160),  # not a wrong attempt
+        S("1A", "TIME_LIMIT_EXCEEDED", 170),
+        S("1A", None, 175),  # still being judged
+        S("1A", "OK", 200),
+        S("1A", "WRONG_ANSWER", 210),  # after the accept
+        S("1A", "OK", 300),
+        S("2A", "OK", 5000),  # after the end
+    ]
+    assert first_solve(subs, "1A", since=100, until=1000) == (200, 2)
+    assert first_solve(subs, "2A", since=100, until=1000) is None
+    assert first_solve(subs, "1A", since=100, until=150) is None  # ended before the accept
+    assert first_solve([S("1A", "OK", 100)], "1A", since=100, until=100) == (100, 0)
 
 
 def test_format_hm():
@@ -344,10 +356,10 @@ def test_pick_mashup_fails_when_the_range_is_too_small():
 def test_mashup_standings_rank_solved_then_time_with_shared_ranks():
     players = [(1, "a", 0), (2, "b", 1), (3, "c", 2), (4, "d", 3), (5, "e", 4)]
     solves = {
-        1: {"A": 160, "B": 400},
-        2: {"A": 150, "B": 410},  # same total as player 1, so the same rank
-        3: {"A": 100},
-        4: {"A": 100, "B": 1000, "C": 1100},
+        1: {"A": (160, 0), "B": (400, 0)},
+        2: {"A": (150, 0), "B": (410, 0)},  # same total as player 1, so the same rank
+        3: {"A": (100, 0)},
+        4: {"A": (100, 0), "B": (1000, 0), "C": (1100, 0)},
     }
     rows = mashup_standings(players, solves, started_at=100)
     assert [(r.user_id, r.rank, r.solved, r.total_seconds) for r in rows] == [
@@ -358,3 +370,13 @@ def test_mashup_standings_rank_solved_then_time_with_shared_ranks():
         (5, 5, 0, 0),
     ]
     assert rows[1].times == {"A": 60, "B": 300}
+
+
+def test_mashup_standings_penalty_per_wrong_attempt():
+    players = [(1, "a", 0), (2, "b", 1)]
+    solves = {1: {"A": (160, 2)}, 2: {"A": (200, 0)}}  # a solved first but with 2 wrong attempts
+    rows = mashup_standings(players, solves, started_at=100, penalty_minutes=20)
+    assert [(r.handle, r.total_seconds) for r in rows] == [("b", 100), ("a", 60 + 2 * 20 * 60)]
+    assert rows[1].wrong == {"A": 2}
+    free = mashup_standings(players, solves, started_at=100)  # no penalty: a is first
+    assert [r.handle for r in free] == ["a", "b"]
