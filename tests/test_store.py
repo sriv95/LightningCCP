@@ -155,3 +155,11 @@ async def test_failed_problem_replace_keeps_cache(store):
         await store.replace_problems([p, p])  # duplicate (contest_id, idx)
     await store.link_handle(1, 1, "a", None)  # unrelated write must not commit the DELETE
     assert sorted(await store.load_problems(), key=lambda x: x.key) == [p, q]
+
+
+async def test_close_challenge_is_guarded(store):
+    await store.open_challenge(1, 10, "1A", 800, 1)
+    ch = await store.get_open_challenge(1, 10)
+    assert await store.close_challenge(ch.id, 500) is True
+    assert await store.close_challenge(ch.id, 900) is False
+    assert await store.solved_ratings(1, 10) == [800]

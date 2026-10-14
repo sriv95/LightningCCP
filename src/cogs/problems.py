@@ -118,7 +118,8 @@ class ProblemsCog(commands.Cog, name="Problems"):
         subs = await s.cf.user_status(linked.handle, count=100)
         if not has_solved_since(subs, challenge.problem_key, challenge.issued_at):
             raise BotError(f"No accepted submission for {challenge.problem_key} yet.")
-        await s.db.close_challenge(challenge.id, int(time.time()))
+        if not await s.db.close_challenge(challenge.id, int(time.time())):
+            raise NoChallenge()  # a concurrent /gotgud already claimed it
         earned = gitgud_points(challenge.rating)
         total = sum(gitgud_points(r) for r in await s.db.solved_ratings(guild_id, user_id))
         await interaction.followup.send(

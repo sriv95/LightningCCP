@@ -220,10 +220,12 @@ class Store:
             else None
         )
 
-    async def close_challenge(self, challenge_id: int, solved_at: int) -> None:
-        await self._write(
-            "UPDATE challenge SET solved_at = ? WHERE id = ?", (solved_at, challenge_id)
+    async def close_challenge(self, challenge_id: int, solved_at: int) -> bool:
+        n = await self._write(
+            "UPDATE challenge SET solved_at = ? WHERE id = ? AND solved_at IS NULL",
+            (solved_at, challenge_id),
         )
+        return n > 0
 
     async def cancel_challenge(self, guild_id: int, user_id: int) -> bool:
         n = await self._write(
