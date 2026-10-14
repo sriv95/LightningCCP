@@ -355,6 +355,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         except Exception:
             log.exception("Mashup tick failed")
             return
+        self.tick_loop.change_interval(seconds=self.svc.interval)
         for view in views:
             m = view.mashup
             if m.message_id is None:

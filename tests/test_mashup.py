@@ -612,7 +612,7 @@ async def test_team_virtual_contest_and_rematch(env):
 
 
 async def test_tick_reads_the_stalest_players_within_the_budget(env, monkeypatch):
-    monkeypatch.setattr("src.mashup.MASHUP_READS_PER_TICK", 2)
+    monkeypatch.setattr("src.mashup.MASHUP_READS_PER_SECOND", 2 / 60)  # 2 reads in a 60 s interval
     svc, store, cf, clock = env
     view = await started(svc, 2, 3, 4)
     cf.calls.clear()
@@ -630,3 +630,15 @@ async def test_tick_reads_the_stalest_players_within_the_budget(env, monkeypatch
     await svc.tick()
     assert sorted(cf.calls) == ["h1", "h2", "h3", "h4"]
     assert (await svc.view(view.mashup.id)).mashup.status == "finished"
+
+
+async def test_interval_shrinks_with_fewer_players_waiting(env):
+    svc, store, cf, clock = env
+    assert svc.interval == 60  # nothing running yet
+    await started(svc, 2)  # 2 players: 4 s of reads at 0.5 per second, so the minimum
+    cf.calls.clear()
+    clock.t = 1060
+    await svc.tick()
+    assert (svc.interval, cf.calls) == (10, ["h1", "h2"])
+    await svc.tick()
+    assert cf.calls == ["h1", "h2"] * 2  # 10 s pay for 5 reads, so both are read again

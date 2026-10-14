@@ -1,4 +1,5 @@
 import logging
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,11 +10,13 @@ from src.db.store import MashupPlayer, MashupRow, Store
 from src.errors import BotError, MatchClosed, MatchFull, NotLinked
 from src.logic import (
     LOBBY_TTL_SECONDS,
+    MASHUP_MAX_INTERVAL,
     MASHUP_MAX_PLAYERS,
     MASHUP_MAX_PROBLEMS,
     MASHUP_MAX_TEAM_SIZE,
     MASHUP_MAX_TEAMS,
-    MASHUP_READS_PER_TICK,
+    MASHUP_MIN_INTERVAL,
+    MASHUP_READS_PER_SECOND,
     MashupRank,
     first_solve,
     mashup_standings,
@@ -80,6 +83,7 @@ class MashupService:
         self._cf = cf
         self._problems = problems
         self._clock = clock
+        self.interval = MASHUP_MAX_INTERVAL  # seconds until the next tick, set by every tick
         self._read_at: dict[tuple[int, int], int] = {}  # (contest, user) -> last read, in memory
 
     def _now(self) -> int:
@@ -329,9 +333,10 @@ class MashupService:
         return await self._store.record_mashup_solves(mashup.id, player.user_id, solves)
 
     async def tick(self) -> list[MashupView]:
-        """Cancels expired lobbies, reads the stalest players of running contests (at most
-        MASHUP_READS_PER_TICK, everyone in a contest that is out of time) and ends the contests
-        out of time. Returns the contests whose message needs an update."""
+        """Cancels expired lobbies, reads the stalest players of running contests (the reads the
+        last interval pays for, everyone in a contest that is out of time) and ends the contests
+        out of time. Returns the contests whose message needs an update. Sets `interval`: the
+        fewer players are waiting for a read, the sooner the next tick."""
         now = self._now()
         views: list[MashupView] = []
         running: list[MashupRow] = []
@@ -345,7 +350,11 @@ class MashupService:
                     views.append(await self.view(mashup.id, note="The lobby expired."))
             except Exception:
                 log.exception("Could not update mashup %s", mashup.id)
-        changed = await self._read_players(running, now)
+        changed, waiting = await self._read_players(running, now)
+        self.interval = min(
+            MASHUP_MAX_INTERVAL,
+            max(MASHUP_MIN_INTERVAL, math.ceil(waiting / MASHUP_READS_PER_SECOND)),
+        )
         for mashup in running:
             try:
                 ended = now >= mashup.ends_at
@@ -379,10 +388,11 @@ class MashupService:
         changes = match_deltas([groups[k] for k in sorted(groups)], entrant_ratings)
         return {p.user_id: changes[p.team] for p in view.players}
 
-    async def _read_players(self, running: list[MashupRow], now: int) -> dict[int, int]:
-        """Reads submissions and returns the new solves per contest. A contest out of time is read
-        in full (its last solves count); the others share the per-minute budget, the player read
-        longest ago first. A team that solved everything is not read."""
+    async def _read_players(self, running: list[MashupRow], now: int) -> tuple[dict[int, int], int]:
+        """Reads submissions; returns the new solves per contest and how many players of contests
+        still running are due the next time. A contest out of time is read in full (its last
+        solves count); the others share the budget of the last interval, the player read longest
+        ago first. A team that solved everything is not read."""
         due: list[tuple[int, MashupRow, MashupPlayer]] = []
         for mashup in running:
             try:
@@ -400,7 +410,7 @@ class MashupService:
                 if len(solves.get(p.team, {})) < total:
                     due.append((last or self._read_at.get((mashup.id, p.user_id), 0), mashup, p))
         due.sort(key=lambda d: d[0])  # stable: equal staleness keeps contest and joining order
-        budget = MASHUP_READS_PER_TICK
+        budget = max(1, round(MASHUP_READS_PER_SECOND * self.interval))
         changed: dict[int, int] = {}
         for stale, mashup, player in due:
             if stale >= 0 and budget <= 0:
@@ -412,4 +422,4 @@ class MashupService:
             except Exception:
                 # One unreachable handle must not stall the others or the ending.
                 log.warning("Skipping %s in mashup %s", player.handle, mashup.id, exc_info=True)
-        return changed
+        return changed, sum(1 for stale, _, _ in due if stale >= 0)

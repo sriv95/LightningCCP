@@ -17,9 +17,10 @@ LOBBY_TTL_SECONDS = 600
 MATCH_TTL_SECONDS = 7200
 MATCH_MAX_PLAYERS = 10
 MASHUP_MAX_PLAYERS = 50
-MASHUP_READS_PER_TICK = (
-    30  # Codeforces reads per minute for running contests, the rest is for commands
-)
+# Codeforces reads per second for running contests; commands get the rest of the 1 per second
+MASHUP_READS_PER_SECOND = 0.5
+MASHUP_MIN_INTERVAL = 10  # seconds between rounds when few players wait for a read
+MASHUP_MAX_INTERVAL = 60
 MASHUP_MAX_PROBLEMS = 10
 MASHUP_MAX_TEAMS = 10
 MASHUP_MAX_TEAM_SIZE = 5
