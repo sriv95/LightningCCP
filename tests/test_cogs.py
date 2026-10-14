@@ -2,6 +2,7 @@ from src.cf.models import Contest, Problem, User
 from src.cogs.contests import ContestsCog
 from src.cogs.handles import HandlesCog, VerifyButton
 from src.cogs.match import MatchButton, MatchCog
+from src.cogs.plot import PlotCog
 from src.cogs.problems import ProblemsCog
 from src.ui.embeds import (
     contest_pages,
@@ -115,3 +116,15 @@ def test_stalk_pages_lines_and_paging():
     assert first[0] == f"[1700B. Foo]({known.url}) (1400)" and first[1] == "9999Z"
     assert pages[0].title == "Unsolved by tourist"
     assert stalk_pages("x", []) == []
+
+
+def test_plot_group_commands():
+    assert {c.name for c in PlotCog.plot.commands} == {"rating", "codeforces"}
+
+
+def test_rating_plot_renders_png():
+    from src.ui.plots import CF_BANDS, rating_plot
+
+    png = rating_plot("T", [(1_700_000_000, 1500), (1_700_100_000, 1450)], CF_BANDS)
+    assert png.read(8) == b"\x89PNG\r\n\x1a\n"
+    assert rating_plot("T", [(1_700_000_000, 800)]).read(4) == b"\x89PNG"  # one point works

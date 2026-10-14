@@ -16,7 +16,13 @@ from src.services import Services
 
 log = logging.getLogger(__name__)
 
-COGS = ("src.cogs.handles", "src.cogs.problems", "src.cogs.contests", "src.cogs.match")
+COGS = (
+    "src.cogs.handles",
+    "src.cogs.problems",
+    "src.cogs.contests",
+    "src.cogs.match",
+    "src.cogs.plot",
+)
 
 
 class LightningBot(commands.Bot):

@@ -474,6 +474,17 @@ class Store:
         )
         return [(r["user_id"], r["handle"], r["total"], r["played"]) for r in rows]
 
+    async def rating_changes(self, guild_id: int, user_id: int) -> list[tuple[int, int]]:
+        """(finished_at, rating change) of the player's finished matches, oldest first."""
+        rows = await self._all(
+            "SELECT m.finished_at, mp.delta FROM match_players mp "
+            "JOIN matches m ON m.id = mp.match_id "
+            "WHERE mp.guild_id = ? AND mp.user_id = ? AND mp.delta IS NOT NULL "
+            "AND m.status = 'finished' ORDER BY m.finished_at, m.id",
+            (guild_id, user_id),
+        )
+        return [(r["finished_at"], r["delta"]) for r in rows]
+
     async def matches_due(self, lobby_before: int, now: int) -> list[MatchRow]:
         rows = await self._all(
             "SELECT * FROM matches WHERE (status = 'lobby' AND created_at <= ?) "

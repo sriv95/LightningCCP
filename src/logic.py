@@ -73,6 +73,16 @@ def solved_keys(subs: Iterable[Submission]) -> frozenset[str]:
     return frozenset(s.problem_key for s in subs if s.verdict == "OK")
 
 
+def rating_series(changes: Iterable[tuple[int, int]]) -> list[tuple[int, int]]:
+    """(time, rating change) pairs, oldest first, to (time, rating after) from the start rating."""
+    rating = START_RATING
+    series = []
+    for time, delta in changes:
+        rating += delta
+        series.append((time, rating))
+    return series
+
+
 def unsolved_keys(subs: Iterable[Submission]) -> list[str]:
     """Problems attempted but never solved, in order of first appearance (newest attempt first)."""
     solved = solved_keys(subs)

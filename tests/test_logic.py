@@ -13,6 +13,7 @@ from src.logic import (
     parse_minutes,
     parse_tags,
     rank_groups,
+    rating_series,
     refresh_minutes,
     reminders_due,
     round_rating,
@@ -256,3 +257,8 @@ def test_unsolved_keys_attempted_not_solved_newest_first():
     ]
     assert unsolved_keys(subs) == ["1C", "1B"]
     assert unsolved_keys([]) == []
+
+
+def test_rating_series_accumulates_from_the_start_rating():
+    assert rating_series([(10, 49), (20, -16), (30, 0)]) == [(10, 849), (20, 833), (30, 833)]
+    assert rating_series([]) == []

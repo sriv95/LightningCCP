@@ -33,11 +33,13 @@ Config comes from `.env` (see `.env.example`): `BOT_TOKEN` (required), `DB_PATH`
 
 Slash commands only. The bot uses `Intents.default()` (no `message_content`, no `members`) and `help_command=None`; do not add prefix commands.
 
-**Startup** (`LightningBot.setup_hook` in `src/bot.py`) runs in a fixed order: open the SQLite store (migrates), build the `Services` container, start the caches (load from DB, then the refresh loop's first tick fetches live), load the four cogs, sync the command tree. `close()` calls `super().close()` first so cogs and the reminder loop stop before the session and DB close.
+**Startup** (`LightningBot.setup_hook` in `src/bot.py`) runs in a fixed order: open the SQLite store (migrates), build the `Services` container, start the caches (load from DB, then the refresh loop's first tick fetches live), load the five cogs, sync the command tree. `close()` calls `super().close()` first so cogs and the reminder loop stop before the session and DB close.
 
 **`Services`** (`src/services.py`) holds `db`, `cf`, `problems`, `contests`, `matches`, `session`. It is attached as `bot.services`; cogs reach everything through `self.bot.services`. There are no module-level globals, which is a deliberate departure from TLE.
 
 **Data flow.** Cogs are thin. Decisions live in pure functions in `src/logic.py` (problem filter, tag parsing and autocomplete suggestions, compile-error verification window, match rating (solo linear gain, `duel_gain` staircase for duel and custom, default problem rating), contest selection, reminder-due calculation), which is where unit tests concentrate. `src/cf/client.py` is the Codeforces API client; `src/cache/*` wrap it with periodic refresh and persist to SQLite so restarts are fast; `src/db/store.py` is the only SQL. `src/matches.py` (`MatchService`, with `MatchView`) is the only place match state transitions happen, over the `matches` and `match_players` tables; `src/cogs/match.py` is the thin cog (`/match solo|duel|custom`, `/stats`, persistent `MatchButton` DynamicItem with custom id `match:<action>:<id>`, 60 s expiry loop).
+
+**Plots.** `src/cogs/plot.py` (`/plot rating|codeforces`) renders with `matplotlib.figure.Figure` in `src/ui/plots.py` (never pyplot) inside `asyncio.to_thread`, so drawing does not block the event loop. Match rating history is rebuilt from the stored deltas of finished matches (`Store.rating_changes`, `logic.rating_series`).
 
 **Codeforces client.** One request per second enforced through a lock plus an injected clock and sleep (tests inject fakes); retries on "limit exceeded"; non-JSON or network failures become `CodeforcesError`; a "not found" comment starting with "handle" becomes `HandleNotFound` (other not-found errors, such as an unknown contest, stay `CodeforcesError`). `standings` splits a failing chunk of handles in halves to drop an unknown handle.
 

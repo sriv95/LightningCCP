@@ -41,6 +41,12 @@ class Contest:
 
 
 @dataclass(frozen=True, slots=True)
+class RatingChange:
+    time: int
+    rating: int  # rating after the contest
+
+
+@dataclass(frozen=True, slots=True)
 class Standing:
     rank: int
     handles: tuple[str, ...]

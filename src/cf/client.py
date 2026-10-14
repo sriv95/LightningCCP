@@ -5,7 +5,7 @@ from typing import Any
 
 import aiohttp
 
-from src.cf.models import Contest, Problem, Standing, Submission, User
+from src.cf.models import Contest, Problem, RatingChange, Standing, Submission, User
 from src.errors import CodeforcesError, HandleNotFound
 
 BASE_URL = "https://codeforces.com/api/"
@@ -151,3 +151,7 @@ class CodeforcesClient:
             )
             for r in data["rows"]
         ]
+
+    async def rating_history(self, handle: str) -> list[RatingChange]:
+        data = await self._call("user.rating", {"handle": handle})
+        return [RatingChange(c["ratingUpdateTimeSeconds"], c["newRating"]) for c in data]

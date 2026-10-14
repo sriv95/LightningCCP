@@ -9,4 +9,4 @@ def test_bot_is_slash_only(tmp_path):
 
 
 def test_match_cog_is_loaded():
-    assert "src.cogs.match" in COGS
+    assert "src.cogs.match" in COGS and "src.cogs.plot" in COGS

@@ -199,3 +199,17 @@ async def test_unknown_contest_is_not_a_handle_error():
     with pytest.raises(CodeforcesError) as info:
         await client.standings(5, ["a"])
     assert not isinstance(info.value, HandleNotFound)
+
+
+async def test_rating_history_parses():
+    client, session, _ = make_client(
+        ok(
+            [
+                {"ratingUpdateTimeSeconds": 100, "newRating": 1500, "oldRating": 1400},
+                {"ratingUpdateTimeSeconds": 200, "newRating": 1450, "oldRating": 1500},
+            ]
+        )
+    )
+    changes = await client.rating_history("a")
+    assert [(c.time, c.rating) for c in changes] == [(100, 1500), (200, 1450)]
+    assert session.calls[0][0].endswith("user.rating") and session.calls[0][1] == {"handle": "a"}

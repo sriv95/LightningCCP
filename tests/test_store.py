@@ -413,3 +413,13 @@ async def test_migration_3_resets_old_points_to_start_rating(tmp_path):
     assert await s.rating(1, 1) == 800
     assert await s.stats(1) == [(1, "h1", 800, 1)]  # still counted as a finished match
     await s.close()
+
+
+async def test_rating_changes_lists_finished_matches_oldest_first(store):
+    for finished, delta in ((900, 5), (500, -2)):
+        mid = await make_match(store, mode="solo", max_players=1)
+        await store.start_match(mid, 100, "1700A", 200, 7400, [1])
+        await store.finish_match(mid, finished, {1: delta})
+    await make_match(store, host=1)  # lobby: not counted
+    assert await store.rating_changes(1, 1) == [(500, -2), (900, 5)]
+    assert await store.rating_changes(1, 2) == [] and await store.rating_changes(2, 1) == []
