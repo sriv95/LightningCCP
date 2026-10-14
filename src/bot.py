@@ -49,14 +49,8 @@ class LightningBot(commands.Bot):
         for extension in COGS:
             await self.load_extension(extension)
         self.tree.on_error = self._on_tree_error
-        if self.config.dev_guild_id:
-            guild = discord.Object(id=self.config.dev_guild_id)
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-            log.info("Synced commands to dev guild %s", self.config.dev_guild_id)
-        else:
-            await self.tree.sync()
-            log.info("Synced commands globally")
+        await self.tree.sync()
+        log.info("Synced commands globally")
 
     async def _on_tree_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError

@@ -5,7 +5,7 @@ Slash-command Discord bot for competitive programmers, modeled on [TLE](https://
 ## Setup
 
 1. Create a bot at https://discord.com/developers/applications. Invite it with the `bot` and `applications.commands` scopes. No privileged intents needed.
-2. `cp .env.example .env` and set `BOT_TOKEN`. For development set `DEV_GUILD_ID` to your test server id so commands sync instantly.
+2. `cp .env.example .env` and set `BOT_TOKEN`.
 3. `uv sync`
 4. `uv run python -m src`
 

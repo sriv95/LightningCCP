@@ -20,7 +20,7 @@ uv run pytest tests/test_logic.py::test_name -v   # one test
 uv run ruff check . && uv run ruff format --check .   # lint (both must pass)
 ```
 
-Config comes from `.env` (see `.env.example`): `BOT_TOKEN` (required), `DEV_GUILD_ID` (optional; syncs slash commands to that guild instantly, otherwise they sync globally and can take up to an hour), `DB_PATH` (default `data/bot.db`).
+Config comes from `.env` (see `.env.example`): `BOT_TOKEN` (required), `DB_PATH` (default `data/bot.db`).
 
 ## Layout rules
 
@@ -57,4 +57,4 @@ Slash commands only. The bot uses `Intents.default()` (no `message_content`, no 
 
 ## Testing notes
 
-Tests cover the client (injected fake session in `tests/conftest.py`), store (real aiosqlite on a temp file), logic, caches, `report_error`, and the reminder loop (fakes). `tests/test_matches.py` runs `MatchService` with a fake Codeforces client over the real store. Cog command bodies are not unit-tested; `tests/test_cogs.py` only checks command registration and embeds, and `tests/test_buttons.py` covers button error reporting, match re-post and Check feedback with fakes. Nothing has been run against live Discord, so verify user-facing flows manually in a dev guild (`DEV_GUILD_ID`) before relying on them.
+Tests cover the client (injected fake session in `tests/conftest.py`), store (real aiosqlite on a temp file), logic, caches, `report_error`, and the reminder loop (fakes). `tests/test_matches.py` runs `MatchService` with a fake Codeforces client over the real store. Cog command bodies are not unit-tested; `tests/test_cogs.py` only checks command registration and embeds, and `tests/test_buttons.py` covers button error reporting, match re-post and Check feedback with fakes. Nothing has been run against live Discord, so verify user-facing flows manually in a test server before relying on them.
