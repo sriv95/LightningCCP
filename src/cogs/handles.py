@@ -145,7 +145,9 @@ class HandlesCog(commands.Cog, name="Handles"):
         owner = await self.s.db.user_for_handle(interaction.guild_id, handle)
         if owner is None:
             raise BotError(f"No member is linked to {handle}.")
-        await interaction.response.send_message(f"**{handle}** is <@{owner}>.")
+        await interaction.response.send_message(
+            f"**{handle}** is <@{owner}>.", allowed_mentions=discord.AllowedMentions.none()
+        )
 
     @handle.command(name="unlink", description="Remove your linked handle")
     async def unlink(self, interaction: discord.Interaction) -> None:

@@ -62,7 +62,10 @@ class CodeforcesClient:
         raise CodeforcesError("Codeforces rate limit hit. Try again shortly.")
 
     async def user_info(self, handle: str) -> User:
-        (data,) = await self._call("user.info", {"handles": handle})
+        result = await self._call("user.info", {"handles": handle})
+        if len(result) != 1:  # ";" in the handle makes user.info treat it as several handles
+            raise HandleNotFound()
+        (data,) = result
         return User(
             handle=data["handle"],
             rating=data.get("rating"),

@@ -152,3 +152,9 @@ async def test_user_status_params_and_parse():
     assert subs[1].verdict is None
     await client.user_status("a")
     assert session.calls[1][1] == {"handle": "a", "from": 1}
+
+
+async def test_user_info_semicolon_handle_is_not_found():
+    client, *_ = make_client(ok([{"handle": "a"}, {"handle": "b"}]))
+    with pytest.raises(HandleNotFound):
+        await client.user_info("a;b")
