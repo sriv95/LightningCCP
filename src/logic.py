@@ -88,12 +88,6 @@ def has_compile_error(
     )
 
 
-def has_solved_since(subs: Iterable[Submission], problem_key: str, since: int) -> bool:
-    return any(
-        s.problem_key == problem_key and s.verdict == "OK" and s.created >= since for s in subs
-    )
-
-
 def select_contests(contests: Iterable[Contest], kind: str, limit: int = 50) -> list[Contest]:
     if kind == "upcoming":
         picked = [c for c in contests if c.phase == "BEFORE" and c.start_time is not None]

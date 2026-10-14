@@ -8,7 +8,7 @@ from typing import Any
 import aiosqlite
 
 from src.cf.models import Contest, Problem
-from src.errors import ChallengeConflict, HandleTaken
+from src.errors import HandleTaken
 
 MIGRATIONS = [
     """
@@ -81,14 +81,6 @@ class LinkedHandle:
 class Pending:
     handle: str
     problem_key: str
-    issued_at: int
-
-
-@dataclass(frozen=True)
-class Challenge:
-    id: int
-    problem_key: str
-    rating: int
     issued_at: int
 
 
@@ -194,52 +186,6 @@ class Store:
         await self._write(
             "DELETE FROM pending_link WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
         )
-
-    # --- challenges ---
-    async def open_challenge(
-        self, guild_id: int, user_id: int, problem_key: str, rating: int, issued_at: int
-    ) -> None:
-        try:
-            await self._write(
-                "INSERT INTO challenge (guild_id, user_id, problem_key, rating, issued_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (guild_id, user_id, problem_key, rating, issued_at),
-            )
-        except sqlite3.IntegrityError as exc:
-            raise ChallengeConflict() from exc
-
-    async def get_open_challenge(self, guild_id: int, user_id: int) -> Challenge | None:
-        row = await self._one(
-            "SELECT id, problem_key, rating, issued_at FROM challenge "
-            "WHERE guild_id = ? AND user_id = ? AND solved_at IS NULL",
-            (guild_id, user_id),
-        )
-        return (
-            Challenge(row["id"], row["problem_key"], row["rating"], row["issued_at"])
-            if row
-            else None
-        )
-
-    async def close_challenge(self, challenge_id: int, solved_at: int) -> bool:
-        n = await self._write(
-            "UPDATE challenge SET solved_at = ? WHERE id = ? AND solved_at IS NULL",
-            (solved_at, challenge_id),
-        )
-        return n > 0
-
-    async def cancel_challenge(self, guild_id: int, user_id: int) -> bool:
-        n = await self._write(
-            "DELETE FROM challenge WHERE guild_id = ? AND user_id = ? AND solved_at IS NULL",
-            (guild_id, user_id),
-        )
-        return n > 0
-
-    async def solved_ratings(self, guild_id: int, user_id: int) -> list[int]:
-        rows = await self._all(
-            "SELECT rating FROM challenge WHERE guild_id = ? AND user_id = ? AND solved_at IS NOT NULL",
-            (guild_id, user_id),
-        )
-        return [r["rating"] for r in rows]
 
     # --- reminders ---
     async def set_reminder(

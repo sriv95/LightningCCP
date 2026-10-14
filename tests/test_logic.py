@@ -7,7 +7,6 @@ from src.logic import (
     filter_problems,
     gitgud_points,
     has_compile_error,
-    has_solved_since,
     parse_minutes,
     parse_tags,
     refresh_minutes,
@@ -109,12 +108,6 @@ def test_has_compile_error_after_window_does_not_count():
 def test_has_compile_error_wrong_verdict_or_problem():
     assert not has_compile_error([S("1A", "WRONG_ANSWER", 1100)], "1A", issued_at=1000)
     assert not has_compile_error([S("1B", "COMPILATION_ERROR", 1100)], "1A", issued_at=1000)
-
-
-def test_has_solved_since():
-    assert has_solved_since([S("1A", "OK", 500)], "1A", since=500)
-    assert not has_solved_since([S("1A", "OK", 499)], "1A", since=500)
-    assert not has_solved_since([S("1A", "WRONG_ANSWER", 600)], "1A", since=500)
 
 
 def test_select_contests():

@@ -58,7 +58,7 @@ def test_verify_button_template_matches_custom_id():
 
 def test_problems_commands_registered():
     names = {c.name for c in ProblemsCog.__cog_app_commands__}
-    assert names == {"gimme", "gitgud", "gotgud", "nogud"}
+    assert names == {"gimme"}
 
 
 def test_contests_groups():

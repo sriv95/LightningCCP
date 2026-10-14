@@ -1,17 +1,13 @@
 import random
-import time
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.errors import BotError, ChallengeConflict, NoChallenge, NotLinked
+from src.errors import BotError
 from src.logic import (
     filter_problems,
-    gitgud_points,
-    has_solved_since,
     parse_tags,
-    round_rating,
     solved_keys,
     tag_suggestions,
 )
@@ -77,62 +73,6 @@ class ProblemsCog(commands.Cog, name="Problems"):
             app_commands.Choice(name=value, value=value)
             for value in tag_suggestions(current, self.s.problems.tags)
         ]
-
-    @app_commands.command(name="gitgud", description="Start a problem challenge")
-    @app_commands.guild_only()
-    @app_commands.describe(rating="Defaults to your rating rounded to 100")
-    async def gitgud(self, interaction: discord.Interaction, rating: Rating | None = None) -> None:
-        await interaction.response.defer()
-        s = self.s
-        guild_id, user_id = interaction.guild_id, interaction.user.id
-        linked = await s.db.get_handle(guild_id, user_id)
-        if linked is None:
-            raise NotLinked()
-        if await s.db.get_open_challenge(guild_id, user_id) is not None:
-            raise ChallengeConflict()
-        problems = s.problems.require()
-        if rating is None:
-            rating = round_rating((await s.cf.user_info(linked.handle)).rating)
-        solved = solved_keys(await s.cf.user_status(linked.handle))
-        pool = filter_problems(problems, min_rating=rating, max_rating=rating, solved=solved)
-        if not pool:
-            raise BotError(f"No unsolved problems rated {rating}.")
-        problem = random.choice(pool)
-        await s.db.open_challenge(guild_id, user_id, problem.key, rating, int(time.time()))
-        await interaction.followup.send(
-            embed=problem_embed(problem, footer="Solve it, then run /gotgud. Give up with /nogud.")
-        )
-
-    @app_commands.command(name="gotgud", description="Claim points for your solved challenge")
-    @app_commands.guild_only()
-    async def gotgud(self, interaction: discord.Interaction) -> None:
-        await interaction.response.defer()
-        s = self.s
-        guild_id, user_id = interaction.guild_id, interaction.user.id
-        linked = await s.db.get_handle(guild_id, user_id)
-        if linked is None:
-            raise NotLinked()
-        challenge = await s.db.get_open_challenge(guild_id, user_id)
-        if challenge is None:
-            raise NoChallenge()
-        subs = await s.cf.user_status(linked.handle, count=100)
-        if not has_solved_since(subs, challenge.problem_key, challenge.issued_at):
-            raise BotError(f"No accepted submission for {challenge.problem_key} yet.")
-        if not await s.db.close_challenge(challenge.id, int(time.time())):
-            raise NoChallenge()  # a concurrent /gotgud already claimed it
-        earned = gitgud_points(challenge.rating)
-        total = sum(gitgud_points(r) for r in await s.db.solved_ratings(guild_id, user_id))
-        await interaction.followup.send(
-            f"{interaction.user.mention} solved {challenge.problem_key}: +{earned} points "
-            f"(total {total})."
-        )
-
-    @app_commands.command(name="nogud", description="Cancel your open challenge")
-    @app_commands.guild_only()
-    async def nogud(self, interaction: discord.Interaction) -> None:
-        if not await self.s.db.cancel_challenge(interaction.guild_id, interaction.user.id):
-            raise NoChallenge()
-        await interaction.response.send_message("Challenge cancelled.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:

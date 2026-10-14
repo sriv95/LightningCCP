@@ -38,16 +38,6 @@ class CacheNotReady(BotError):
         super().__init__("Codeforces data is still loading. Try again in a minute.")
 
 
-class ChallengeConflict(BotError):
-    def __init__(self):
-        super().__init__("You already have an open challenge. Use /gotgud or /nogud first.")
-
-
-class NoChallenge(BotError):
-    def __init__(self):
-        super().__init__("You have no open challenge. Start one with /gitgud.")
-
-
 async def report_error(interaction: discord.Interaction, error: Exception) -> None:
     """Send a user-facing ephemeral message for any command or component error."""
     original = getattr(error, "original", error)
