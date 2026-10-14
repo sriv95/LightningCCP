@@ -1,6 +1,6 @@
 import math
 import random
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from src.cf.models import Contest, Problem, Submission
@@ -57,6 +57,27 @@ def tag_suggestions(current: str, all_tags: Iterable[str], limit: int = 25) -> l
         value = prefix + tag
         if len(value) <= CHOICE_MAX_LEN:
             out.append(value)
+        if len(out) == limit:
+            break
+    return out
+
+
+def contest_suggestions(
+    contests: Iterable[Contest], known_ids: Container[int], current: str, limit: int = 25
+) -> list[tuple[str, int]]:
+    """(label, contest id) of the newest finished contests whose problems are known, whose id or
+    name contains what the user typed."""
+    needle = current.strip().lower()
+    newest = sorted(
+        (c for c in contests if c.phase == "FINISHED" and c.id in known_ids),
+        key=lambda c: c.start_time or 0,
+        reverse=True,
+    )
+    out = []
+    for c in newest:
+        label = f"{c.id} - {c.name}"
+        if needle in label.lower():
+            out.append((label[:CHOICE_MAX_LEN], c.id))
         if len(out) == limit:
             break
     return out

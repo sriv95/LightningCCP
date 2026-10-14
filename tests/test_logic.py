@@ -4,6 +4,7 @@ from src.cf.models import Contest, Problem, Submission
 from src.errors import BotError
 from src.logic import (
     chunked,
+    contest_suggestions,
     duel_gain,
     earliest_solve,
     filter_problems,
@@ -408,3 +409,23 @@ def test_pick_mashup_respects_tags():
     assert pick_mashup(pool, 800, 1300, 4, tags=frozenset({"dp"})) is None  # only 3 have dp
     picked = pick_mashup(pool, 800, 1300, 3, exclude_tags=frozenset({"dp"}))
     assert {p.contest_id % 2 for p in picked} == {0}
+
+
+def test_contest_suggestions_lists_newest_finished_known_contests():
+    contests = [
+        Contest(1, "Round One", "CF", "FINISHED", 100, 7200),
+        Contest(2, "Educational Two", "ICPC", "FINISHED", 300, 7200),
+        Contest(3, "Round Three", "CF", "BEFORE", 900, 7200),
+        Contest(4, "Round Four", "CF", "FINISHED", 200, 7200),
+        Contest(5, "Unknown problems", "CF", "FINISHED", 400, 7200),
+    ]
+    known = {1, 2, 3, 4}
+    assert contest_suggestions(contests, known, "") == [
+        (f"{i} - {n}", i) for i, n in ((2, "Educational Two"), (4, "Round Four"), (1, "Round One"))
+    ]
+    assert contest_suggestions(contests, known, "ROUND") == [
+        ("4 - Round Four", 4),
+        ("1 - Round One", 1),
+    ]
+    assert contest_suggestions(contests, known, "2") == [("2 - Educational Two", 2)]
+    assert contest_suggestions(contests, known, "", limit=1) == [("2 - Educational Two", 2)]

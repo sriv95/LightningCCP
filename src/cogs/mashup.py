@@ -7,7 +7,13 @@ from discord.ext import commands, tasks
 
 from src.cogs.match import EXCLUDE_HELP, TAGS_HELP
 from src.errors import BotError, report_error
-from src.logic import MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAM_SIZE, MASHUP_MAX_TEAMS, tag_suggestions
+from src.logic import (
+    MASHUP_MAX_PROBLEMS,
+    MASHUP_MAX_TEAM_SIZE,
+    MASHUP_MAX_TEAMS,
+    contest_suggestions,
+    tag_suggestions,
+)
 from src.mashup import MashupView
 from src.ui.embeds import mashup_embed
 
@@ -237,6 +243,18 @@ class MashupCog(commands.Cog, name="Mashup"):
         players: app_commands.Range[int, 1, MASHUP_MAX_TEAM_SIZE] = 1,
     ) -> None:
         await self._virtual(interaction, contest_id, penalty, teams, players, False)
+
+    @rated_virtual.autocomplete("contest_id")
+    @unrated_virtual.autocomplete("contest_id")
+    async def contest_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[int]]:
+        s = self.bot.services
+        known = {p.contest_id for p in s.problems.problems if p.rating}
+        return [
+            app_commands.Choice(name=label, value=contest_id)
+            for label, contest_id in contest_suggestions(s.contests.contests, known, current)
+        ]
 
     async def _virtual(
         self,
