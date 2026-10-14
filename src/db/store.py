@@ -451,7 +451,7 @@ class Store:
         )
         return row[0]
 
-    async def leaderboard(self, guild_id: int) -> list[tuple[int, str, int, int]]:
+    async def stats(self, guild_id: int) -> list[tuple[int, str, int, int]]:
         """(user_id, handle, total points, finished matches), best first. Finished matches only."""
         rows = await self._all(
             "SELECT mp.user_id, COALESCE(uh.handle, MAX(mp.handle)) AS handle, "

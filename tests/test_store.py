@@ -375,7 +375,7 @@ async def test_match_survives_reconnect(tmp_path):
     await s2.close()
 
 
-async def test_leaderboard_orders_and_counts_finished_only(store):
+async def test_stats_orders_and_counts_finished_only(store):
     await store.link_handle(1, 2, "linked2", None)
     for deltas in ({1: 5, 2: -5}, {1: -2, 2: 2}):
         mid = await make_match(store, host=1)
@@ -383,5 +383,5 @@ async def test_leaderboard_orders_and_counts_finished_only(store):
         await store.start_match(mid, 1000, "1700A", 200, 7400, [1, 2])
         await store.finish_match(mid, 500, deltas)
     await make_match(store, host=3)  # lobby: not counted
-    assert await store.leaderboard(1) == [(1, "h1", 3, 2), (2, "linked2", -3, 2)]
-    assert await store.leaderboard(9) == []
+    assert await store.stats(1) == [(1, "h1", 3, 2), (2, "linked2", -3, 2)]
+    assert await store.stats(9) == []
