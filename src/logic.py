@@ -34,6 +34,11 @@ def parse_tags(raw: str | None) -> frozenset[str]:
     return frozenset(t.strip().lower() for t in raw.split(",") if t.strip())
 
 
+def normalize_tags(raw: str | None) -> str:
+    """Canonical stored form of a tag list: sorted, lower case, comma-separated."""
+    return ",".join(sorted(parse_tags(raw)))
+
+
 def tag_suggestions(current: str, all_tags: Iterable[str], limit: int = 25) -> list[str]:
     head, sep, last = current.rpartition(",")
     chosen = parse_tags(head)

@@ -15,6 +15,8 @@ from src.logic import (
     filter_problems,
     match_deltas,
     match_rating,
+    normalize_tags,
+    parse_tags,
     rank_groups,
     solo_delta,
     solved_keys,
@@ -90,6 +92,8 @@ class MatchService:
         max_players: int,
         invited_id: int | None = None,
         rating_arg: int | None = None,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
     ) -> MatchView:
         handle = await self._linked_handle(guild_id, host_id)
         if invited_id is not None and invited_id == host_id:
@@ -104,6 +108,8 @@ class MatchService:
             invited_id=invited_id,
             rating_arg=rating_arg,
             now=self._now(),
+            tags=normalize_tags(tags),
+            exclude_tags=normalize_tags(exclude_tags),
         )
         if mode != "solo":
             return await self._view(match_id)
@@ -130,6 +136,8 @@ class MatchService:
             max_players=2,
             invited_id=opponent,
             rating_arg=match.rating_arg,
+            tags=match.tags,
+            exclude_tags=match.exclude_tags,
         )
 
     async def join(self, match_id: int, user_id: int) -> MatchView:
@@ -181,10 +189,16 @@ class MatchService:
             solved |= solved_keys(await self._cf.user_status(p.handle))
         rating = match_rating(match.rating_arg, ratings)
         pool = filter_problems(
-            problems, min_rating=rating, max_rating=rating, solved=frozenset(solved)
+            problems,
+            min_rating=rating,
+            max_rating=rating,
+            tags=parse_tags(match.tags),
+            exclude_tags=parse_tags(match.exclude_tags),
+            solved=frozenset(solved),
         )
         if not pool:
-            raise BotError(f"No problem rated {rating} is unsolved by every player.")
+            with_tags = " with those tags" if match.tags or match.exclude_tags else ""
+            raise BotError(f"No problem rated {rating}{with_tags} is unsolved by every player.")
         problem = random.choice(pool)
         now = self._now()
         if not await self._store.start_match(

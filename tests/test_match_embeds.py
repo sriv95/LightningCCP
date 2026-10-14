@@ -51,6 +51,12 @@ def text(embed):
     return "\n".join(parts)
 
 
+def test_lobby_embed_lists_tag_filters():
+    out = text(match_embed(MatchView(row(tags="dp,math", exclude_tags="greedy"), [player(10)])))
+    assert "Tags: dp, math" in out and "Excluding: greedy" in out
+    assert "Tags:" not in text(match_embed(MatchView(row(), [player(10)])))
+
+
 def test_lobby_embed():
     view = MatchView(row(invited_id=11), [player(10)])
     out = text(match_embed(view))

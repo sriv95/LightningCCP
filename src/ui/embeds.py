@@ -126,6 +126,10 @@ def match_embed(view: MatchView) -> discord.Embed:
         desc = f"Host: <@{m.host_id}>\nPlayers {len(players)}/{m.max_players}:\n{lines}"
         if m.invited_id is not None:
             desc += f"\nInvited: <@{m.invited_id}>"
+        if m.tags:
+            desc += f"\nTags: {m.tags.replace(',', ', ')}"
+        if m.exclude_tags:
+            desc += f"\nExcluding: {m.exclude_tags.replace(',', ', ')}"
         desc += f"\nExpires <t:{m.created_at + LOBBY_TTL_SECONDS}:R>. The host presses Start."
         return discord.Embed(
             title=f"Match lobby - {_mode_label(view)}",

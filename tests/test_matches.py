@@ -593,3 +593,29 @@ async def test_rematch_rules(env):
     solo = await svc.give_up(solo.match.id, 4)
     with pytest.raises(MatchClosed):
         await svc.rematch(solo.match.id, 4, 5)  # only duels
+
+
+async def test_match_problem_follows_the_tag_filters(tmp_path):
+    store = Store(tmp_path / "t.db")
+    await store.connect()
+    dp = Problem(1, "A", "DP", 800, ("dp", "math"))
+    greedy = Problem(2, "A", "Greedy", 800, ("greedy",))
+    svc = MatchService(store, FakeCF(), FakeProblems([dp, greedy]), clock=Clock())
+    for uid in (1, 2, 3):
+        await store.link_handle(GUILD, uid, f"h{uid}", 1000)
+    only_dp = await make(svc, 1, "solo", 1, tags="DP, math")
+    assert only_dp.match.problem_key == "1A" and only_dp.match.tags == "dp,math"
+    not_dp = await make(svc, 2, "solo", 1, exclude_tags="dp")
+    assert not_dp.match.problem_key == "2A" and not_dp.match.exclude_tags == "dp"
+    with pytest.raises(BotError, match="with those tags"):
+        await make(svc, 3, "solo", 1, tags="graphs")
+    assert await store.active_match_for(GUILD, 3) is None  # the failed solo lobby is cancelled
+    await store.close()
+
+
+async def test_rematch_keeps_the_tag_filters(env):
+    svc, store, cf, clock = env
+    svc._problems.problems = [Problem(1700, "A", "Foo", 800, ("dp",))]
+    done = await finished_duel(svc, tags="dp", exclude_tags="math")
+    new = await svc.rematch(done.match.id, 1, 5)
+    assert (new.match.tags, new.match.exclude_tags) == ("dp", "math")

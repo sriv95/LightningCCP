@@ -214,6 +214,11 @@ MIGRATIONS = [
         PRIMARY KEY (guild_id, contest_id)
     );
     """,
+    # Matches can filter their problem by tags (logic.normalize_tags form, '' for no filter).
+    """
+    ALTER TABLE matches ADD COLUMN tags TEXT NOT NULL DEFAULT '';
+    ALTER TABLE matches ADD COLUMN exclude_tags TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 
@@ -248,6 +253,8 @@ class MatchRow:
     started_at: int | None
     expires_at: int | None
     finished_at: int | None
+    tags: str = ""
+    exclude_tags: str = ""
 
 
 @dataclass(frozen=True)
@@ -445,6 +452,8 @@ class Store:
         invited_id: int | None,
         rating_arg: int | None,
         now: int,
+        tags: str = "",
+        exclude_tags: str = "",
     ) -> int:
         try:
             async with self._tx() as db:
@@ -452,9 +461,20 @@ class Store:
                     raise AlreadyInMatch()
                 cur = await db.execute(
                     "INSERT INTO matches (guild_id, channel_id, host_id, mode, max_players, "
-                    "invited_id, rating_arg, status, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, 'lobby', ?)",
-                    (guild_id, channel_id, host_id, mode, max_players, invited_id, rating_arg, now),
+                    "invited_id, rating_arg, status, created_at, tags, exclude_tags) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?)",
+                    (
+                        guild_id,
+                        channel_id,
+                        host_id,
+                        mode,
+                        max_players,
+                        invited_id,
+                        rating_arg,
+                        now,
+                        tags,
+                        exclude_tags,
+                    ),
                 )
                 match_id = cur.lastrowid
                 await db.execute(

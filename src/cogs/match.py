@@ -9,7 +9,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from src.errors import BotError, report_error
-from src.logic import MATCH_MAX_PLAYERS, daily_streak, utc_day
+from src.logic import MATCH_MAX_PLAYERS, daily_streak, tag_suggestions, utc_day
 from src.matches import MatchView
 from src.ui.embeds import (
     head_to_head_pages,
@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 
 Rating = app_commands.Range[int, 800, 3500]
 Players = app_commands.Range[int, 2, MATCH_MAX_PLAYERS]
+TAGS_HELP = "Comma-separated tags; the problem must have all of them"
+EXCLUDE_HELP = "Comma-separated tags to avoid"
 
 BUTTONS = {
     "join": ("Join", discord.ButtonStyle.success),
@@ -104,6 +106,8 @@ class MatchCog(commands.Cog, name="Match"):
         max_players: int,
         invited_id: int | None = None,
         rating: int | None = None,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
     ) -> None:
         await interaction.response.defer()
         # Already in a match: re-post it with fresh buttons instead of creating another.
@@ -117,6 +121,8 @@ class MatchCog(commands.Cog, name="Match"):
                 max_players=max_players,
                 invited_id=invited_id,
                 rating_arg=rating,
+                tags=tags,
+                exclude_tags=exclude_tags,
             )
         await self._post(interaction, view)
 
@@ -138,34 +144,71 @@ class MatchCog(commands.Cog, name="Match"):
                 )
 
     @match.command(name="solo", description="Practice alone for points")
-    @app_commands.describe(rating="Problem rating (default: your match rating)")
-    async def solo(self, interaction: discord.Interaction, rating: Rating | None = None) -> None:
-        await self._create(interaction, "solo", 1, None, rating)
+    @app_commands.describe(
+        rating="Problem rating (default: your match rating)",
+        tags=TAGS_HELP,
+        exclude_tags=EXCLUDE_HELP,
+    )
+    async def solo(
+        self,
+        interaction: discord.Interaction,
+        rating: Rating | None = None,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
+    ) -> None:
+        await self._create(interaction, "solo", 1, None, rating, tags, exclude_tags)
 
     @match.command(name="duel", description="Duel one other player for points")
     @app_commands.describe(
         opponent="Challenge this member (default: anyone can join)",
         rating="Problem rating (default: average match rating of the players)",
+        tags=TAGS_HELP,
+        exclude_tags=EXCLUDE_HELP,
     )
     async def duel(
         self,
         interaction: discord.Interaction,
         opponent: discord.Member | None = None,
         rating: Rating | None = None,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
     ) -> None:
         if opponent is not None and opponent.bot:
             raise BotError("You cannot duel a bot.")
-        await self._create(interaction, "duel", 2, opponent.id if opponent else None, rating)
+        await self._create(
+            interaction, "duel", 2, opponent.id if opponent else None, rating, tags, exclude_tags
+        )
 
     @match.command(name="custom", description="A match for several players")
     @app_commands.describe(
         players="Maximum number of players",
         rating="Problem rating (default: average match rating of the players)",
+        tags=TAGS_HELP,
+        exclude_tags=EXCLUDE_HELP,
     )
     async def custom(
-        self, interaction: discord.Interaction, players: Players, rating: Rating | None = None
+        self,
+        interaction: discord.Interaction,
+        players: Players,
+        rating: Rating | None = None,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
     ) -> None:
-        await self._create(interaction, "custom", players, None, rating)
+        await self._create(interaction, "custom", players, None, rating, tags, exclude_tags)
+
+    @solo.autocomplete("tags")
+    @solo.autocomplete("exclude_tags")
+    @duel.autocomplete("tags")
+    @duel.autocomplete("exclude_tags")
+    @custom.autocomplete("tags")
+    @custom.autocomplete("exclude_tags")
+    async def tag_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        return [
+            app_commands.Choice(name=value, value=value)
+            for value in tag_suggestions(current, self.bot.services.problems.tags)
+        ]
 
     @match.command(name="history", description="Show finished matches")
     @app_commands.describe(member="Defaults to you; also shows your matches against them")

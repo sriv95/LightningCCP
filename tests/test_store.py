@@ -480,3 +480,19 @@ async def test_recap_marks_once_and_clear_reminder_resets(store):
     await store.set_reminder(1, 99, None, [60])
     await store.clear_reminder(1)
     assert await store.recapped(1) == set()
+
+
+async def test_migration_8_adds_tag_columns_with_empty_defaults(tmp_path):
+    db = await aiosqlite.connect(tmp_path / "old.db")
+    await db.executescript("\n".join(MIGRATIONS[:7]) + "\nPRAGMA user_version = 7;")
+    await db.execute(
+        "INSERT INTO matches (guild_id, channel_id, host_id, mode, max_players, status, created_at) "
+        "VALUES (1, 2, 3, 'solo', 1, 'lobby', 4)"
+    )
+    await db.commit()
+    await db.close()
+    s = Store(tmp_path / "old.db")
+    await s.connect()
+    match = await s.get_match(1)
+    assert (match.tags, match.exclude_tags) == ("", "")
+    await s.close()
