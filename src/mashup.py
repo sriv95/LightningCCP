@@ -462,7 +462,7 @@ class MashupService:
     async def _refresh(self, mashup: MashupRow, player: MashupPlayer) -> int:
         """Reads the player's recent submissions; returns how many new solves it stored."""
         cells = await self._store.mashup_cells(mashup.id)
-        subs = await self._cf.user_status(player.handle, count=100)
+        subs = await self._cf.user_status(player.handle, count=100, since=mashup.started_at)
         solves = {}
         for c in cells:
             found = first_solve(subs, c.key, c.since, mashup.ends_at)

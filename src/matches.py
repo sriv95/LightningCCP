@@ -278,7 +278,7 @@ class MatchService:
             if p.solved_at is not None or p.gave_up:
                 continue
             try:
-                subs = await self._cf.user_status(p.handle, count=100)
+                subs = await self._cf.user_status(p.handle, count=100, since=match.started_at)
             except Exception:
                 if not tolerant or p.user_id == strict_user:
                     raise

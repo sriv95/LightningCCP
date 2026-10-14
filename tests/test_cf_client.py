@@ -220,3 +220,38 @@ async def test_client_counts_requests_and_rate_limit_answers():
     assert (client.requests, client.rate_limited) == (0, 0)
     await client.user_info("a")
     assert (client.requests, client.rate_limited) == (2, 1)
+
+
+def status_row(i, at):
+    return {
+        "id": i,
+        "creationTimeSeconds": at,
+        "problem": {"contestId": 1, "index": "A"},
+        "verdict": "OK",
+    }
+
+
+async def test_user_status_since_reads_older_pages_until_one_reaches_back():
+    newest = [status_row(i, 5000 - i) for i in range(3)]  # all after `since`
+    middle = [status_row(10 + i, 4000 - i) for i in range(3)]  # still after
+    oldest = [status_row(20 + i, 900 - i) for i in range(2)]  # before: stop here
+    client, session, _ = make_client(ok(newest), ok(middle), ok(oldest))
+    subs = await client.user_status("a", count=3, since=1000)
+    assert len(subs) == 8
+    assert [params["from"] for _, params in session.calls] == [1, 4, 7]
+    assert all(params["count"] == 3 for _, params in session.calls)
+
+
+async def test_user_status_since_stops_after_one_page_when_it_reaches_back():
+    client, session, _ = make_client(ok([status_row(1, 5000), status_row(2, 100)]))
+    assert len(await client.user_status("a", count=2, since=1000)) == 2
+    assert len(session.calls) == 1
+
+
+async def test_user_status_since_stops_on_a_short_page_and_caps_the_pages():
+    client, session, _ = make_client(ok([status_row(1, 5000)]))  # fewer than count: no more
+    await client.user_status("a", count=3, since=1000)
+    assert len(session.calls) == 1
+    full = [ok([status_row(i, 5000 - i) for i in range(2)]) for _ in range(9)]
+    client, session, _ = make_client(*full)
+    assert len(await client.user_status("a", count=2, since=1000)) == 10  # 5 pages at most

@@ -17,7 +17,7 @@ class FakeCF:
     def __init__(self):
         self.subs: list[Submission] = []
 
-    async def user_status(self, handle, count=None):
+    async def user_status(self, handle, count=None, since=None):
         return list(self.subs)
 
 

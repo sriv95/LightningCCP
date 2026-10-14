@@ -25,9 +25,11 @@ class FakeCF:
         self.subs: dict[str, list[Submission]] = {}
         self.errors: dict[str, Exception] = {}
         self.before_status = None  # optional async callable(handle), runs mid-fetch
+        self.since = None  # the `since` of the last read
 
-    async def user_status(self, handle, count=None):
+    async def user_status(self, handle, count=None, since=None):
         await asyncio.sleep(0)  # yield, so concurrent requests interleave like real network calls
+        self.since = since
         if self.before_status:
             await self.before_status(handle)
         if handle in self.errors:
@@ -637,3 +639,12 @@ async def test_expiry_of_a_match_finished_meanwhile_adds_no_time_is_up_note(env,
     (view,) = await svc.expire_due()
     assert view.match.status == "finished" and view.note is None
     assert deltas(view) == deltas(done)  # scored once
+
+
+async def test_check_reads_reach_back_to_the_start_of_the_match(env):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "duel", 2)
+    await svc.join(lobby.match.id, 2)
+    started_ = await svc.start(lobby.match.id, 1)
+    await svc.check(lobby.match.id, 1)
+    assert cf.since == started_.match.started_at

@@ -9,6 +9,7 @@ from src.cf.models import Contest, Problem, RatingChange, Standing, Submission, 
 from src.errors import CodeforcesError, HandleNotFound
 
 BASE_URL = "https://codeforces.com/api/"
+STATUS_PAGES = 5  # pages of submissions a `since` read may take
 
 
 class CodeforcesClient:
@@ -104,20 +105,31 @@ class CodeforcesClient:
             for c in data
         ]
 
-    async def user_status(self, handle: str, count: int | None = None) -> list[Submission]:
-        params: dict[str, Any] = {"handle": handle, "from": 1}
-        if count is not None:
-            params["count"] = count
-        data = await self._call("user.status", params)
-        return [
-            Submission(
-                id=s["id"],
-                created=s["creationTimeSeconds"],
-                problem_key=f"{s['problem'].get('contestId', '')}{s['problem']['index']}",
-                verdict=s.get("verdict"),
-            )
-            for s in data
-        ]
+    async def user_status(
+        self, handle: str, count: int | None = None, since: int | None = None
+    ) -> list[Submission]:
+        """The newest `count` submissions (all when None). With `since`, keeps reading older
+        pages of `count` until one reaches back before that time (at most STATUS_PAGES pages),
+        so a busy player's early submissions of a contest are not cut off."""
+        out: list[Submission] = []
+        for page in range(STATUS_PAGES if since is not None and count else 1):
+            params: dict[str, Any] = {"handle": handle, "from": 1 + page * (count or 0)}
+            if count is not None:
+                params["count"] = count
+            data = await self._call("user.status", params)
+            got = [
+                Submission(
+                    id=s["id"],
+                    created=s["creationTimeSeconds"],
+                    problem_key=f"{s['problem'].get('contestId', '')}{s['problem']['index']}",
+                    verdict=s.get("verdict"),
+                )
+                for s in data
+            ]
+            out += got
+            if len(got) < (count or 0) or any(s.created < (since or 0) for s in got):
+                break
+        return out
 
     async def standings(
         self, contest_id: int, handles: Sequence[str], chunk: int = 100

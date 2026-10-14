@@ -21,9 +21,10 @@ class FakeCF:
         self.errors: dict[str, Exception] = {}
         self.calls: list[str] = []
 
-    async def user_status(self, handle, count=None):
+    async def user_status(self, handle, count=None, since=None):
         await asyncio.sleep(0)
         self.calls.append(handle)
+        self.since = since
         if handle in self.errors:
             raise self.errors[handle]
         return list(self.subs.get(handle, []))
@@ -884,3 +885,10 @@ async def test_wins_count_finished_contests_won_against_someone(env):
     tie = await started(svc, 2, host=4)
     await finish_contest(svc, cf, clock, tie, {})
     assert await svc.wins(GUILD, 4) == 0  # nothing solved
+
+
+async def test_reads_reach_back_to_the_start_of_the_contest(env):
+    svc, store, cf, clock = env
+    view = await started(svc, 2)
+    await svc.check(view.mashup.id, 1)
+    assert cf.since == view.mashup.started_at
