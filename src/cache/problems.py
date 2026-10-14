@@ -1,4 +1,5 @@
 import logging
+import time
 
 from discord.ext import tasks
 
@@ -16,6 +17,7 @@ class ProblemCache:
         self._store = store
         self.problems: list[Problem] = []
         self.tags: frozenset[str] = frozenset()
+        self.refreshed_at: int | None = None  # epoch seconds of the last live fetch
         self._loop = tasks.loop(hours=6)(self._tick)
 
     def _set(self, problems: list[Problem]) -> None:
@@ -36,6 +38,7 @@ class ProblemCache:
             raise CodeforcesError("Codeforces returned no problems")
         await self._store.replace_problems(problems)
         self._set(problems)
+        self.refreshed_at = int(time.time())
 
     async def _tick(self) -> None:
         try:

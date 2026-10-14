@@ -1,4 +1,5 @@
 import logging
+import time
 
 import aiohttp
 import discord
@@ -39,6 +40,7 @@ class LightningBot(commands.Bot):
             help_command=None,
         )
         self.config = config
+        self.started_at = int(time.time())
 
     async def setup_hook(self) -> None:
         store = Store(self.config.db_path)

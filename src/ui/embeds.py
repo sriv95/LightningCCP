@@ -105,6 +105,36 @@ def member_profile_embed(
     )
 
 
+def status_embed(
+    *,
+    latency_ms: int,
+    started_at: int,
+    problems: int,
+    problems_at: int | None,
+    contests: int,
+    contests_at: int | None,
+    requests: int,
+    rate_limited: int,
+    matches: int,
+    mashups: int,
+) -> discord.Embed:
+    """How the bot is doing: uptime, the caches, Codeforces calls and running games."""
+
+    def fetched(at: int | None) -> str:
+        return f"fetched <t:{at}:R>" if at else "loaded from the database, not fetched yet"
+
+    lines = [
+        f"Online since <t:{started_at}:R>, Discord latency {latency_ms} ms",
+        f"Problems: {problems} ({fetched(problems_at)})",
+        f"Contests: {contests} ({fetched(contests_at)})",
+        f"Codeforces calls since start: {requests} (rate limited {rate_limited})",
+        f"Unfinished in all servers: {matches} matches, {mashups} contests",
+    ]
+    return discord.Embed(
+        title="Status", description="\n".join(lines), colour=discord.Colour.blurple()
+    )
+
+
 def _contest_line(c: Contest) -> str:
     hours, minutes = divmod(c.duration // 60, 60)
     when = f"<t:{c.start_time}:f> (<t:{c.start_time}:R>)" if c.start_time else "time not set"

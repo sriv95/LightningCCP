@@ -1026,6 +1026,16 @@ class Store:
         row = await self._one("SELECT * FROM mashups WHERE id = ?", (mashup_id,))
         return MashupRow(**dict(row)) if row else None
 
+    async def unfinished_counts(self) -> tuple[int, int]:
+        """(matches, contests) that are in a lobby or running, in every server."""
+        counts = []
+        for table in ("matches", "mashups"):
+            row = await self._one(
+                f"SELECT COUNT(*) FROM {table} WHERE status IN ('lobby', 'active')"
+            )
+            counts.append(row[0])
+        return counts[0], counts[1]
+
     async def active_mashup_for(self, guild_id: int, user_id: int) -> int | None:
         """The unfinished contest (lobby or running) the user is in, if any."""
         row = await self._one(

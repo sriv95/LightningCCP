@@ -8,7 +8,8 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "2. Everyone starts at a match rating of 800 in each server. Matches and contests move it.\n"
         "3. Try `/gimme` for a problem, `/daily` for double rating once a day, or "
         "`/match solo` to practice.\n"
-        "4. `/handle show` shows a profile and `/handle unlink` removes your link.",
+        "4. `/handle show` shows a profile and `/handle unlink` removes your link.\n"
+        "5. `/status` shows whether the bot and its Codeforces data are healthy.",
     ),
     "problems": (
         "Problems",

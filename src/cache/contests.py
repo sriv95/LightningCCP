@@ -1,4 +1,5 @@
 import logging
+import time
 
 from discord.ext import tasks
 
@@ -16,6 +17,7 @@ class ContestCache:
         self._cf = cf
         self._store = store
         self.contests: list[Contest] = []
+        self.refreshed_at: int | None = None  # epoch seconds of the last live fetch
         self._loop = tasks.loop(minutes=30)(self._tick)
 
     async def load(self) -> None:
@@ -27,6 +29,7 @@ class ContestCache:
             raise CodeforcesError("Codeforces returned no contests")
         await self._store.replace_contests(contests)
         self.contests = contests
+        self.refreshed_at = int(time.time())
 
     async def _tick(self) -> None:
         try:
