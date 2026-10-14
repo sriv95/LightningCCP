@@ -276,12 +276,16 @@ class Store:
 
     # --- caches ---
     async def replace_contests(self, contests: Sequence[Contest]) -> None:
-        await self._db.execute("DELETE FROM contest")
-        await self._db.executemany(
-            "INSERT INTO contest (id, name, type, phase, start_time, duration) VALUES (?, ?, ?, ?, ?, ?)",
-            [(c.id, c.name, c.type, c.phase, c.start_time, c.duration) for c in contests],
-        )
-        await self._db.commit()
+        try:
+            await self._db.execute("DELETE FROM contest")
+            await self._db.executemany(
+                "INSERT INTO contest (id, name, type, phase, start_time, duration) VALUES (?, ?, ?, ?, ?, ?)",
+                [(c.id, c.name, c.type, c.phase, c.start_time, c.duration) for c in contests],
+            )
+            await self._db.commit()
+        except Exception:
+            await self._db.rollback()
+            raise
 
     async def load_contests(self) -> list[Contest]:
         rows = await self._all("SELECT * FROM contest")
@@ -291,12 +295,19 @@ class Store:
         ]
 
     async def replace_problems(self, problems: Sequence[Problem]) -> None:
-        await self._db.execute("DELETE FROM problem")
-        await self._db.executemany(
-            "INSERT INTO problem (contest_id, idx, name, rating, tags) VALUES (?, ?, ?, ?, ?)",
-            [(p.contest_id, p.index, p.name, p.rating, json.dumps(list(p.tags))) for p in problems],
-        )
-        await self._db.commit()
+        try:
+            await self._db.execute("DELETE FROM problem")
+            await self._db.executemany(
+                "INSERT INTO problem (contest_id, idx, name, rating, tags) VALUES (?, ?, ?, ?, ?)",
+                [
+                    (p.contest_id, p.index, p.name, p.rating, json.dumps(list(p.tags)))
+                    for p in problems
+                ],
+            )
+            await self._db.commit()
+        except Exception:
+            await self._db.rollback()
+            raise
 
     async def load_problems(self) -> list[Problem]:
         rows = await self._all("SELECT * FROM problem")

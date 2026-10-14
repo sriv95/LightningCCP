@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from src.cf.models import Contest, Problem
@@ -132,4 +134,24 @@ async def test_problem_cache_roundtrip(store):
     p = Problem(1700, "A", "Foo", 800, ("math", "dp"))
     q = Problem(1700, "B", "Bar", None, ())
     await store.replace_problems([p, q])
+    assert sorted(await store.load_problems(), key=lambda x: x.key) == [p, q]
+
+
+async def test_failed_contest_replace_keeps_cache(store):
+    a = Contest(1, "A", "CF", "BEFORE", 1000, 7200)
+    b = Contest(2, "B", "ICPC", "FINISHED", None, 60)
+    await store.replace_contests([a, b])
+    with pytest.raises(sqlite3.IntegrityError):
+        await store.replace_contests([a, a])  # duplicate id
+    await store.link_handle(1, 1, "a", None)  # unrelated write must not commit the DELETE
+    assert sorted(await store.load_contests(), key=lambda c: c.id) == [a, b]
+
+
+async def test_failed_problem_replace_keeps_cache(store):
+    p = Problem(1700, "A", "Foo", 800, ("math", "dp"))
+    q = Problem(1700, "B", "Bar", None, ())
+    await store.replace_problems([p, q])
+    with pytest.raises(sqlite3.IntegrityError):
+        await store.replace_problems([p, p])  # duplicate (contest_id, idx)
+    await store.link_handle(1, 1, "a", None)  # unrelated write must not commit the DELETE
     assert sorted(await store.load_problems(), key=lambda x: x.key) == [p, q]
