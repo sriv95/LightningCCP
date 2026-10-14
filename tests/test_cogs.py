@@ -119,12 +119,14 @@ def test_member_profile_embed_shows_rating_games_and_streak():
         peak=859,
         streak=3,
         codeforces="h 1500 (specialist)",
+        contest_wins=1,
     )
     assert e.title == "Ann"
     lines = e.description.splitlines()
     assert lines[0] == "Match rating: **849** (#2 of 7)" and lines[1] == "Peak: 859"
     assert lines[2] == "Games: 2 matches, 1 contests (rating up 1, down 1, even 1)"
-    assert lines[3] == "Daily streak: 3" and lines[4] == "Codeforces: h 1500 (specialist)"
+    assert lines[3] == "Contest wins: 1" and lines[4] == "Daily streak: 3"
+    assert lines[5] == "Codeforces: h 1500 (specialist)"
     fresh = member_profile_embed(
         me,
         rating=800,

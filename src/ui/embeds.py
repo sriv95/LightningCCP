@@ -84,6 +84,7 @@ def member_profile_embed(
     peak: int | None,
     streak: int,
     codeforces: str,
+    contest_wins: int = 0,
 ) -> discord.Embed:
     """A member's server card: match rating and rank, games, how their rating moved, daily streak
     and Codeforces rating. changes: the rating change of each finished game."""
@@ -95,6 +96,7 @@ def member_profile_embed(
         f"Peak: {peak}" if peak else "Peak: none yet",
         f"Games: {matches} matches, {contests} contests "
         f"(rating up {up}, down {down}, even {len(changes) - up - down})",
+        f"Contest wins: {contest_wins}",
         f"Daily streak: {streak}",
         f"Codeforces: {codeforces}",
     ]

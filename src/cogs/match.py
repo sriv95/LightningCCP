@@ -374,6 +374,7 @@ class MatchCog(commands.Cog, name="Match"):
             peak=max((r for _, r in series), default=None),
             streak=streak,
             codeforces=codeforces,
+            contest_wins=await s.mashups.wins(guild_id, target.id),
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 

@@ -869,3 +869,16 @@ async def test_start_pings_every_player_in_the_thread(env):
     await svc.set_thread(view.mashup.id, 9)
     await cog.log_started(await svc.view(view.mashup.id))
     assert sent == [(text, True)]
+
+
+async def test_wins_count_finished_contests_won_against_someone(env):
+    svc, store, cf, clock = env
+    view = await started(svc, 2)
+    await finish_contest(svc, cf, clock, view, {"h1": [(0, view.mashup.started_at + 60)]})
+    assert await svc.wins(GUILD, 1) == 1 and await svc.wins(GUILD, 2) == 0
+    lone = await started(svc, host=3)
+    await finish_contest(svc, cf, clock, lone, {"h3": [(0, lone.mashup.started_at + 60)]})
+    assert await svc.wins(GUILD, 3) == 0  # nobody to beat
+    tie = await started(svc, 2, host=4)
+    await finish_contest(svc, cf, clock, tie, {})
+    assert await svc.wins(GUILD, 4) == 0  # nothing solved

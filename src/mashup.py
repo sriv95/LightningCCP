@@ -198,6 +198,14 @@ class MashupService:
     async def set_thread(self, mashup_id: int, thread_id: int) -> None:
         await self._store.set_mashup_thread(mashup_id, thread_id)
 
+    async def wins(self, guild_id: int, user_id: int, limit: int = 200) -> int:
+        """Finished contests (the newest `limit`) the user's team won or tied for first, with
+        something solved and another team to beat."""
+        return sum(
+            r.rank == 1 and r.solved > 0 and r.entrants > 1
+            for r in await self.history(guild_id, user_id, limit)
+        )
+
     async def set_message(self, mashup_id: int, channel_id: int, message_id: int) -> None:
         await self._store.set_mashup_message(mashup_id, channel_id, message_id)
 
