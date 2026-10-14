@@ -5,7 +5,7 @@ from discord.ext import tasks
 from src.cf.client import CodeforcesClient
 from src.cf.models import Problem
 from src.db.store import Store
-from src.errors import CacheNotReady
+from src.errors import CacheNotReady, CodeforcesError
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +32,8 @@ class ProblemCache:
 
     async def refresh(self) -> None:
         problems = await self._cf.problemset()
+        if not problems:  # keep the old data; the tick retries in 5 minutes
+            raise CodeforcesError("Codeforces returned no problems")
         await self._store.replace_problems(problems)
         self._set(problems)
 

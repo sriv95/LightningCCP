@@ -4,7 +4,7 @@ from src.cache.contests import ContestCache
 from src.cache.problems import ProblemCache
 from src.cf.models import Contest, Problem
 from src.db.store import Store
-from src.errors import CacheNotReady
+from src.errors import CacheNotReady, CodeforcesError
 
 
 class FakeCF:
@@ -53,3 +53,25 @@ async def test_contest_refresh_and_load(store):
     fresh = ContestCache(FakeCF(), store)
     await fresh.load()
     assert fresh.contests == [c]
+
+
+async def test_problem_refresh_empty_keeps_old_data(store):
+    p = Problem(1, "A", "x", 800, ("dp",))
+    cache = ProblemCache(FakeCF(problems=[p]), store)
+    await cache.refresh()
+    cache._cf = FakeCF()
+    with pytest.raises(CodeforcesError):
+        await cache.refresh()
+    assert cache.require() == [p]
+    assert await store.load_problems() == [p]
+
+
+async def test_contest_refresh_empty_keeps_old_data(store):
+    c = Contest(1, "A", "CF", "BEFORE", 1000, 7200)
+    cache = ContestCache(FakeCF(contests=[c]), store)
+    await cache.refresh()
+    cache._cf = FakeCF()
+    with pytest.raises(CodeforcesError):
+        await cache.refresh()
+    assert cache.contests == [c]
+    assert await store.load_contests() == [c]

@@ -5,6 +5,7 @@ from discord.ext import tasks
 from src.cf.client import CodeforcesClient
 from src.cf.models import Contest
 from src.db.store import Store
+from src.errors import CodeforcesError
 from src.logic import refresh_minutes
 
 log = logging.getLogger(__name__)
@@ -22,6 +23,8 @@ class ContestCache:
 
     async def refresh(self) -> None:
         contests = await self._cf.contests()
+        if not contests:  # keep the old data; the tick retries in 5 minutes
+            raise CodeforcesError("Codeforces returned no contests")
         await self._store.replace_contests(contests)
         self.contests = contests
 
