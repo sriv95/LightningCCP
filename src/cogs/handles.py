@@ -117,29 +117,32 @@ class HandlesCog(commands.Cog, name="Handles"):
         await interaction.followup.send(f"Linked you to **{user.handle}**.", ephemeral=True)
 
     @handle.command(name="show", description="Show a member's Codeforces profile")
-    @app_commands.describe(member="Defaults to you")
+    @app_commands.describe(
+        member="Defaults to you", handle="Find the member who linked this Codeforces handle"
+    )
     async def show(
-        self, interaction: discord.Interaction, member: discord.Member | None = None
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member | None = None,
+        handle: str | None = None,
     ) -> None:
+        if member is not None and handle is not None:
+            raise BotError("Give a member or a handle, not both.")
         await interaction.response.defer(ephemeral=True)
+        if handle is not None:
+            owner = await self.s.db.user_for_handle(interaction.guild_id, handle)
+            if owner is None:
+                raise BotError(f"No member is linked to {handle}.")
+            try:
+                member = await interaction.guild.fetch_member(owner)
+            except discord.NotFound:
+                raise BotError(f"{handle} is linked to a member who left this server.") from None
         target = member or interaction.user
         linked = await self.s.db.get_handle(interaction.guild_id, target.id)
         if linked is None:
             raise NotLinked(f"{target.display_name} has no linked handle.")
         user = await self.s.cf.user_info(linked.handle)
         await interaction.followup.send(embed=profile_embed(user, target), ephemeral=True)
-
-    @handle.command(name="whois", description="Find which member owns a handle")
-    @app_commands.describe(handle="Codeforces handle")
-    async def whois(self, interaction: discord.Interaction, handle: str) -> None:
-        owner = await self.s.db.user_for_handle(interaction.guild_id, handle)
-        if owner is None:
-            raise BotError(f"No member is linked to {handle}.")
-        await interaction.response.send_message(
-            f"**{handle}** is <@{owner}>.",
-            allowed_mentions=discord.AllowedMentions.none(),
-            ephemeral=True,
-        )
 
     @handle.command(name="unlink", description="Remove your linked handle")
     async def unlink(self, interaction: discord.Interaction) -> None:

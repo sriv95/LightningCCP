@@ -53,7 +53,6 @@ def test_handles_group_commands():
     assert {c.name for c in HandlesCog.handle.commands} == {
         "link",
         "show",
-        "whois",
         "unlink",
     }
     assert HandlesCog.handle.guild_only
