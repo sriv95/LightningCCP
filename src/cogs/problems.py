@@ -35,6 +35,7 @@ class ProblemsCog(commands.Cog, name="Problems"):
         max_rating="Maximum rating",
         tags="Comma-separated tags; the problem must have all of them",
         exclude_tags="Comma-separated tags to avoid",
+        contest_id="Only problems from this Codeforces contest",
     )
     async def gimme(
         self,
@@ -44,6 +45,7 @@ class ProblemsCog(commands.Cog, name="Problems"):
         max_rating: Rating | None = None,
         tags: str | None = None,
         exclude_tags: str | None = None,
+        contest_id: int | None = None,
     ) -> None:
         await interaction.response.defer()
         s = self.s
@@ -53,8 +55,8 @@ class ProblemsCog(commands.Cog, name="Problems"):
         if linked:
             solved = solved_keys(await s.cf.user_status(linked.handle))
         footer = None if linked else "Link your handle with /handle link to hide solved problems."
-        if rating is None and min_rating is None and max_rating is None:
-            # No range given: aim at the caller's match rating.
+        if rating is None and min_rating is None and max_rating is None and contest_id is None:
+            # No range or contest given: aim at the caller's match rating.
             mine = await s.db.rating(interaction.guild_id, interaction.user.id)
             rating = round_rating(mine)
             footer = f"Rating {rating} (from your match rating)." if linked else footer
@@ -67,6 +69,7 @@ class ProblemsCog(commands.Cog, name="Problems"):
             tags=parse_tags(tags),
             exclude_tags=parse_tags(exclude_tags),
             solved=solved,
+            contest_id=contest_id,
         )
         if not pool:
             raise BotError("No problems match those filters.")

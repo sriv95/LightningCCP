@@ -59,10 +59,13 @@ def filter_problems(
     tags: frozenset[str] = frozenset(),
     exclude_tags: frozenset[str] = frozenset(),
     solved: frozenset[str] = frozenset(),
+    contest_id: int | None = None,
 ) -> list[Problem]:
     out = []
     for p in problems:
         if p.rating is None:  # unrated problems are not useful for recommendations
+            continue
+        if contest_id is not None and p.contest_id != contest_id:
             continue
         if min_rating is not None and p.rating < min_rating:
             continue

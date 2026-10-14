@@ -73,6 +73,13 @@ def test_filter_problems_rating_range_and_unrated_excluded():
     assert [p.key for p in filter_problems(ps, max_rating=800)] == ["1A"]
 
 
+def test_filter_problems_by_contest():
+    ps = [P(1, "A", 800), P(2, "A", 900), P(2, "B", None), P(2, "C", 1000)]
+    assert [p.key for p in filter_problems(ps, contest_id=2)] == ["2A", "2C"]  # unrated stays out
+    assert filter_problems(ps, contest_id=3) == []
+    assert [p.key for p in filter_problems(ps, contest_id=2, min_rating=950)] == ["2C"]
+
+
 def test_filter_problems_tags_and_solved():
     ps = [P(1, "A", 800, "dp", "math"), P(1, "B", 800, "dp"), P(1, "C", 800, "math")]
     assert [p.key for p in filter_problems(ps, tags=frozenset({"dp", "math"}))] == ["1A"]
