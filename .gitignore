@@ -1,0 +1,9 @@
+docs/
+.env
+.venv/
+__pycache__/
+*.db
+data/
+.ruff_cache/
+.pytest_cache/
+.superpowers/
