@@ -175,6 +175,13 @@ class MashupService:
             self._check_team(mashup.teams, team)
         else:
             team = None
+        if mashup.teams and user_id in {
+            p.user_id for p in await self._store.mashup_players(mashup_id)
+        }:
+            if user_id == mashup.host_id:
+                raise BotError("The host stays in team 1.")
+            await self._store.move_mashup_player(mashup_id, user_id, team, mashup.team_size)
+            return await self.view(mashup_id)
         await self._store.add_mashup_player(
             mashup_id,
             mashup.guild_id,

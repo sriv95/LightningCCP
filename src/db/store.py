@@ -989,6 +989,28 @@ class Store:
         except sqlite3.IntegrityError as exc:
             raise AlreadyInMatch() from exc
 
+    async def move_mashup_player(
+        self, mashup_id: int, user_id: int, team: int, team_size: int = 0
+    ) -> None:
+        """Puts a lobby player into another team, unless that team is full."""
+        async with self._tx() as db:
+            cur = await db.execute("SELECT status FROM mashups WHERE id = ?", (mashup_id,))
+            row = await cur.fetchone()
+            if row is None or row["status"] != "lobby":
+                raise MatchClosed("This contest is no longer open.")
+            if team_size:
+                cur = await db.execute(
+                    "SELECT COUNT(*) FROM mashup_players "
+                    "WHERE mashup_id = ? AND team = ? AND user_id != ?",
+                    (mashup_id, team, user_id),
+                )
+                if (await cur.fetchone())[0] >= team_size:
+                    raise MatchFull("That team is full.")
+            await db.execute(
+                "UPDATE mashup_players SET team = ? WHERE mashup_id = ? AND user_id = ?",
+                (team, mashup_id, user_id),
+            )
+
     async def remove_mashup_player(self, mashup_id: int, user_id: int) -> bool:
         n = await self._write(
             "DELETE FROM mashup_players WHERE mashup_id = ? AND user_id = ? "

@@ -516,3 +516,19 @@ async def test_team_size_caps_each_team(env):
         await team_lobby(svc, host=4, teams=0, team_size=2)  # needs a team contest
     with pytest.raises(BotError):
         await team_lobby(svc, host=4, team_size=MASHUP_MAX_PLAYERS + 1)
+
+
+async def test_join_again_changes_team(env):
+    svc, store, cf, clock = env
+    mid = (await team_lobby(svc, team_size=2)).mashup.id
+    await svc.join(mid, 2, 1)
+    await svc.join(mid, 3, 2)
+    with pytest.raises(MatchFull):
+        await svc.join(mid, 3, 1)  # team 1 is full; player 3 stays in team 2
+    view = await svc.join(mid, 2, 2)
+    assert {p.user_id: p.team for p in view.players} == {1: 1, 2: 2, 3: 2}
+    assert (await svc.join(mid, 2, 2)).players[1].team == 2  # same team again changes nothing
+    with pytest.raises(BotError, match="host"):
+        await svc.join(mid, 1, 2)
+    with pytest.raises(BotError):
+        await svc.join(mid, 2, 9)  # an unknown team
