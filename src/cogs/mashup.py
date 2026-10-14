@@ -7,7 +7,7 @@ from discord.ext import commands, tasks
 
 from src.cogs.match import EXCLUDE_HELP, TAGS_HELP
 from src.errors import BotError, report_error
-from src.logic import MASHUP_MAX_PLAYERS, MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAMS, tag_suggestions
+from src.logic import MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAM_SIZE, MASHUP_MAX_TEAMS, tag_suggestions
 from src.mashup import MashupView
 from src.ui.embeds import mashup_embed
 
@@ -22,6 +22,8 @@ BUTTONS = {
     "check": ("Check", discord.ButtonStyle.primary),
     "rematch": ("Rematch", discord.ButtonStyle.primary),
 }
+TEAMS = "Number of teams (default 10)"
+TEAM_SIZE = "Players in each team, 1-5 (default 1: every player is a team of their own)"
 OPTIONS = {
     "min_rating": "Easiest problem rating (default 800)",
     "max_rating": "Hardest problem rating (default 1500)",
@@ -29,16 +31,17 @@ OPTIONS = {
     "hour": "Hours the contest lasts (default 2)",
     "minute": "Extra minutes (default 0)",
     "penalty": "Minutes added per wrong attempt before a solve (default 0)",
+    "teams": TEAMS,
+    "players": TEAM_SIZE,
     "tags": TAGS_HELP,
     "exclude_tags": EXCLUDE_HELP,
 }
 VIRTUAL = {
     "contest_id": "Codeforces contest id to replay (it must have finished)",
     "penalty": OPTIONS["penalty"],
+    "teams": TEAMS,
+    "players": TEAM_SIZE,
 }
-PLAYERS = "Maximum number of players (default 20)"
-TEAMS = "Number of teams (default 2)"
-TEAM_SIZE = "Maximum players in each team (default: no cap, 20 players in all)"
 ACTIONS = {
     "lobby": ("join", "start", "leave"),
     "active": ("check",),
@@ -143,7 +146,7 @@ class MashupCog(commands.Cog, name="Mashup"):
     @host_rated.command(
         name="contest", description="Open a rated timed contest lobby with a live scoreboard"
     )
-    @app_commands.describe(**OPTIONS, players=PLAYERS)
+    @app_commands.describe(**OPTIONS)
     async def rated_contest(
         self,
         interaction: discord.Interaction,
@@ -153,39 +156,8 @@ class MashupCog(commands.Cog, name="Mashup"):
         hour: app_commands.Range[int, 0, 24] = 2,
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
-        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] = MASHUP_MAX_PLAYERS,
-        tags: str | None = None,
-        exclude_tags: str | None = None,
-    ) -> None:
-        await self._open(
-            interaction,
-            min_rating,
-            max_rating,
-            count,
-            hour,
-            minute,
-            penalty,
-            max_players=players,
-            tags=tags,
-            exclude_tags=exclude_tags,
-        )
-
-    @host_rated.command(
-        name="team-contest",
-        description="Open a rated team contest lobby; Join asks for a team number",
-    )
-    @app_commands.describe(teams=TEAMS, **OPTIONS, players=TEAM_SIZE)
-    async def rated_team_contest(
-        self,
-        interaction: discord.Interaction,
-        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = 2,
-        min_rating: Rating = 800,
-        max_rating: Rating = 1500,
-        count: app_commands.Range[int, 1, MASHUP_MAX_PROBLEMS] = 5,
-        hour: app_commands.Range[int, 0, 24] = 2,
-        minute: app_commands.Range[int, 0, 59] = 0,
-        penalty: app_commands.Range[int, 0, 120] = 0,
-        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] | None = None,
+        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = MASHUP_MAX_TEAMS,
+        players: app_commands.Range[int, 1, MASHUP_MAX_TEAM_SIZE] = 1,
         tags: str | None = None,
         exclude_tags: str | None = None,
     ) -> None:
@@ -198,15 +170,30 @@ class MashupCog(commands.Cog, name="Mashup"):
             minute,
             penalty,
             teams,
-            team_size=players or 0,
+            players,
+            True,
             tags=tags,
             exclude_tags=exclude_tags,
         )
 
+    @host_rated.command(
+        name="virtual", description="Open a rated lobby that replays a finished Codeforces contest"
+    )
+    @app_commands.describe(**VIRTUAL)
+    async def rated_virtual(
+        self,
+        interaction: discord.Interaction,
+        contest_id: int,
+        penalty: app_commands.Range[int, 0, 120] = 0,
+        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = MASHUP_MAX_TEAMS,
+        players: app_commands.Range[int, 1, MASHUP_MAX_TEAM_SIZE] = 1,
+    ) -> None:
+        await self._virtual(interaction, contest_id, penalty, teams, players, True)
+
     @host_unrated.command(
         name="contest", description="Open an unrated timed contest lobby with a live scoreboard"
     )
-    @app_commands.describe(**OPTIONS, players=PLAYERS)
+    @app_commands.describe(**OPTIONS)
     async def unrated_contest(
         self,
         interaction: discord.Interaction,
@@ -216,40 +203,8 @@ class MashupCog(commands.Cog, name="Mashup"):
         hour: app_commands.Range[int, 0, 24] = 2,
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
-        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] = MASHUP_MAX_PLAYERS,
-        tags: str | None = None,
-        exclude_tags: str | None = None,
-    ) -> None:
-        await self._open(
-            interaction,
-            min_rating,
-            max_rating,
-            count,
-            hour,
-            minute,
-            penalty,
-            max_players=players,
-            rated=False,
-            tags=tags,
-            exclude_tags=exclude_tags,
-        )
-
-    @host_unrated.command(
-        name="team-contest",
-        description="Open an unrated team contest lobby; Join asks for a team number",
-    )
-    @app_commands.describe(teams=TEAMS, **OPTIONS, players=TEAM_SIZE)
-    async def unrated_team_contest(
-        self,
-        interaction: discord.Interaction,
-        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = 2,
-        min_rating: Rating = 800,
-        max_rating: Rating = 1500,
-        count: app_commands.Range[int, 1, MASHUP_MAX_PROBLEMS] = 5,
-        hour: app_commands.Range[int, 0, 24] = 2,
-        minute: app_commands.Range[int, 0, 59] = 0,
-        penalty: app_commands.Range[int, 0, 120] = 0,
-        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] | None = None,
+        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = MASHUP_MAX_TEAMS,
+        players: app_commands.Range[int, 1, MASHUP_MAX_TEAM_SIZE] = 1,
         tags: str | None = None,
         exclude_tags: str | None = None,
     ) -> None:
@@ -262,82 +217,35 @@ class MashupCog(commands.Cog, name="Mashup"):
             minute,
             penalty,
             teams,
-            rated=False,
-            team_size=players or 0,
+            players,
+            False,
             tags=tags,
             exclude_tags=exclude_tags,
         )
-
-    @host_rated.command(
-        name="virtual", description="Open a rated lobby that replays a finished Codeforces contest"
-    )
-    @app_commands.describe(**VIRTUAL, players=PLAYERS)
-    async def rated_virtual(
-        self,
-        interaction: discord.Interaction,
-        contest_id: int,
-        penalty: app_commands.Range[int, 0, 120] = 0,
-        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] = MASHUP_MAX_PLAYERS,
-    ) -> None:
-        await self._virtual(interaction, contest_id, penalty, players, True)
 
     @host_unrated.command(
         name="virtual",
         description="Open an unrated lobby that replays a finished Codeforces contest",
     )
-    @app_commands.describe(**VIRTUAL, players=PLAYERS)
+    @app_commands.describe(**VIRTUAL)
     async def unrated_virtual(
         self,
         interaction: discord.Interaction,
         contest_id: int,
         penalty: app_commands.Range[int, 0, 120] = 0,
-        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] = MASHUP_MAX_PLAYERS,
+        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = MASHUP_MAX_TEAMS,
+        players: app_commands.Range[int, 1, MASHUP_MAX_TEAM_SIZE] = 1,
     ) -> None:
-        await self._virtual(interaction, contest_id, penalty, players, False)
-
-    @host_rated.command(
-        name="team-virtual",
-        description="Open a rated team lobby that replays a finished Codeforces contest",
-    )
-    @app_commands.describe(**VIRTUAL, teams=TEAMS, players=TEAM_SIZE)
-    async def rated_team_virtual(
-        self,
-        interaction: discord.Interaction,
-        contest_id: int,
-        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = 2,
-        penalty: app_commands.Range[int, 0, 120] = 0,
-        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] | None = None,
-    ) -> None:
-        await self._virtual(
-            interaction, contest_id, penalty, MASHUP_MAX_PLAYERS, True, teams, players or 0
-        )
-
-    @host_unrated.command(
-        name="team-virtual",
-        description="Open an unrated team lobby that replays a finished Codeforces contest",
-    )
-    @app_commands.describe(**VIRTUAL, teams=TEAMS, players=TEAM_SIZE)
-    async def unrated_team_virtual(
-        self,
-        interaction: discord.Interaction,
-        contest_id: int,
-        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = 2,
-        penalty: app_commands.Range[int, 0, 120] = 0,
-        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] | None = None,
-    ) -> None:
-        await self._virtual(
-            interaction, contest_id, penalty, MASHUP_MAX_PLAYERS, False, teams, players or 0
-        )
+        await self._virtual(interaction, contest_id, penalty, teams, players, False)
 
     async def _virtual(
         self,
         interaction: discord.Interaction,
         contest_id: int,
         penalty: int,
-        players: int,
+        teams: int,
+        team_size: int,
         rated: bool,
-        teams: int = 0,
-        team_size: int = 0,
     ) -> None:
         contest = next((c for c in self.bot.services.contests.contests if c.id == contest_id), None)
         if contest is None:
@@ -353,20 +261,15 @@ class MashupCog(commands.Cog, name="Mashup"):
             contest.duration % 3600 // 60,
             penalty,
             teams,
-            max_players=players,
-            rated=rated,
-            team_size=team_size,
+            team_size,
+            rated,
             contest_id=contest_id,
         )
 
     @rated_contest.autocomplete("tags")
     @rated_contest.autocomplete("exclude_tags")
-    @rated_team_contest.autocomplete("tags")
-    @rated_team_contest.autocomplete("exclude_tags")
     @unrated_contest.autocomplete("tags")
     @unrated_contest.autocomplete("exclude_tags")
-    @unrated_team_contest.autocomplete("tags")
-    @unrated_team_contest.autocomplete("exclude_tags")
     async def tag_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
@@ -384,10 +287,9 @@ class MashupCog(commands.Cog, name="Mashup"):
         hour: int,
         minute: int,
         penalty: int,
-        teams: int = 0,
-        max_players: int = MASHUP_MAX_PLAYERS,
-        rated: bool = True,
-        team_size: int = 0,
+        teams: int,
+        team_size: int,
+        rated: bool,
         tags: str | None = None,
         exclude_tags: str | None = None,
         contest_id: int | None = None,
@@ -403,9 +305,8 @@ class MashupCog(commands.Cog, name="Mashup"):
             duration_seconds=hour * 3600 + minute * 60,
             penalty_minutes=penalty,
             teams=teams,
-            max_players=max_players,
-            rated=rated,
             team_size=team_size,
+            rated=rated,
             tags=tags,
             exclude_tags=exclude_tags,
             contest_id=contest_id,
@@ -431,7 +332,7 @@ class MashupCog(commands.Cog, name="Mashup"):
             return
         if action == "join":
             mashup = await self.bot.services.db.get_mashup(mashup_id)
-            if mashup is not None and mashup.status == "lobby" and mashup.teams:
+            if mashup is not None and mashup.status == "lobby" and mashup.team_size != 1:
                 # A team contest asks for the team first; the modal then joins.
                 await interaction.response.send_modal(TeamModal(self, mashup_id, mashup.teams))
                 return

@@ -292,7 +292,7 @@ def _line_pages(title: str, lines: Sequence[str], colour: discord.Colour) -> lis
 
 def _mashup_history_line(record: MashupRecord) -> str:
     m = record.mashup
-    kind = f"Team mashup (team {record.team})" if m.teams else "Mashup"
+    kind = "Mashup" if m.team_size == 1 else f"Team mashup (team {record.team})"
     place = f"{ordinal(record.rank)} of {record.entrants}" if record.solved else "nothing solved"
     rating = f", {record.delta:+d}" if record.delta is not None else ""
     return f"<t:{m.ends_at}:d> {kind} - {place}, {record.solved}/{m.count} solved{rating}"
@@ -348,7 +348,7 @@ def number_pages(pages: list[discord.Embed]) -> list[discord.Embed]:
 def _mashup_change(view: MashupView, rank) -> int | None:
     """The match rating change of a standings row (a player, or a team in a team contest)."""
     for p in view.players:
-        if (p.team if view.mashup.teams else p.user_id) == rank.user_id:
+        if p.team == rank.user_id:
             return p.delta
     return None
 
@@ -359,8 +359,8 @@ def _mashup_setup(view: MashupView) -> str:
     return (
         f"{m.count} problems rated {m.min_rating}-{m.max_rating}, "
         f"{format_hm(m.duration_seconds)} long, {penalty}"
-        + (f", {m.teams} teams" if m.teams else "")
-        + (f" of up to {m.team_size}" if m.team_size else "")
+        + (f", {m.teams} teams" if m.team_size != 1 else "")
+        + (f" of up to {m.team_size}" if m.team_size > 1 else "")
         + (f", virtual contest {m.contest_id}" if m.contest_id else "")
         + (f", tags {m.tags.replace(',', ', ')}" if m.tags else "")
         + (f", without {m.exclude_tags.replace(',', ', ')}" if m.exclude_tags else "")
@@ -378,7 +378,7 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
             colour=discord.Colour.red(),
         )
     if m.status == "lobby":
-        if m.teams:
+        if m.team_size != 1:
             names = "\n".join(
                 f"Team {t}: "
                 + (", ".join(f"<@{p.user_id}> ({p.handle})" for p in view.players if p.team == t))
@@ -388,11 +388,11 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
         else:
             names = "\n".join(f"<@{p.user_id}> ({p.handle})" for p in view.players)
         return discord.Embed(
-            title="Team mashup lobby" if m.teams else "Mashup lobby",
+            title="Mashup lobby" if m.team_size == 1 else "Team mashup lobby",
             description=(
                 f"Host: <@{m.host_id}>\n{_mashup_setup(view)}\n{players}:\n{names}\n"
                 f"Expires <t:{m.created_at + LOBBY_TTL_SECONDS}:R>. "
-                + (f"Join asks for a team number (1-{m.teams}). " if m.teams else "")
+                + (f"Join asks for a team number (1-{m.teams}). " if m.team_size != 1 else "")
                 + "The host presses Start; nobody can join after that."
             ),
             colour=discord.Colour.blurple(),
@@ -414,7 +414,7 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
         )
         detail = f" ({solved})" if solved else ""
         who = r.handle
-        if m.teams:
+        if m.team_size != 1:
             members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
             who = f"{r.handle} ({members})"
         lines.append(f"{r.rank}. {who} - {r.solved} solved, {format_hm(r.total_seconds)}{detail}")
@@ -422,7 +422,7 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
             lines[-1] += f", rating {change:+d}"
     return discord.Embed(
         title=(
-            ("Team mashup" if m.teams else "Mashup contest")
+            ("Mashup contest" if m.team_size == 1 else "Team mashup")
             + (" - final standings" if finished else "")
         ),
         description="\n".join(lines),

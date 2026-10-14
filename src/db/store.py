@@ -240,6 +240,17 @@ MIGRATIONS = [
     """,
     # A virtual contest replays a finished Codeforces contest (NULL for a random mashup).
     "ALTER TABLE mashups ADD COLUMN contest_id INTEGER;",
+    # Every contest is a team contest now (a team of one is a player): turn the individual
+    # contests (teams = 0) into teams of one, numbered in joining order.
+    """
+    UPDATE mashup_players SET team = (
+        SELECT COUNT(*) FROM mashup_players q WHERE q.mashup_id = mashup_players.mashup_id
+        AND (q.joined_at, q.rowid) <= (mashup_players.joined_at, mashup_players.rowid)
+    ) WHERE mashup_id IN (SELECT id FROM mashups WHERE teams = 0);
+    UPDATE mashups SET team_size = 1, teams = MAX(1, CASE WHEN status = 'lobby' THEN max_players
+        ELSE (SELECT COUNT(*) FROM mashup_players p WHERE p.mashup_id = mashups.id) END)
+    WHERE teams = 0;
+    """,
 ]
 
 

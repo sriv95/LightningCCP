@@ -6,11 +6,13 @@ from typing import Any
 
 from src.cf.models import Problem
 from src.db.store import MashupPlayer, MashupRow, Store
-from src.errors import BotError, MatchClosed, NotLinked
+from src.errors import BotError, MatchClosed, MatchFull, NotLinked
 from src.logic import (
     LOBBY_TTL_SECONDS,
     MASHUP_MAX_PLAYERS,
     MASHUP_MAX_PROBLEMS,
+    MASHUP_MAX_TEAM_SIZE,
+    MASHUP_MAX_TEAMS,
     MashupRank,
     first_solve,
     mashup_standings,
@@ -35,21 +37,19 @@ class MashupView:
 
     @property
     def standings(self) -> list[MashupRank]:
-        """Players, or in a team contest the teams: a problem counts for a team once, from the
-        teammate who solved it first (MashupRank.user_id is then the team number)."""
-        if self.mashup.teams:
-            joined: dict[int, int] = {}
-            for p in self.players:
-                joined[p.team] = min(joined.get(p.team, p.joined_at), p.joined_at)
-            return mashup_standings(
-                ((team, f"Team {team}", at) for team, at in joined.items()),
-                team_solves(((p.user_id, p.team) for p in self.players), self.solves),
-                self.mashup.started_at or 0,
-                self.mashup.penalty_minutes,
-            )
+        """The teams (MashupRank.user_id is the team number; a team of one shows its player's
+        handle): a problem counts for a team once, from the teammate who solved it first."""
+        joined: dict[int, tuple[int, str]] = {}
+        for p in self.players:
+            if p.team not in joined or p.joined_at < joined[p.team][0]:
+                joined[p.team] = (p.joined_at, p.handle)
+        solo = self.mashup.team_size == 1
         return mashup_standings(
-            ((p.user_id, p.handle, p.joined_at) for p in self.players),
-            self.solves,
+            (
+                (team, handle if solo else f"Team {team}", at)
+                for team, (at, handle) in joined.items()
+            ),
+            team_solves(((p.user_id, p.team) for p in self.players), self.solves),
             self.mashup.started_at or 0,
             self.mashup.penalty_minutes,
         )
@@ -61,7 +61,7 @@ class MashupRecord:
 
     mashup: MashupRow
     rank: int
-    entrants: int  # players, or teams in a team contest
+    entrants: int  # teams (a team of one is a player)
     solved: int
     team: int | None
     delta: int | None = None  # match rating change; None when the contest did not rate
@@ -102,7 +102,7 @@ class MashupService:
             view = await self.view(mashup.id)
             me = next(p for p in view.players if p.user_id == user_id)
             ranks = view.standings
-            mine = next(r for r in ranks if r.user_id == (me.team if mashup.teams else user_id))
+            mine = next(r for r in ranks if r.user_id == me.team)
             records.append(
                 MashupRecord(mashup, mine.rank, len(ranks), mine.solved, me.team, me.delta)
             )
@@ -146,10 +146,9 @@ class MashupService:
         count: int,
         duration_seconds: int,
         penalty_minutes: int = 0,
-        teams: int = 0,
-        max_players: int = MASHUP_MAX_PLAYERS,
+        teams: int = MASHUP_MAX_TEAMS,
+        team_size: int = 1,
         rated: bool = True,
-        team_size: int = 0,
         tags: str | None = None,
         exclude_tags: str | None = None,
         contest_id: int | None = None,
@@ -162,10 +161,10 @@ class MashupService:
             tags = exclude_tags = None
         if min_rating > max_rating:
             raise BotError("min_rating cannot be higher than max_rating.")
-        if not 1 <= max_players <= MASHUP_MAX_PLAYERS:
-            raise BotError(f"The player cap must be from 1 to {MASHUP_MAX_PLAYERS}.")
-        if team_size and not (teams and 1 <= team_size <= MASHUP_MAX_PLAYERS):
-            raise BotError(f"The team size must be from 1 to {MASHUP_MAX_PLAYERS}.")
+        if not 1 <= teams <= MASHUP_MAX_TEAMS:
+            raise BotError(f"The number of teams must be from 1 to {MASHUP_MAX_TEAMS}.")
+        if not 1 <= team_size <= MASHUP_MAX_TEAM_SIZE:
+            raise BotError(f"Players per team must be from 1 to {MASHUP_MAX_TEAM_SIZE}.")
         if duration_seconds <= 0:
             raise BotError("The contest must last at least one minute.")
         mashup_id = await self._store.create_mashup(
@@ -180,8 +179,8 @@ class MashupService:
             penalty_minutes=penalty_minutes,
             now=self._now(),
             teams=teams,
-            host_team=1 if teams else None,  # the host always starts in team 1
-            max_players=max_players,
+            host_team=1,  # the host always starts in team 1
+            max_players=min(MASHUP_MAX_PLAYERS, teams * team_size),
             rated=rated,
             team_size=team_size,
             tags=normalize_tags(tags),
@@ -212,9 +211,8 @@ class MashupService:
             duration_seconds=m.duration_seconds,
             penalty_minutes=m.penalty_minutes,
             teams=m.teams,
-            max_players=m.max_players,
-            rated=bool(m.rated),
             team_size=m.team_size,
+            rated=bool(m.rated),
             tags=m.tags,
             exclude_tags=m.exclude_tags,
             contest_id=m.contest_id,
@@ -224,17 +222,19 @@ class MashupService:
         mashup = await self._mashup(mashup_id)
         if mashup.status != "lobby":
             raise MatchClosed("This contest has already started, so nobody can join.")
-        if mashup.teams:
-            self._check_team(mashup.teams, team)
+        players = await self._store.mashup_players(mashup_id)
+        if mashup.team_size == 1:  # every player is a team: take the first free number
+            taken = {p.team for p in players}
+            team = next((t for t in range(1, mashup.teams + 1) if t not in taken), None)
+            if team is None:
+                raise MatchFull()
         else:
-            team = None
-        if mashup.teams and user_id in {
-            p.user_id for p in await self._store.mashup_players(mashup_id)
-        }:
-            if user_id == mashup.host_id:
-                raise BotError("The host stays in team 1.")
-            await self._store.move_mashup_player(mashup_id, user_id, team, mashup.team_size)
-            return await self.view(mashup_id)
+            self._check_team(mashup.teams, team)
+            if user_id in {p.user_id for p in players}:
+                if user_id == mashup.host_id:
+                    raise BotError("The host stays in team 1.")
+                await self._store.move_mashup_player(mashup_id, user_id, team, mashup.team_size)
+                return await self.view(mashup_id)
         await self._store.add_mashup_player(
             mashup_id,
             mashup.guild_id,
@@ -352,39 +352,33 @@ class MashupService:
         return views
 
     async def _rating_changes(self, view: MashupView) -> dict[int, int]:
-        """Match rating change per player: every pair of entrants (players, or teams rated at
-        their members' average) is a duel decided by the standings, as in a custom match. Empty
+        """Match rating change per player: every pair of teams (rated at their members' average,
+        a team of one at its player's rating) is a duel decided by the standings, as in a custom match. Empty
         for a single entrant or an unrated contest."""
         ranks = view.standings
         if len(ranks) < 2 or not view.mashup.rated:
             return {}
         guild_id = view.mashup.guild_id
         ratings = {p.user_id: await self._store.rating(guild_id, p.user_id) for p in view.players}
-        if view.mashup.teams:
-            members: dict[int, list[int]] = {}
-            for p in view.players:
-                members.setdefault(p.team, []).append(ratings[p.user_id])
-            entrant_ratings = {team: sum(r) // len(r) for team, r in members.items()}
-        else:
-            entrant_ratings = ratings
+        members: dict[int, list[int]] = {}
+        for p in view.players:
+            members.setdefault(p.team, []).append(ratings[p.user_id])
+        entrant_ratings = {team: sum(r) // len(r) for team, r in members.items()}
         groups: dict[int, list[int]] = {}
         for r in ranks:
             groups.setdefault(r.rank, []).append(r.user_id)
         changes = match_deltas([groups[k] for k in sorted(groups)], entrant_ratings)
-        if view.mashup.teams:
-            return {p.user_id: changes[p.team] for p in view.players}
-        return changes
+        return {p.user_id: changes[p.team] for p in view.players}
 
     async def _refresh_everyone(self, mashup: MashupRow) -> int:
         changed = 0
         total = len(await self._store.mashup_problems(mashup.id))
         solves = await self._store.mashup_solves(mashup.id)
         players = await self._store.mashup_players(mashup.id)
-        if mashup.teams:  # a team that solved everything needs no more reads from any member
-            solves = team_solves(((p.user_id, p.team) for p in players), solves)
+        # a team that solved everything needs no more reads from any member
+        solves = team_solves(((p.user_id, p.team) for p in players), solves)
         for player in players:
-            who = player.team if mashup.teams else player.user_id
-            if len(solves.get(who, {})) >= total:
+            if len(solves.get(player.team, {})) >= total:
                 continue  # solved everything: nothing left to read, saves a Codeforces call
             try:
                 changed += await self._refresh(mashup, player)

@@ -498,7 +498,7 @@ async def test_migration_8_adds_tag_columns_with_empty_defaults(tmp_path):
     await s.close()
 
 
-async def test_migration_9_adds_team_columns_with_defaults(tmp_path):
+async def test_migration_16_turns_individual_contests_into_teams_of_one(tmp_path):
     db = await aiosqlite.connect(tmp_path / "old.db")
     await db.executescript("\n".join(MIGRATIONS[:8]) + "\nPRAGMA user_version = 8;")
     await db.execute(
@@ -507,15 +507,24 @@ async def test_migration_9_adds_team_columns_with_defaults(tmp_path):
         "VALUES (1, 2, 3, 800, 1200, 3, 7200, 0, 'lobby', 4)"
     )
     await db.execute(
-        "INSERT INTO mashup_players (mashup_id, guild_id, user_id, handle, joined_at) "
-        "VALUES (1, 1, 3, 'h', 4)"
+        "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, count, "
+        "duration_seconds, penalty_minutes, status, created_at) "
+        "VALUES (1, 2, 3, 800, 1200, 3, 7200, 0, 'finished', 4)"
     )
+    for mashup_id, user_id, at in ((1, 3, 4), (2, 5, 9), (2, 6, 7), (2, 4, 7)):
+        await db.execute(
+            "INSERT INTO mashup_players (mashup_id, guild_id, user_id, handle, joined_at) "
+            f"VALUES ({mashup_id}, 1, {user_id}, 'h', {at})"
+        )
     await db.commit()
     await db.close()
     s = Store(tmp_path / "old.db")
     await s.connect()
-    assert (await s.get_mashup(1)).teams == 0
-    assert (await s.mashup_players(1))[0].team is None
+    lobby, done = await s.get_mashup(1), await s.get_mashup(2)
+    assert (lobby.teams, lobby.team_size, done.teams, done.team_size) == (20, 1, 3, 1)
+    assert [(p.user_id, p.team) for p in await s.mashup_players(1)] == [(3, 1)]
+    # numbered in joining order (joined_at, then insertion order)
+    assert [(p.user_id, p.team) for p in await s.mashup_players(2)] == [(6, 1), (4, 2), (5, 3)]
     await s.close()
 
 

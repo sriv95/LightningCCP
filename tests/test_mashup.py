@@ -6,7 +6,7 @@ from src.cf.models import Problem, Submission
 from src.cogs.mashup import mashup_components
 from src.db.store import Store
 from src.errors import AlreadyInMatch, BotError, CacheNotReady, MatchClosed, MatchFull, NotLinked
-from src.logic import LOBBY_TTL_SECONDS, MASHUP_MAX_PLAYERS
+from src.logic import LOBBY_TTL_SECONDS, MASHUP_MAX_PLAYERS, MASHUP_MAX_TEAMS
 from src.mashup import MashupService
 from src.matches import MatchService
 from src.ui.embeds import mashup_embed
@@ -125,7 +125,7 @@ async def test_join_and_leave_in_the_lobby(env):
 async def test_lobby_stops_at_the_player_cap(env):
     svc, store, cf, clock = env
     mid = (await lobby(svc)).mashup.id
-    for uid in range(100, 100 + MASHUP_MAX_PLAYERS - 1):
+    for uid in range(100, 100 + MASHUP_MAX_TEAMS - 1):  # a default contest has 10 teams of one
         await store.link_handle(GUILD, uid, f"h{uid}", None)
         await svc.join(mid, uid)
     with pytest.raises(MatchFull):
@@ -310,7 +310,7 @@ async def test_embed_lobby_active_cancelled(env):
 
 
 async def team_lobby(svc, teams=2, **kw):
-    return await lobby(svc, teams=teams, **kw)
+    return await lobby(svc, teams=teams, **{"team_size": 5, **kw})
 
 
 async def test_team_contest_join_needs_a_valid_team(env):
@@ -323,8 +323,8 @@ async def test_team_contest_join_needs_a_valid_team(env):
         with pytest.raises(BotError, match="1 to 3"):
             await svc.join(mid, 2, bad)
     assert [(p.user_id, p.team) for p in (await svc.join(mid, 2, 3)).players] == [(1, 1), (2, 3)]
-    solo = await lobby(svc, host=4)  # an individual contest ignores the team
-    assert (await svc.join(solo.mashup.id, 3, 2)).players[1].team is None
+    solo = await lobby(svc, host=4)  # teams of one ignore the number and take the first free team
+    assert (await svc.join(solo.mashup.id, 3, 7)).players[1].team == 2
 
 
 async def test_team_standings_count_a_problem_once_from_the_first_solver(env):
@@ -383,16 +383,21 @@ def test_team_solves_picks_the_earliest_solve_per_problem():
 
 async def test_player_cap_is_chosen_by_the_host(env):
     svc, store, cf, clock = env
-    view = await lobby(svc, max_players=2)
+    view = await lobby(svc, teams=2)
     assert view.mashup.max_players == 2
     assert "1/2 players" in mashup_embed(view, {}).description
     await svc.join(view.mashup.id, 2)
     with pytest.raises(MatchFull):
         await svc.join(view.mashup.id, 3)
-    for bad in (0, MASHUP_MAX_PLAYERS + 1):
-        with pytest.raises(BotError, match="1 to 20"):
-            await lobby(svc, host=4, max_players=bad)
-    assert (await lobby(svc, host=3)).mashup.max_players == MASHUP_MAX_PLAYERS  # default
+    for bad in (0, MASHUP_MAX_TEAMS + 1):
+        with pytest.raises(BotError, match="teams must be from 1 to 10"):
+            await lobby(svc, host=4, teams=bad)
+    for bad in (0, 6):
+        with pytest.raises(BotError, match="per team must be from 1 to 5"):
+            await lobby(svc, host=4, team_size=bad)
+    assert (await lobby(svc, host=3)).mashup.max_players == 10  # default: 10 teams of one
+    big = await lobby(svc, host=4, teams=10, team_size=5)
+    assert big.mashup.max_players == MASHUP_MAX_PLAYERS  # the 20 player limit still holds
 
 
 async def finish_contest(svc, cf, clock, view, solves):
@@ -416,7 +421,7 @@ async def test_history_lists_finished_contests_with_the_users_place(env):
     )
     assert done.mashup.status == "finished"
     records = await svc.history(GUILD, 1)
-    assert [(r.rank, r.entrants, r.solved, r.team) for r in records] == [(2, 3, 1, None)]
+    assert [(r.rank, r.entrants, r.solved, r.team) for r in records] == [(2, 3, 1, 1)]
     assert [r.rank for r in await svc.history(GUILD, 3)] == [3]  # nothing solved ranks last
     assert await svc.history(GUILD, 4) == []
     page = history_pages("t", [], 1, {}, records)[0].description
@@ -449,7 +454,9 @@ def test_history_pages_merges_matches_and_mashups_newest_first():
 
     match = row(mode="solo", status="finished", rating=800, problem_key="1A", finished_at=2000)
     solo = [player(10, solved_at=1500, delta=10)]
-    mashup = MashupRow(1, 1, 5, None, 10, 800, 1200, 3, 7200, 0, "finished", 0, 0, 3000)
+    mashup = MashupRow(
+        1, 1, 5, None, 10, 800, 1200, 3, 7200, 0, "finished", 0, 0, 3000, team_size=1
+    )
     new = MashupRecord(mashup, 1, 4, 3, None)
     pages = history_pages("t", [(match, solo)], 10, {}, [new])
     lines = pages[0].description.splitlines()
