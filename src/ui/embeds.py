@@ -294,7 +294,8 @@ def _mashup_history_line(record: MashupRecord) -> str:
     m = record.mashup
     kind = f"Team mashup (team {record.team})" if m.teams else "Mashup"
     place = f"{ordinal(record.rank)} of {record.entrants}" if record.solved else "nothing solved"
-    return f"<t:{m.ends_at}:d> {kind} - {place}, {record.solved}/{m.count} solved"
+    rating = f", {record.delta:+d}" if record.delta is not None else ""
+    return f"<t:{m.ends_at}:d> {kind} - {place}, {record.solved}/{m.count} solved{rating}"
 
 
 def history_pages(
@@ -342,6 +343,14 @@ def number_pages(pages: list[discord.Embed]) -> list[discord.Embed]:
     for i, page in enumerate(pages, start=1):
         page.set_footer(text=f"Page {i}/{len(pages)}")
     return pages
+
+
+def _mashup_change(view: MashupView, rank) -> int | None:
+    """The match rating change of a standings row (a player, or a team in a team contest)."""
+    for p in view.players:
+        if (p.team if view.mashup.teams else p.user_id) == rank.user_id:
+            return p.delta
+    return None
 
 
 def _mashup_setup(view: MashupView) -> str:
@@ -404,6 +413,8 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
             members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
             who = f"{r.handle} ({members})"
         lines.append(f"{r.rank}. {who} - {r.solved} solved, {format_hm(r.total_seconds)}{detail}")
+        if finished and (change := _mashup_change(view, r)) is not None:
+            lines[-1] += f", rating {change:+d}"
     return discord.Embed(
         title=(
             ("Team mashup" if m.teams else "Mashup contest")

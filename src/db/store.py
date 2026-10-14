@@ -226,6 +226,9 @@ MIGRATIONS = [
     """,
     # The host can lower the player cap of a mashup (20 until now).
     "ALTER TABLE mashups ADD COLUMN max_players INTEGER NOT NULL DEFAULT 20;",
+    # A finished mashup moves match ratings: the change is stored per player (NULL before it ends,
+    # and for contests that ended earlier or had a single entrant).
+    "ALTER TABLE mashup_players ADD COLUMN delta INTEGER;",
 ]
 
 
@@ -315,6 +318,7 @@ class MashupPlayer:
     handle: str
     joined_at: int
     team: int | None = None
+    delta: int | None = None
 
 
 def _match(row: aiosqlite.Row) -> MatchRow:
@@ -747,38 +751,51 @@ class Store:
             )
             return True
 
+    # A player's rating changes come from finished matches and finished mashups.
+    _CHANGES = (
+        "SELECT guild_id, user_id, handle, delta FROM match_players WHERE delta IS NOT NULL "
+        "UNION ALL "
+        "SELECT guild_id, user_id, handle, delta FROM mashup_players WHERE delta IS NOT NULL"
+    )
+
     async def rating(self, guild_id: int, user_id: int) -> int:
         """Match rating: the start rating plus every stored rating change."""
         row = await self._one(
-            "SELECT COALESCE(SUM(delta), 0) FROM match_players "
-            "WHERE guild_id = ? AND user_id = ? AND delta IS NOT NULL",
+            f"SELECT COALESCE(SUM(delta), 0) FROM ({self._CHANGES}) "
+            "WHERE guild_id = ? AND user_id = ?",
             (guild_id, user_id),
         )
         return START_RATING + row[0]
 
     async def stats(self, guild_id: int) -> list[tuple[int, str, int, int]]:
-        """(user_id, handle, match rating, finished matches), best rated first. Finished matches only."""
+        """(user_id, handle, match rating, games played), best rated first. Finished matches and
+        mashups count."""
         rows = await self._all(
-            "SELECT mp.user_id, COALESCE(uh.handle, MAX(mp.handle)) AS handle, "
-            "? + SUM(mp.delta) AS total, COUNT(*) AS played "
-            "FROM match_players mp "
-            "LEFT JOIN user_handle uh ON uh.guild_id = mp.guild_id AND uh.user_id = mp.user_id "
-            "WHERE mp.guild_id = ? AND mp.delta IS NOT NULL "
-            "GROUP BY mp.user_id ORDER BY total DESC, played DESC, handle",
+            "SELECT c.user_id, COALESCE(uh.handle, MAX(c.handle)) AS handle, "
+            f"? + SUM(c.delta) AS total, COUNT(*) AS played FROM ({self._CHANGES}) c "
+            "LEFT JOIN user_handle uh ON uh.guild_id = c.guild_id AND uh.user_id = c.user_id "
+            "WHERE c.guild_id = ? "
+            "GROUP BY c.user_id ORDER BY total DESC, played DESC, handle",
             (START_RATING, guild_id),
         )
         return [(r["user_id"], r["handle"], r["total"], r["played"]) for r in rows]
 
     async def rating_changes(self, guild_id: int, user_id: int) -> list[tuple[int, int]]:
-        """(finished_at, rating change) of the player's finished matches, oldest first."""
+        """(finished_at, rating change) of the player's finished matches and mashups, oldest
+        first."""
         rows = await self._all(
-            "SELECT m.finished_at, mp.delta FROM match_players mp "
+            "SELECT m.finished_at AS at, mp.delta FROM match_players mp "
             "JOIN matches m ON m.id = mp.match_id "
             "WHERE mp.guild_id = ? AND mp.user_id = ? AND mp.delta IS NOT NULL "
-            "AND m.status = 'finished' ORDER BY m.finished_at, m.id",
-            (guild_id, user_id),
+            "AND m.status = 'finished' "
+            "UNION ALL "
+            "SELECT k.ends_at AS at, kp.delta FROM mashup_players kp "
+            "JOIN mashups k ON k.id = kp.mashup_id "
+            "WHERE kp.guild_id = ? AND kp.user_id = ? AND kp.delta IS NOT NULL "
+            "AND k.status = 'finished' ORDER BY at",
+            (guild_id, user_id, guild_id, user_id),
         )
-        return [(r["finished_at"], r["delta"]) for r in rows]
+        return [(r["at"], r["delta"]) for r in rows]
 
     async def finished_matches(
         self, guild_id: int, user_id: int, limit: int = 100
@@ -914,11 +931,14 @@ class Store:
 
     async def mashup_players(self, mashup_id: int) -> list[MashupPlayer]:
         rows = await self._all(
-            "SELECT user_id, handle, joined_at, team FROM mashup_players WHERE mashup_id = ? "
-            "ORDER BY joined_at, rowid",
+            "SELECT user_id, handle, joined_at, team, delta FROM mashup_players "
+            "WHERE mashup_id = ? ORDER BY joined_at, rowid",
             (mashup_id,),
         )
-        return [MashupPlayer(r["user_id"], r["handle"], r["joined_at"], r["team"]) for r in rows]
+        return [
+            MashupPlayer(r["user_id"], r["handle"], r["joined_at"], r["team"], r["delta"])
+            for r in rows
+        ]
 
     async def add_mashup_player(
         self,
@@ -1028,7 +1048,9 @@ class Store:
             out.setdefault(r["user_id"], {})[r["problem_key"]] = (r["solved_at"], r["wrong"])
         return out
 
-    async def finish_mashup(self, mashup_id: int) -> bool:
+    async def finish_mashup(self, mashup_id: int, deltas: Mapping[int, int] | None = None) -> bool:
+        """Ends an active contest and stores each player's rating change. False when another
+        request already ended it, so ratings are never applied twice."""
         async with self._tx() as db:
             cur = await db.execute(
                 "UPDATE mashups SET status = 'finished' WHERE id = ? AND status = 'active'",
@@ -1036,6 +1058,10 @@ class Store:
             )
             if cur.rowcount == 0:
                 return False
+            await db.executemany(
+                "UPDATE mashup_players SET delta = ? WHERE mashup_id = ? AND user_id = ?",
+                [(d, mashup_id, uid) for uid, d in (deltas or {}).items()],
+            )
             await db.execute(
                 "UPDATE mashup_players SET active = 0 WHERE mashup_id = ?", (mashup_id,)
             )

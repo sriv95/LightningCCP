@@ -419,9 +419,9 @@ async def test_history_lists_finished_contests_with_the_users_place(env):
     assert [r.rank for r in await svc.history(GUILD, 3)] == [3]  # nothing solved ranks last
     assert await svc.history(GUILD, 4) == []
     page = history_pages("t", [], 1, {}, records)[0].description
-    assert page.endswith("Mashup - 2nd of 3, 1/3 solved")
+    assert page.endswith("Mashup - 2nd of 3, 1/3 solved, +0")
     nothing = history_pages("t", [], 3, {}, await svc.history(GUILD, 3))[0].description
-    assert nothing.endswith("Mashup - nothing solved, 0/3 solved")
+    assert nothing.endswith("Mashup - nothing solved, 0/3 solved, -49")
 
 
 async def test_history_of_a_team_contest_shows_the_team_place(env):
@@ -437,7 +437,7 @@ async def test_history_of_a_team_contest_shows_the_team_place(env):
     (record,) = await svc.history(GUILD, 2)
     assert (record.rank, record.entrants, record.solved, record.team) == (1, 2, 1, 2)
     line = history_pages("t", [], 2, {}, [record])[0].description
-    assert line.endswith("Team mashup (team 2) - 1st of 2, 1/3 solved")
+    assert line.endswith("Team mashup (team 2) - 1st of 2, 1/3 solved, +49")
 
 
 def test_history_pages_merges_matches_and_mashups_newest_first():
@@ -453,3 +453,43 @@ def test_history_pages_merges_matches_and_mashups_newest_first():
     pages = history_pages("t", [(match, solo)], 10, {}, [new])
     lines = pages[0].description.splitlines()
     assert "Mashup - 1st of 4" in lines[0] and "Solo" in lines[1]
+
+
+async def test_finished_mashup_moves_match_ratings(env):
+    svc, store, cf, clock = env
+    view = await started(svc, 2, 3)
+    done = await finish_contest(
+        svc, cf, clock, view, {"h1": [(0, 1100)], "h2": [(0, 1100), (1, 1200)]}
+    )
+    assert {p.user_id: p.delta for p in done.players} == {1: 0, 2: 49, 3: -49}
+    assert [await store.rating(GUILD, u) for u in (1, 2, 3)] == [800, 849, 751]
+    assert dict((u, n) for u, _, _, n in await store.stats(GUILD)) == {1: 1, 2: 1, 3: 1}
+    assert [d for _, d in await store.rating_changes(GUILD, 2)] == [49]
+    text = mashup_embed(done, {}).description
+    assert "1. h2 - 2 solved" in text and text.count("rating +49") == 1
+    clock.t += 5000
+    await svc.tick()  # a second tick must not apply the change again
+    assert await store.rating(GUILD, 2) == 849
+
+
+async def test_team_contest_rates_every_member_by_team_average(env):
+    svc, store, cf, clock = env
+    await store.link_handle(GUILD, 5, "h5", None)
+    mid = (await team_lobby(svc)).mashup.id
+    await svc.join(mid, 2, 1)
+    await svc.join(mid, 3, 2)
+    await svc.join(mid, 5, 2)
+    view = await svc.start(mid, 1)
+    done = await finish_contest(svc, cf, clock, view, {"h5": [(0, 1100)]})
+    assert {p.user_id: p.delta for p in done.players} == {1: -49, 2: -49, 3: 49, 5: 49}
+    assert "rating +49" in mashup_embed(done, {}).description
+
+
+async def test_nothing_solved_or_one_entrant_changes_no_rating(env):
+    svc, store, cf, clock = env
+    done = await finish_contest(svc, cf, clock, await started(svc, 2), {})
+    assert {p.user_id: p.delta for p in done.players} == {1: 0, 2: 0}  # a tie moves nothing
+    alone = await finish_contest(svc, cf, clock, await started(svc, host=3), {"h3": [(0, 9999)]})
+    assert [p.delta for p in alone.players] == [None]  # one entrant: not rated
+    assert await store.rating(GUILD, 3) == 800
+    assert {u for u, *_ in await store.stats(GUILD)} == {1, 2}  # player 3 played nothing rated

@@ -12,6 +12,7 @@ from src.logic import (
     MashupRank,
     first_solve,
     mashup_standings,
+    match_deltas,
     pick_mashup,
     solved_keys,
     team_solves,
@@ -59,6 +60,7 @@ class MashupRecord:
     entrants: int  # players, or teams in a team contest
     solved: int
     team: int | None
+    delta: int | None = None  # match rating change; None when the contest did not rate
 
 
 class MashupService:
@@ -97,7 +99,9 @@ class MashupService:
             me = next(p for p in view.players if p.user_id == user_id)
             ranks = view.standings
             mine = next(r for r in ranks if r.user_id == (me.team if mashup.teams else user_id))
-            records.append(MashupRecord(mashup, mine.rank, len(ranks), mine.solved, me.team))
+            records.append(
+                MashupRecord(mashup, mine.rank, len(ranks), mine.solved, me.team, me.delta)
+            )
         return records
 
     async def set_message(self, mashup_id: int, channel_id: int, message_id: int) -> None:
@@ -262,12 +266,38 @@ class MashupService:
                 changed = await self._refresh_everyone(mashup)
                 ended = now >= mashup.ends_at
                 if ended:
-                    await self._store.finish_mashup(mashup.id)
+                    await self._store.finish_mashup(
+                        mashup.id, await self._rating_changes(await self.view(mashup.id))
+                    )
                 if changed or ended:
                     views.append(await self.view(mashup.id))
             except Exception:
                 log.exception("Could not update mashup %s", mashup.id)
         return views
+
+    async def _rating_changes(self, view: MashupView) -> dict[int, int]:
+        """Match rating change per player: every pair of entrants (players, or teams rated at
+        their members' average) is a duel decided by the standings, as in a custom match. Empty
+        for a single entrant."""
+        ranks = view.standings
+        if len(ranks) < 2:
+            return {}
+        guild_id = view.mashup.guild_id
+        ratings = {p.user_id: await self._store.rating(guild_id, p.user_id) for p in view.players}
+        if view.mashup.teams:
+            members: dict[int, list[int]] = {}
+            for p in view.players:
+                members.setdefault(p.team, []).append(ratings[p.user_id])
+            entrant_ratings = {team: sum(r) // len(r) for team, r in members.items()}
+        else:
+            entrant_ratings = ratings
+        groups: dict[int, list[int]] = {}
+        for r in ranks:
+            groups.setdefault(r.rank, []).append(r.user_id)
+        changes = match_deltas([groups[k] for k in sorted(groups)], entrant_ratings)
+        if view.mashup.teams:
+            return {p.user_id: changes[p.team] for p in view.players}
+        return changes
 
     async def _refresh_everyone(self, mashup: MashupRow) -> int:
         changed = 0
