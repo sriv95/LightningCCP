@@ -11,7 +11,7 @@ from src.ui.embeds import (
     profile_embed,
     ranklist_pages,
     stalk_pages,
-    stats_embed,
+    stats_pages,
 )
 
 
@@ -87,15 +87,19 @@ def test_match_button_template_matches_all_actions():
     assert not template.fullmatch("match:other:42")
 
 
-def test_stats_embed_shows_caller_below_top_ten():
+def test_stats_pages_page_by_ten_and_mark_the_caller():
     rows = [(i, f"h{i}", 100 - i, 1) for i in range(1, 13)]
-    desc = stats_embed(rows, 12).description
-    assert desc.count("\n") == 11 and "1. <@1>" in desc and "10. <@10>" in desc
-    assert "11." not in desc and desc.endswith("**12. <@12> (h12) 88 (1 games)**")
-    in_top = stats_embed(rows, 2)
-    assert "..." not in in_top.description and "**2. <@2>" in in_top.description
-    assert stats_embed(rows, 99).footer.text == "You have no finished games yet."
-    assert stats_embed([], 1).description == "No finished games yet."
+    pages = stats_pages(rows, 12)
+    assert len(pages) == 2
+    assert pages[0].description.count("\n") == 9 and "10. <@10>" in pages[0].description
+    assert pages[1].description.splitlines() == [
+        "11. <@11> (h11) 89 (1 games)",
+        "**12. <@12> (h12) 88 (1 games)**",
+    ]
+    assert pages[1].footer.text == "Page 2/2 | You are #12."
+    assert "**2. <@2>" in stats_pages(rows, 2)[0].description
+    assert stats_pages(rows, 99)[0].footer.text == "Page 1/2 | You have no finished games yet."
+    assert stats_pages([], 1)[0].description == "No finished games yet."
 
 
 def test_member_profile_embed_shows_rating_games_and_streak():
@@ -138,30 +142,30 @@ def test_member_profile_embed_shows_rating_games_and_streak():
 
 def test_stats_embed_names_the_kind():
     rows = [(1, "a", 900, 2)]
-    assert "(2 matches)" in stats_embed(rows, 1, kind="matches").description
-    assert stats_embed(rows, 1, kind="matches").title == "Match stats"
-    assert "(2 contests)" in stats_embed(rows, 1, kind="contests").description
-    assert stats_embed(rows, 1, kind="contests").title == "Contest stats"
-    assert stats_embed([], 1, kind="contests").description == "No finished contests yet."
+    assert "(2 matches)" in stats_pages(rows, 1, kind="matches")[0].description
+    assert stats_pages(rows, 1, kind="matches")[0].title == "Match stats"
+    assert "(2 contests)" in stats_pages(rows, 1, kind="contests")[0].description
+    assert stats_pages(rows, 1, kind="contests")[0].title == "Contest stats"
+    assert stats_pages([], 1, kind="contests")[0].description == "No finished contests yet."
 
 
 def test_stats_embed_shows_daily_streak_with_fire():
     rows = [(1, "a", 900, 3), (2, "b", 850, 2)]
-    lines = stats_embed(rows, 9, {1: 4, 2: 0}).description.splitlines()
+    lines = stats_pages(rows, 9, {1: 4, 2: 0})[0].description.splitlines()
     assert lines[0].endswith("900 (3 games) \U0001f5254")
     assert lines[1].endswith("850 (2 games)")
 
 
 def test_stats_embed_sorts_by_streak():
     rows = [(1, "a", 900, 3), (2, "b", 850, 2), (3, "c", 800, 1), (4, "d", 790, 1)]
-    e = stats_embed(rows, 4, {2: 5, 3: 5, 4: 1}, by_streak=True)
+    e = stats_pages(rows, 4, {2: 5, 3: 5, 4: 1}, by_streak=True)[0]
     lines = e.description.splitlines()
     assert e.title == "Daily streaks" and len(lines) == 3  # player 1 has no streak
     assert "<@2>" in lines[0] and "<@3>" in lines[1]  # equal streaks keep the rating order
     assert lines[2].startswith("**3. <@4>") and lines[2].endswith("\U0001f5251**")
-    nobody = stats_embed(rows, 1, {2: 5}, by_streak=True)
-    assert nobody.footer.text == "You have no daily streak."
-    assert stats_embed(rows, 1, {}, by_streak=True).description == "No daily streaks yet."
+    nobody = stats_pages(rows, 1, {2: 5}, by_streak=True)[0]
+    assert nobody.footer.text == "Page 1/1 | You have no daily streak."
+    assert stats_pages(rows, 1, {}, by_streak=True)[0].description == "No daily streaks yet."
 
 
 def test_ranklist_pages_lines_and_paging():

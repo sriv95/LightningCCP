@@ -207,16 +207,17 @@ def match_embed(view: MatchView) -> discord.Embed:
 STATS_SIZE = 10
 
 
-def stats_embed(
+def stats_pages(
     rows: Sequence[tuple[int, str, int, int]],
     me_id: int,
     streaks: Mapping[int, int] | None = None,
     by_streak: bool = False,
     kind: str = "all",
-) -> discord.Embed:
-    """Top 10, plus the caller's own row when they are ranked lower. streaks: daily streak by
-    user id, shown as a fire emoji and the day count. by_streak ranks players with a streak by
-    it, longest first, keeping the rating order among equal streaks."""
+) -> list[discord.Embed]:
+    """Pages of 10 ranked players (never empty); the caller's row is bold and the footer says
+    where they are. streaks: daily streak by user id, shown as a fire emoji and the day count.
+    by_streak ranks players with a streak by it, longest first, keeping the rating order among
+    equal streaks."""
     streaks = streaks or {}
     noun = {"matches": "matches", "contests": "contests"}.get(kind, "games")
     if by_streak:
@@ -229,26 +230,29 @@ def stats_embed(
             text += f" \U0001f525{streaks[user_id]}"
         return f"**{text}**" if user_id == me_id else text
 
-    lines = [line(i, r) for i, r in enumerate(rows[:STATS_SIZE], 1)]
-    mine = next(((i, r) for i, r in enumerate(rows, 1) if r[0] == me_id), None)
-    footer = None
-    if mine is None:
-        footer = "You have no daily streak." if by_streak else f"You have no finished {noun} yet."
-    elif mine[0] > STATS_SIZE:
-        lines += ["...", line(*mine)]
-    embed = discord.Embed(
-        title="Daily streaks"
-        if by_streak
-        else "Contest stats"
-        if kind == "contests"
-        else "Match stats",
-        description="\n".join(lines)
-        or ("No daily streaks yet." if by_streak else f"No finished {noun} yet."),
-        colour=discord.Colour.gold(),
+    title = (
+        "Daily streaks" if by_streak else "Contest stats" if kind == "contests" else "Match stats"
     )
-    if footer and lines:
-        embed.set_footer(text=footer)
-    return embed
+    if not rows:
+        empty = "No daily streaks yet." if by_streak else f"No finished {noun} yet."
+        return [discord.Embed(title=title, description=empty, colour=discord.Colour.gold())]
+    mine = next((i for i, r in enumerate(rows, 1) if r[0] == me_id), None)
+    if mine:
+        you = f"You are #{mine}."
+    else:
+        you = "You have no daily streak." if by_streak else f"You have no finished {noun} yet."
+    groups = chunked(rows, STATS_SIZE)
+    pages = []
+    for i, group in enumerate(groups, 1):
+        first = (i - 1) * STATS_SIZE + 1
+        embed = discord.Embed(
+            title=title,
+            description="\n".join(line(first + j, r) for j, r in enumerate(group)),
+            colour=discord.Colour.gold(),
+        )
+        embed.set_footer(text=f"Page {i}/{len(groups)} | {you}")
+        pages.append(embed)
+    return pages
 
 
 def ranklist_pages(

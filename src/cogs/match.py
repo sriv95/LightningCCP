@@ -17,7 +17,7 @@ from src.ui.embeds import (
     match_embed,
     member_profile_embed,
     number_pages,
-    stats_embed,
+    stats_pages,
 )
 from src.ui.paginator import send_pages
 
@@ -276,6 +276,7 @@ class MatchCog(commands.Cog, name="Match"):
         sort: Literal["rating", "streak"] = "rating",
         kind: Literal["all", "matches", "contests"] = "all",
     ) -> None:
+        await interaction.response.defer(ephemeral=True)
         db = self.bot.services.db
         rows = await db.stats(interaction.guild_id, kind)
         today = utc_day(int(time.time()))
@@ -283,9 +284,8 @@ class MatchCog(commands.Cog, name="Match"):
             uid: daily_streak(days, today)
             for uid, days in (await db.daily_days_by_user(interaction.guild_id)).items()
         }
-        await interaction.response.send_message(
-            embed=stats_embed(rows, interaction.user.id, streaks, sort == "streak", kind),
-            ephemeral=True,
+        await send_pages(
+            interaction, stats_pages(rows, interaction.user.id, streaks, sort == "streak", kind)
         )
 
     @app_commands.command(name="profile", description="A member's match rating, games and streak")
