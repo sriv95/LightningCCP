@@ -219,6 +219,11 @@ MIGRATIONS = [
     ALTER TABLE matches ADD COLUMN tags TEXT NOT NULL DEFAULT '';
     ALTER TABLE matches ADD COLUMN exclude_tags TEXT NOT NULL DEFAULT '';
     """,
+    # Team mashups: teams is the number of teams (0 for an individual contest), team the player's.
+    """
+    ALTER TABLE mashups ADD COLUMN teams INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE mashup_players ADD COLUMN team INTEGER;
+    """,
 ]
 
 
@@ -298,6 +303,7 @@ class MashupRow:
     created_at: int
     started_at: int | None
     ends_at: int | None
+    teams: int = 0
 
 
 @dataclass(frozen=True)
@@ -305,6 +311,7 @@ class MashupPlayer:
     user_id: int
     handle: str
     joined_at: int
+    team: int | None = None
 
 
 def _match(row: aiosqlite.Row) -> MatchRow:
@@ -830,6 +837,8 @@ class Store:
         duration_seconds: int,
         penalty_minutes: int,
         now: int,
+        teams: int = 0,
+        host_team: int | None = None,
     ) -> int:
         try:
             async with self._tx() as db:
@@ -837,8 +846,8 @@ class Store:
                     raise AlreadyInMatch()
                 cur = await db.execute(
                     "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, "
-                    "count, duration_seconds, penalty_minutes, status, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?)",
+                    "count, duration_seconds, penalty_minutes, status, created_at, teams) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?)",
                     (
                         guild_id,
                         channel_id,
@@ -849,13 +858,14 @@ class Store:
                         duration_seconds,
                         penalty_minutes,
                         now,
+                        teams,
                     ),
                 )
                 mashup_id = cur.lastrowid
                 await db.execute(
-                    "INSERT INTO mashup_players (mashup_id, guild_id, user_id, handle, joined_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (mashup_id, guild_id, host_id, host_handle, now),
+                    "INSERT INTO mashup_players (mashup_id, guild_id, user_id, handle, joined_at, "
+                    "team) VALUES (?, ?, ?, ?, ?, ?)",
+                    (mashup_id, guild_id, host_id, host_handle, now, host_team),
                 )
                 return mashup_id
         except sqlite3.IntegrityError as exc:
@@ -887,14 +897,21 @@ class Store:
 
     async def mashup_players(self, mashup_id: int) -> list[MashupPlayer]:
         rows = await self._all(
-            "SELECT user_id, handle, joined_at FROM mashup_players WHERE mashup_id = ? "
+            "SELECT user_id, handle, joined_at, team FROM mashup_players WHERE mashup_id = ? "
             "ORDER BY joined_at, rowid",
             (mashup_id,),
         )
-        return [MashupPlayer(r["user_id"], r["handle"], r["joined_at"]) for r in rows]
+        return [MashupPlayer(r["user_id"], r["handle"], r["joined_at"], r["team"]) for r in rows]
 
     async def add_mashup_player(
-        self, mashup_id: int, guild_id: int, user_id: int, handle: str, now: int, cap: int
+        self,
+        mashup_id: int,
+        guild_id: int,
+        user_id: int,
+        handle: str,
+        now: int,
+        cap: int,
+        team: int | None = None,
     ) -> None:
         try:
             async with self._tx() as db:
@@ -910,9 +927,9 @@ class Store:
                 if await self._in_match(db, guild_id, user_id):
                     raise AlreadyInMatch()
                 await db.execute(
-                    "INSERT INTO mashup_players (mashup_id, guild_id, user_id, handle, joined_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (mashup_id, guild_id, user_id, handle, now),
+                    "INSERT INTO mashup_players (mashup_id, guild_id, user_id, handle, joined_at, "
+                    "team) VALUES (?, ?, ?, ?, ?, ?)",
+                    (mashup_id, guild_id, user_id, handle, now, team),
                 )
         except sqlite3.IntegrityError as exc:
             raise AlreadyInMatch() from exc

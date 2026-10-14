@@ -306,3 +306,76 @@ async def test_embed_lobby_active_cancelled(env):
     assert mashup_embed(final, by_key).title == "Mashup contest - final standings"
     gone = await svc.leave((await lobby(svc, host=3)).mashup.id, 3)
     assert mashup_embed(gone, by_key).title == "Mashup cancelled"
+
+
+async def team_lobby(svc, teams=2, host_team=1, **kw):
+    return await lobby(svc, teams=teams, host_team=host_team, **kw)
+
+
+async def test_team_contest_join_needs_a_valid_team(env):
+    svc, store, cf, clock = env
+    view = await team_lobby(svc, teams=3, host_team=2)
+    assert [(p.user_id, p.team) for p in view.players] == [(1, 2)] and view.mashup.teams == 3
+    mid = view.mashup.id
+    for bad in (None, 0, 4):
+        with pytest.raises(BotError, match="1 to 3"):
+            await svc.join(mid, 2, bad)
+    assert [(p.user_id, p.team) for p in (await svc.join(mid, 2, 3)).players] == [(1, 2), (2, 3)]
+    with pytest.raises(BotError, match="1 to 2"):
+        await team_lobby(svc, host=3, teams=2, host_team=5)
+    solo = await lobby(svc, host=4)  # an individual contest ignores the team
+    assert (await svc.join(solo.mashup.id, 3, 2)).players[1].team is None
+
+
+async def test_team_standings_count_a_problem_once_from_the_first_solver(env):
+    svc, store, cf, clock = env
+    view = await team_lobby(svc, penalty_minutes=10)
+    mid = view.mashup.id
+    await svc.join(mid, 2, 1)
+    await svc.join(mid, 3, 2)
+    view = await svc.start(mid, 1)
+    keys = [k for k, _ in view.problems]
+    sub(cf, "h1", keys[0], 1100)  # team 1: A at 100 s by h1, also A at 150 s by h2
+    sub(cf, "h2", keys[0], 1150)
+    sub(cf, "h2", keys[1], 1200)
+    sub(cf, "h3", keys[0], 1050)  # team 2: A at 50 s
+    sub(cf, "h3", keys[1], 1020, verdict="WRONG_ANSWER")
+    sub(cf, "h3", keys[1], 1300)
+    for uid in (1, 2, 3):
+        await svc.check(mid, uid)
+    view = await svc.view(mid)
+    ranks = view.standings
+    assert [(r.rank, r.user_id, r.handle, r.solved) for r in ranks] == [
+        (1, 1, "Team 1", 2),
+        (2, 2, "Team 2", 2),
+    ]
+    assert ranks[0].total_seconds == 100 + 200  # not 150: the earliest solve of A counts
+    assert ranks[1].total_seconds == 50 + 300 + 10 * 60  # one wrong attempt before B
+
+
+async def test_team_contest_embeds_and_refresh_skips_finished_teams(env):
+    svc, store, cf, clock = env
+    view = await team_lobby(svc, count=1, min_rating=800, max_rating=800)
+    mid = view.mashup.id
+    await svc.join(mid, 2, 2)
+    text = mashup_embed(await svc.view(mid), {}).description
+    assert "Team 1: <@1> (h1)" in text and "Team 2: <@2> (h2)" in text
+    assert "Join asks for a team number (1-2)" in text and "2 teams" in text
+    await svc.join(mid, 3, 1)
+    await svc.start(mid, 1)
+    sub(cf, "h1", "1A", 1100)
+    await svc.check(mid, 1)
+    cf.calls.clear()
+    clock.t = 1200
+    await svc.tick()
+    assert cf.calls == ["h2"]  # team 1 solved everything: neither h1 nor teammate h3 is read
+    embed = mashup_embed(await svc.view(mid), {})
+    assert embed.title == "Team mashup" and "1. Team 1 (<@1>, <@3>) - 1 solved" in embed.description
+
+
+def test_team_solves_picks_the_earliest_solve_per_problem():
+    from src.logic import team_solves
+
+    solves = {1: {"A": (100, 0), "B": (500, 1)}, 2: {"A": (90, 2)}, 3: {"A": (10, 0)}}
+    out = team_solves([(1, 1), (2, 1), (3, 2)], solves)
+    assert out == {1: {"A": (90, 2), "B": (500, 1)}, 2: {"A": (10, 0)}}

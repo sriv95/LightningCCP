@@ -338,6 +338,7 @@ def _mashup_setup(view: MashupView) -> str:
     return (
         f"{m.count} problems rated {m.min_rating}-{m.max_rating}, "
         f"{format_hm(m.duration_seconds)} long, {penalty}"
+        + (f", {m.teams} teams" if m.teams else "")
     )
 
 
@@ -351,13 +352,22 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
             colour=discord.Colour.red(),
         )
     if m.status == "lobby":
-        names = "\n".join(f"<@{p.user_id}> ({p.handle})" for p in view.players)
+        if m.teams:
+            names = "\n".join(
+                f"Team {t}: "
+                + (", ".join(f"<@{p.user_id}> ({p.handle})" for p in view.players if p.team == t))
+                for t in range(1, m.teams + 1)
+                if any(p.team == t for p in view.players)
+            )
+        else:
+            names = "\n".join(f"<@{p.user_id}> ({p.handle})" for p in view.players)
         return discord.Embed(
-            title="Mashup lobby",
+            title="Team mashup lobby" if m.teams else "Mashup lobby",
             description=(
                 f"Host: <@{m.host_id}>\n{_mashup_setup(view)}\n{players}:\n{names}\n"
                 f"Expires <t:{m.created_at + LOBBY_TTL_SECONDS}:R>. "
-                "The host presses Start; nobody can join after that."
+                + (f"Join asks for a team number (1-{m.teams}). " if m.teams else "")
+                + "The host presses Start; nobody can join after that."
             ),
             colour=discord.Colour.blurple(),
         )
@@ -377,11 +387,16 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
             for k, t in done
         )
         detail = f" ({solved})" if solved else ""
-        lines.append(
-            f"{r.rank}. {r.handle} - {r.solved} solved, {format_hm(r.total_seconds)}{detail}"
-        )
+        who = r.handle
+        if m.teams:
+            members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
+            who = f"{r.handle} ({members})"
+        lines.append(f"{r.rank}. {who} - {r.solved} solved, {format_hm(r.total_seconds)}{detail}")
     return discord.Embed(
-        title="Mashup contest - final standings" if finished else "Mashup contest",
+        title=(
+            ("Team mashup" if m.teams else "Mashup contest")
+            + (" - final standings" if finished else "")
+        ),
         description="\n".join(lines),
         colour=discord.Colour.green() if finished else discord.Colour.gold(),
     )

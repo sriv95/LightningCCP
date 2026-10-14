@@ -18,6 +18,7 @@ MATCH_TTL_SECONDS = 7200
 MATCH_MAX_PLAYERS = 10
 MASHUP_MAX_PLAYERS = 20
 MASHUP_MAX_PROBLEMS = 10
+MASHUP_MAX_TEAMS = 10
 START_RATING = 800
 SOLO_MIN = 1
 SOLO_EQUAL = 10
@@ -350,10 +351,24 @@ def pick_mashup(
     return chosen
 
 
+def team_solves(
+    members: Iterable[tuple[int, int]], solves: dict[int, dict[str, tuple[int, int]]]
+) -> dict[int, dict[str, tuple[int, int]]]:
+    """Team number -> problem -> (solve time, wrong attempts) of the teammate who solved it
+    first. members are (user_id, team); a problem counts once for the team."""
+    out: dict[int, dict[str, tuple[int, int]]] = {}
+    for user_id, team in members:
+        mine = out.setdefault(team, {})
+        for key, found in solves.get(user_id, {}).items():
+            if key not in mine or found < mine[key]:
+                mine[key] = found
+    return out
+
+
 @dataclass(frozen=True)
 class MashupRank:
     rank: int
-    user_id: int
+    user_id: int  # the team number in a team contest
     handle: str
     solved: int
     total_seconds: int  # solve times plus the penalty of every wrong attempt

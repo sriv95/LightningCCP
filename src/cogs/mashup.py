@@ -5,8 +5,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from src.errors import report_error
-from src.logic import MASHUP_MAX_PROBLEMS
+from src.errors import BotError, report_error
+from src.logic import MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAMS
 from src.mashup import MashupView
 from src.ui.embeds import mashup_embed
 
@@ -62,6 +62,31 @@ def mashup_components(view: MashupView) -> discord.ui.View | None:
     return ui
 
 
+class TeamModal(discord.ui.Modal):
+    """Asks which team a joining player wants; Join in a team contest opens it."""
+
+    def __init__(self, cog: "MashupCog", mashup_id: int, teams: int):
+        super().__init__(title="Join a team", timeout=300)
+        self.cog = cog
+        self.mashup_id = mashup_id
+        self.team = discord.ui.TextInput(placeholder="1", min_length=1, max_length=2)
+        self.add_item(discord.ui.Label(text=f"Team number (1-{teams})", component=self.team))
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            number = int(self.team.value.strip())
+        except ValueError:
+            raise BotError("The team must be a number.") from None
+        await interaction.response.defer()
+        view = await self.cog.svc.join(self.mashup_id, interaction.user.id, number)
+        await interaction.edit_original_response(
+            embed=mashup_embed(view, self.cog._by_key()), view=mashup_components(view)
+        )
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        await report_error(interaction, error)
+
+
 class MashupCog(commands.Cog, name="Mashup"):
     mashup = app_commands.Group(
         name="mashup", description="Timed multi-problem contests", guild_only=True
@@ -104,6 +129,49 @@ class MashupCog(commands.Cog, name="Mashup"):
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
     ) -> None:
+        await self._open(interaction, min_rating, max_rating, count, hour, minute, penalty)
+
+    @mashup.command(
+        name="team-contest", description="Open a team contest lobby; Join asks for a team number"
+    )
+    @app_commands.describe(
+        teams="Number of teams (default 2)",
+        team="Your own team number (default 1)",
+        min_rating="Easiest problem rating (default 800)",
+        max_rating="Hardest problem rating (default 1500)",
+        count="Number of problems (default 5)",
+        hour="Hours the contest lasts (default 2)",
+        minute="Extra minutes (default 0)",
+        penalty="Minutes added per wrong attempt before a solve (default 0)",
+    )
+    async def team_contest(
+        self,
+        interaction: discord.Interaction,
+        teams: app_commands.Range[int, 2, MASHUP_MAX_TEAMS] = 2,
+        team: app_commands.Range[int, 1, MASHUP_MAX_TEAMS] = 1,
+        min_rating: Rating = 800,
+        max_rating: Rating = 1500,
+        count: app_commands.Range[int, 1, MASHUP_MAX_PROBLEMS] = 5,
+        hour: app_commands.Range[int, 0, 24] = 2,
+        minute: app_commands.Range[int, 0, 59] = 0,
+        penalty: app_commands.Range[int, 0, 120] = 0,
+    ) -> None:
+        await self._open(
+            interaction, min_rating, max_rating, count, hour, minute, penalty, teams, team
+        )
+
+    async def _open(
+        self,
+        interaction: discord.Interaction,
+        min_rating: int,
+        max_rating: int,
+        count: int,
+        hour: int,
+        minute: int,
+        penalty: int,
+        teams: int = 0,
+        host_team: int = 1,
+    ) -> None:
         await interaction.response.defer()
         view = await self.svc.create(
             guild_id=interaction.guild_id,
@@ -114,6 +182,8 @@ class MashupCog(commands.Cog, name="Mashup"):
             count=count,
             duration_seconds=hour * 3600 + minute * 60,
             penalty_minutes=penalty,
+            teams=teams,
+            host_team=host_team,
         )
         message = await interaction.followup.send(
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view), wait=True
@@ -123,6 +193,12 @@ class MashupCog(commands.Cog, name="Mashup"):
     async def on_button(
         self, interaction: discord.Interaction, action: str, mashup_id: int
     ) -> None:
+        if action == "join":
+            mashup = await self.bot.services.db.get_mashup(mashup_id)
+            if mashup is not None and mashup.status == "lobby" and mashup.teams:
+                # A team contest asks for the team first; the modal then joins.
+                await interaction.response.send_modal(TeamModal(self, mashup_id, mashup.teams))
+                return
         await interaction.response.defer()
         handlers = {
             "join": self.svc.join,

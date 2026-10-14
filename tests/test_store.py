@@ -496,3 +496,24 @@ async def test_migration_8_adds_tag_columns_with_empty_defaults(tmp_path):
     match = await s.get_match(1)
     assert (match.tags, match.exclude_tags) == ("", "")
     await s.close()
+
+
+async def test_migration_9_adds_team_columns_with_defaults(tmp_path):
+    db = await aiosqlite.connect(tmp_path / "old.db")
+    await db.executescript("\n".join(MIGRATIONS[:8]) + "\nPRAGMA user_version = 8;")
+    await db.execute(
+        "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, count, "
+        "duration_seconds, penalty_minutes, status, created_at) "
+        "VALUES (1, 2, 3, 800, 1200, 3, 7200, 0, 'lobby', 4)"
+    )
+    await db.execute(
+        "INSERT INTO mashup_players (mashup_id, guild_id, user_id, handle, joined_at) "
+        "VALUES (1, 1, 3, 'h', 4)"
+    )
+    await db.commit()
+    await db.close()
+    s = Store(tmp_path / "old.db")
+    await s.connect()
+    assert (await s.get_mashup(1)).teams == 0
+    assert (await s.mashup_players(1))[0].team is None
+    await s.close()

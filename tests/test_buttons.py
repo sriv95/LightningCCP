@@ -144,3 +144,36 @@ async def test_rematch_button_posts_a_new_lobby():
     svc.set_message.assert_awaited_once_with(9, 6, 222)
     interaction.edit_original_response.assert_not_awaited()  # the finished result stays as it is
     assert MatchButton.__discord_ui_compiled_template__.fullmatch("match:rematch:3")
+
+
+async def test_team_modal_rejects_a_non_number_and_joins_with_the_number():
+    from types import SimpleNamespace
+
+    from src.cogs.mashup import TeamModal
+
+    calls = []
+
+    class Svc:
+        async def join(self, mashup_id, user_id, team):
+            calls.append((mashup_id, user_id, team))
+            raise BotError("stop here")
+
+    cog = SimpleNamespace(svc=Svc(), _by_key=dict)
+    modal = TeamModal(cog, 7, 3)
+    assert modal.children[0].text == "Team number (1-3)"
+
+    class Response:
+        deferred = False
+
+        async def defer(self):
+            self.deferred = True
+
+    interaction = SimpleNamespace(response=Response(), user=SimpleNamespace(id=42))
+    modal.team._value = "abc"
+    with pytest.raises(BotError, match="number"):
+        await modal.on_submit(interaction)
+    assert not interaction.response.deferred and calls == []
+    modal.team._value = " 2 "
+    with pytest.raises(BotError, match="stop here"):
+        await modal.on_submit(interaction)
+    assert calls == [(7, 42, 2)] and interaction.response.deferred

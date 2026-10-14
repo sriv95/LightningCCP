@@ -14,6 +14,7 @@ from src.logic import (
     mashup_standings,
     pick_mashup,
     solved_keys,
+    team_solves,
 )
 
 log = logging.getLogger(__name__)
@@ -29,6 +30,18 @@ class MashupView:
 
     @property
     def standings(self) -> list[MashupRank]:
+        """Players, or in a team contest the teams: a problem counts for a team once, from the
+        teammate who solved it first (MashupRank.user_id is then the team number)."""
+        if self.mashup.teams:
+            joined: dict[int, int] = {}
+            for p in self.players:
+                joined[p.team] = min(joined.get(p.team, p.joined_at), p.joined_at)
+            return mashup_standings(
+                ((team, f"Team {team}", at) for team, at in joined.items()),
+                team_solves(((p.user_id, p.team) for p in self.players), self.solves),
+                self.mashup.started_at or 0,
+                self.mashup.penalty_minutes,
+            )
         return mashup_standings(
             ((p.user_id, p.handle, p.joined_at) for p in self.players),
             self.solves,
@@ -91,9 +104,13 @@ class MashupService:
         count: int,
         duration_seconds: int,
         penalty_minutes: int = 0,
+        teams: int = 0,
+        host_team: int = 1,
     ) -> MashupView:
         if min_rating > max_rating:
             raise BotError("min_rating cannot be higher than max_rating.")
+        if teams:
+            self._check_team(teams, host_team)
         if duration_seconds <= 0:
             raise BotError("The contest must last at least one minute.")
         mashup_id = await self._store.create_mashup(
@@ -107,13 +124,24 @@ class MashupService:
             duration_seconds=duration_seconds,
             penalty_minutes=penalty_minutes,
             now=self._now(),
+            teams=teams,
+            host_team=host_team if teams else None,
         )
         return await self.view(mashup_id)
 
-    async def join(self, mashup_id: int, user_id: int) -> MashupView:
+    @staticmethod
+    def _check_team(teams: int, team: int | None) -> None:
+        if team is None or not 1 <= team <= teams:
+            raise BotError(f"Pick a team number from 1 to {teams}.")
+
+    async def join(self, mashup_id: int, user_id: int, team: int | None = None) -> MashupView:
         mashup = await self._mashup(mashup_id)
         if mashup.status != "lobby":
             raise MatchClosed("This contest has already started, so nobody can join.")
+        if mashup.teams:
+            self._check_team(mashup.teams, team)
+        else:
+            team = None
         await self._store.add_mashup_player(
             mashup_id,
             mashup.guild_id,
@@ -121,6 +149,7 @@ class MashupService:
             await self._handle(mashup.guild_id, user_id),
             self._now(),
             MASHUP_MAX_PLAYERS,
+            team,
         )
         return await self.view(mashup_id)
 
@@ -221,8 +250,12 @@ class MashupService:
         changed = 0
         total = len(await self._store.mashup_problems(mashup.id))
         solves = await self._store.mashup_solves(mashup.id)
-        for player in await self._store.mashup_players(mashup.id):
-            if len(solves.get(player.user_id, {})) >= total:
+        players = await self._store.mashup_players(mashup.id)
+        if mashup.teams:  # a team that solved everything needs no more reads from any member
+            solves = team_solves(((p.user_id, p.team) for p in players), solves)
+        for player in players:
+            who = player.team if mashup.teams else player.user_id
+            if len(solves.get(who, {})) >= total:
                 continue  # solved everything: nothing left to read, saves a Codeforces call
             try:
                 changed += await self._refresh(mashup, player)
