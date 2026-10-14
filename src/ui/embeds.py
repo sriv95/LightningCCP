@@ -449,12 +449,12 @@ def bingo_claim_message(view: MashupView, entry: tuple, by_key: dict[str, Proble
     at, team, key, rating, user = entry
     problem = by_key.get(key)
     text = f"<t:{at}:T> {_bingo_who(view, team, user)} claimed "
-    text += (f"[{key}]({problem.url})" if problem else key) + f" ({rating})"
+    text += (f"[{key}](<{problem.url}>)" if problem else key) + f" ({rating})"
     cell = next(c for c in view.cells if c.key == key)
     new = next((c for c in view.cells if c.cell == cell.cell and c.idx > cell.idx), None)
     if new is not None:
         other = by_key.get(new.key)
-        text += f". New problem there: {f'[{new.key}]({other.url})' if other else new.key}"
+        text += f". New problem there: {f'[{new.key}](<{other.url}>)' if other else new.key}"
         text += f" ({new.rating})"
     return text
 
@@ -472,6 +472,28 @@ def _bingo_log(view: MashupView) -> str:
     return "\n".join(out)
 
 
+def _bingo_grid(view: MashupView) -> str:
+    """The board as text: a classic claimed square shows [team] instead of its problem; a replace
+    one shows its problem and the holder."""
+    m = view.mashup
+    shown = [
+        key + (f"[{team}]" if team is not None else "")
+        if m.mode == "replace"
+        else (f"[{team}]" if team is not None else key)
+        for key, _, team in view.board.squares
+    ]
+    width = max(len(text) for text in shown)
+    return "\n".join(
+        "  ".join(text.ljust(width) for text in shown[r * m.size : (r + 1) * m.size]).rstrip()
+        for r in range(m.size)
+    )
+
+
+def bingo_board_embed(view: MashupView) -> discord.Embed:
+    """The current board for the newest message of the solve log thread."""
+    return discord.Embed(description=f"```\n{_bingo_grid(view)}\n```", colour=discord.Colour.gold())
+
+
 def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
     """The board (a classic claimed square shows [team] instead of its problem; a replace one
     shows its problem and the holder), the open problems by row and the standings."""
@@ -479,17 +501,7 @@ def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
     board = view.board
     finished = m.status == "finished"
     replace = m.mode == "replace"
-    shown = [
-        key + (f"[{team}]" if team is not None else "")
-        if replace
-        else (f"[{team}]" if team is not None else key)
-        for key, _, team in board.squares
-    ]
-    width = max(len(text) for text in shown)
-    grid = "\n".join(
-        "  ".join(text.ljust(width) for text in shown[r * m.size : (r + 1) * m.size]).rstrip()
-        for r in range(m.size)
-    )
+    grid = _bingo_grid(view)
     when = f"Ended <t:{m.ends_at}:f>" if finished else f"Ends <t:{m.ends_at}:R>"
     lines = [f"Host: <@{m.host_id}> | {_mashup_setup(view)} | {when}", f"```\n{grid}\n```"]
     lines.append("**Standings** (the number in brackets is the team on the board)")

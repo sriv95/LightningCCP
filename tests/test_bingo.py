@@ -374,8 +374,10 @@ def test_a_full_size_bingo_embed_fits_discords_limit():
     assert len(mashup_embed(view, by_key).description) <= 4096
 
 
-async def test_claims_are_logged_to_the_thread_once(env):
+async def test_claims_are_logged_to_the_thread_once_and_only_the_newest_shows_the_board(env):
     from types import SimpleNamespace
+
+    import discord
 
     from src.cogs.mashup import MashupCog
 
@@ -384,26 +386,46 @@ async def test_claims_are_logged_to_the_thread_once(env):
     mid = view.mashup.id
     assert await svc.claims_to_log(await svc.view(mid)) == []  # no thread yet
     await svc.set_thread(mid, 777)
-    first = next(c for c in view.cells if c.rating == 800)
+    first, second = [c for c in view.cells if c.rating < 1700][:2]
     sub(cf, "h2", first.key, 1010)
     clock.t = 1020
     after = await svc.check(mid, 2)
     assert after.mashup.thread_id == 777
 
-    sent = []
+    sent, edits = [], []
 
     class Thread:
-        async def send(self, text, **kw):
-            sent.append(text)
+        async def send(self, text, embed=discord.utils.MISSING, **kw):
+            sent.append((text, embed))
+            return SimpleNamespace(id=100 + len(sent))
+
+        def get_partial_message(self, message_id):
+            async def edit(**kw):
+                edits.append((message_id, kw))
+
+            return SimpleNamespace(edit=edit)
 
     bot = SimpleNamespace(
         get_partial_messageable=lambda *a, **kw: Thread(),
-        services=SimpleNamespace(mashups=svc, problems=SimpleNamespace(problems=BINGO_PROBLEMS)),
+        services=SimpleNamespace(
+            mashups=svc, db=store, problems=SimpleNamespace(problems=BINGO_PROBLEMS)
+        ),
     )
     cog = MashupCog(bot)
     await cog._log(after)
     await cog._log(await svc.view(mid))  # nothing new the second time
-    assert len(sent) == 1
-    assert sent[0].startswith("<t:1010:T> <@2> claimed [")
-    assert f"({first.rating})" in sent[0] and "New problem there:" in sent[0]
-    assert f"({first.rating + 100})" in sent[0]
+    assert len(sent) == 1 and edits == []
+    text, embed = sent[0]
+    assert text.startswith("<t:1010:T> <@2> claimed [")
+    assert f"({first.rating})" in text and "New problem there:" in text
+    assert f"({first.rating + 100})" in text
+    assert "[2]" in embed.description  # the board shows team 2 holding the square
+    assert (await store.get_mashup(mid)).log_board_id == 101
+
+    sub(cf, "h1", second.key, 1030)
+    clock.t = 1040
+    await svc.check(mid, 1)
+    await cog._log(await svc.view(mid))
+    assert len(sent) == 2 and sent[1][1].description.startswith("```")
+    assert edits == [(101, {"embeds": []})]  # the older message loses its board
+    assert (await store.get_mashup(mid)).log_board_id == 102

@@ -154,6 +154,9 @@ class MashupService:
             return []
         return [e for e in view.log if await self._store.mark_logged(view.mashup.id, e[2])]
 
+    async def set_log_board(self, mashup_id: int, message_id: int) -> None:
+        await self._store.set_log_board(mashup_id, message_id)
+
     async def set_thread(self, mashup_id: int, thread_id: int) -> None:
         await self._store.set_mashup_thread(mashup_id, thread_id)
 

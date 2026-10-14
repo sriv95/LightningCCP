@@ -300,6 +300,8 @@ MIGRATIONS = [
         PRIMARY KEY (mashup_id, problem_key)
     );
     """,
+    # The thread message that carries the board (only the newest log message does).
+    "ALTER TABLE mashups ADD COLUMN log_board_id INTEGER;",
 ]
 
 
@@ -390,6 +392,7 @@ class MashupRow:
     size: int = 0  # side of a bingo board
     win: str = "line"  # classic bingo: "line" (first full line) or "continuous" (play to the end)
     thread_id: int | None = None  # the thread of a bingo's solve log
+    log_board_id: int | None = None  # the newest thread message, which carries the board
 
 
 @dataclass(frozen=True)
@@ -1211,6 +1214,11 @@ class Store:
 
     async def set_mashup_thread(self, mashup_id: int, thread_id: int) -> None:
         await self._write("UPDATE mashups SET thread_id = ? WHERE id = ?", (thread_id, mashup_id))
+
+    async def set_log_board(self, mashup_id: int, message_id: int) -> None:
+        await self._write(
+            "UPDATE mashups SET log_board_id = ? WHERE id = ?", (message_id, mashup_id)
+        )
 
     async def mark_logged(self, mashup_id: int, problem_key: str) -> bool:
         """True only the first time, so a claim is posted to the thread at most once."""

@@ -18,7 +18,7 @@ from src.logic import (
     tag_suggestions,
 )
 from src.mashup import MashupView
-from src.ui.embeds import bingo_claim_message, mashup_embed
+from src.ui.embeds import bingo_board_embed, bingo_claim_message, mashup_embed
 
 log = logging.getLogger(__name__)
 
@@ -373,12 +373,27 @@ class MashupCog(commands.Cog, name="Mashup"):
             thread = self.bot.get_partial_messageable(
                 m.thread_id, guild_id=m.guild_id, type=discord.ChannelType.public_thread
             )
-            for entry in await self.svc.claims_to_log(view):
-                await thread.send(
-                    bingo_claim_message(view, entry, self._by_key()),
+            entries = await self.svc.claims_to_log(view)
+            if not entries:
+                return
+            old = (await self.bot.services.db.get_mashup(m.id)).log_board_id
+            by_key = self._by_key()
+            last = None
+            for i, entry in enumerate(entries):
+                # Only the newest message shows the board.
+                last = await thread.send(
+                    bingo_claim_message(view, entry, by_key),
+                    embed=bingo_board_embed(view)
+                    if i == len(entries) - 1
+                    else discord.utils.MISSING,
                     allowed_mentions=discord.AllowedMentions.none(),
-                    suppress_embeds=True,
                 )
+            await self.svc.set_log_board(m.id, last.id)
+            if old is not None:
+                try:
+                    await thread.get_partial_message(old).edit(embeds=[])
+                except discord.HTTPException:
+                    log.info("Could not clear the board of message %s", old, exc_info=True)
         except Exception:  # the log is a side channel: it must not break the button or the loop
             log.warning("Could not log to the thread of mashup %s", m.id, exc_info=True)
 
