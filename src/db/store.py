@@ -233,6 +233,11 @@ MIGRATIONS = [
     "ALTER TABLE mashups ADD COLUMN rated INTEGER NOT NULL DEFAULT 1;",
     # A team contest can cap each team's size (0 for no per-team cap).
     "ALTER TABLE mashups ADD COLUMN team_size INTEGER NOT NULL DEFAULT 0;",
+    # Contests can filter their problems by tags (logic.normalize_tags form, '' for no filter).
+    """
+    ALTER TABLE mashups ADD COLUMN tags TEXT NOT NULL DEFAULT '';
+    ALTER TABLE mashups ADD COLUMN exclude_tags TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 
@@ -316,6 +321,8 @@ class MashupRow:
     max_players: int = 20
     rated: int = 1
     team_size: int = 0
+    tags: str = ""
+    exclude_tags: str = ""
 
 
 @dataclass(frozen=True)
@@ -868,6 +875,8 @@ class Store:
         max_players: int = 20,
         rated: bool = True,
         team_size: int = 0,
+        tags: str = "",
+        exclude_tags: str = "",
     ) -> int:
         try:
             async with self._tx() as db:
@@ -876,7 +885,8 @@ class Store:
                 cur = await db.execute(
                     "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, "
                     "count, duration_seconds, penalty_minutes, status, created_at, teams, "
-                    "max_players, rated, team_size) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?, ?, ?)",
+                    "max_players, rated, team_size, tags, exclude_tags) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?, ?, ?, ?, ?)",
                     (
                         guild_id,
                         channel_id,
@@ -891,6 +901,8 @@ class Store:
                         max_players,
                         int(rated),
                         team_size,
+                        tags,
+                        exclude_tags,
                     ),
                 )
                 mashup_id = cur.lastrowid

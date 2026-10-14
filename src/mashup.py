@@ -13,6 +13,8 @@ from src.logic import (
     first_solve,
     mashup_standings,
     match_deltas,
+    normalize_tags,
+    parse_tags,
     pick_mashup,
     solved_keys,
     team_solves,
@@ -134,6 +136,8 @@ class MashupService:
         max_players: int = MASHUP_MAX_PLAYERS,
         rated: bool = True,
         team_size: int = 0,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
     ) -> MashupView:
         if min_rating > max_rating:
             raise BotError("min_rating cannot be higher than max_rating.")
@@ -159,6 +163,8 @@ class MashupService:
             max_players=max_players,
             rated=rated,
             team_size=team_size,
+            tags=normalize_tags(tags),
+            exclude_tags=normalize_tags(exclude_tags),
         )
         return await self.view(mashup_id)
 
@@ -221,11 +227,18 @@ class MashupService:
         for p in players:
             solved |= solved_keys(await self._cf.user_status(p.handle))
         picked = pick_mashup(
-            problems, mashup.min_rating, mashup.max_rating, mashup.count, frozenset(solved)
+            problems,
+            mashup.min_rating,
+            mashup.max_rating,
+            mashup.count,
+            frozenset(solved),
+            tags=parse_tags(mashup.tags),
+            exclude_tags=parse_tags(mashup.exclude_tags),
         )
         if picked is None:
             raise BotError(
                 f"Not enough problems rated {mashup.min_rating}-{mashup.max_rating} "
+                f"{' with those tags' if mashup.tags or mashup.exclude_tags else ''} "
                 f"that nobody here has solved, for {mashup.count} problems."
             )
         now = self._now()

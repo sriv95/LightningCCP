@@ -532,3 +532,15 @@ async def test_join_again_changes_team(env):
         await svc.join(mid, 1, 2)
     with pytest.raises(BotError):
         await svc.join(mid, 2, 9)  # an unknown team
+
+
+async def test_tags_filter_the_problems_and_show_in_the_lobby(env):
+    svc, store, cf, clock = env
+    view = await lobby(svc, tags="DP, math", exclude_tags="graphs")
+    assert (view.mashup.tags, view.mashup.exclude_tags) == ("dp,math", "graphs")
+    assert "tags dp, math, without graphs" in mashup_embed(view, {}).description
+    with pytest.raises(BotError, match="with those tags"):
+        await svc.start(view.mashup.id, 1)  # no test problem has those tags
+    await svc.leave(view.mashup.id, 1)
+    plain = await lobby(svc, exclude_tags="dp")
+    assert (await svc.start(plain.mashup.id, 1)).mashup.status == "active"

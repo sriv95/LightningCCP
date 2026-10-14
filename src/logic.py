@@ -328,9 +328,12 @@ def pick_mashup(
     count: int,
     solved: frozenset[str] = frozenset(),
     rng: random.Random | None = None,
+    tags: frozenset[str] = frozenset(),
+    exclude_tags: frozenset[str] = frozenset(),
 ) -> list[Problem] | None:
     """`count` distinct unsolved problems, easy to hard, as close as possible to ratings spread
-    evenly over min_rating..max_rating. None when the range cannot supply that many."""
+    evenly over min_rating..max_rating, all with `tags` and none with `exclude_tags`. None when
+    that cannot supply that many."""
     rng = rng or random.Random()
     if count == 1:
         targets = [(min_rating + max_rating) / 2]
@@ -340,7 +343,12 @@ def pick_mashup(
     taken = set(solved)
     for target in targets:
         pool = filter_problems(
-            problems, min_rating=min_rating, max_rating=max_rating, solved=frozenset(taken)
+            problems,
+            min_rating=min_rating,
+            max_rating=max_rating,
+            tags=tags,
+            exclude_tags=exclude_tags,
+            solved=frozenset(taken),
         )
         if not pool:
             return None

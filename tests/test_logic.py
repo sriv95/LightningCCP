@@ -399,3 +399,12 @@ def test_recaps_due_window_and_sent():
     running = Contest(4, "d", "CF", "CODING", now - 100, 7200)
     assert [c.id for c in recaps_due([done, older, stale, running], set(), now)] == [2, 1]
     assert [c.id for c in recaps_due([done, older], {2}, now)] == [1]
+
+
+def test_pick_mashup_respects_tags():
+    pool = [Problem(i, "A", "x", 800 + 100 * i, ("dp",) if i % 2 else ("math",)) for i in range(6)]
+    picked = pick_mashup(pool, 800, 1300, 3, tags=frozenset({"dp"}))
+    assert {p.contest_id % 2 for p in picked} == {1}
+    assert pick_mashup(pool, 800, 1300, 4, tags=frozenset({"dp"})) is None  # only 3 have dp
+    picked = pick_mashup(pool, 800, 1300, 3, exclude_tags=frozenset({"dp"}))
+    assert {p.contest_id % 2 for p in picked} == {0}

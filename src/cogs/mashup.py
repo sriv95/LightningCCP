@@ -5,8 +5,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from src.cogs.match import EXCLUDE_HELP, TAGS_HELP
 from src.errors import BotError, report_error
-from src.logic import MASHUP_MAX_PLAYERS, MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAMS
+from src.logic import MASHUP_MAX_PLAYERS, MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAMS, tag_suggestions
 from src.mashup import MashupView
 from src.ui.embeds import mashup_embed
 
@@ -27,6 +28,8 @@ OPTIONS = {
     "hour": "Hours the contest lasts (default 2)",
     "minute": "Extra minutes (default 0)",
     "penalty": "Minutes added per wrong attempt before a solve (default 0)",
+    "tags": TAGS_HELP,
+    "exclude_tags": EXCLUDE_HELP,
 }
 PLAYERS = "Maximum number of players (default 20)"
 TEAMS = "Number of teams (default 2)"
@@ -142,9 +145,20 @@ class MashupCog(commands.Cog, name="Mashup"):
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
         players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] = MASHUP_MAX_PLAYERS,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
     ) -> None:
         await self._open(
-            interaction, min_rating, max_rating, count, hour, minute, penalty, max_players=players
+            interaction,
+            min_rating,
+            max_rating,
+            count,
+            hour,
+            minute,
+            penalty,
+            max_players=players,
+            tags=tags,
+            exclude_tags=exclude_tags,
         )
 
     @host_rated.command(
@@ -163,6 +177,8 @@ class MashupCog(commands.Cog, name="Mashup"):
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
         players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] | None = None,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
     ) -> None:
         await self._open(
             interaction,
@@ -174,6 +190,8 @@ class MashupCog(commands.Cog, name="Mashup"):
             penalty,
             teams,
             team_size=players or 0,
+            tags=tags,
+            exclude_tags=exclude_tags,
         )
 
     @host_unrated.command(
@@ -190,6 +208,8 @@ class MashupCog(commands.Cog, name="Mashup"):
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
         players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] = MASHUP_MAX_PLAYERS,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
     ) -> None:
         await self._open(
             interaction,
@@ -201,6 +221,8 @@ class MashupCog(commands.Cog, name="Mashup"):
             penalty,
             max_players=players,
             rated=False,
+            tags=tags,
+            exclude_tags=exclude_tags,
         )
 
     @host_unrated.command(
@@ -219,6 +241,8 @@ class MashupCog(commands.Cog, name="Mashup"):
         minute: app_commands.Range[int, 0, 59] = 0,
         penalty: app_commands.Range[int, 0, 120] = 0,
         players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] | None = None,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
     ) -> None:
         await self._open(
             interaction,
@@ -231,7 +255,25 @@ class MashupCog(commands.Cog, name="Mashup"):
             teams,
             rated=False,
             team_size=players or 0,
+            tags=tags,
+            exclude_tags=exclude_tags,
         )
+
+    @rated_contest.autocomplete("tags")
+    @rated_contest.autocomplete("exclude_tags")
+    @rated_team_contest.autocomplete("tags")
+    @rated_team_contest.autocomplete("exclude_tags")
+    @unrated_contest.autocomplete("tags")
+    @unrated_contest.autocomplete("exclude_tags")
+    @unrated_team_contest.autocomplete("tags")
+    @unrated_team_contest.autocomplete("exclude_tags")
+    async def tag_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        return [
+            app_commands.Choice(name=value, value=value)
+            for value in tag_suggestions(current, self.bot.services.problems.tags)
+        ]
 
     async def _open(
         self,
@@ -246,6 +288,8 @@ class MashupCog(commands.Cog, name="Mashup"):
         max_players: int = MASHUP_MAX_PLAYERS,
         rated: bool = True,
         team_size: int = 0,
+        tags: str | None = None,
+        exclude_tags: str | None = None,
     ) -> None:
         await interaction.response.defer()
         view = await self.svc.create(
@@ -261,6 +305,8 @@ class MashupCog(commands.Cog, name="Mashup"):
             max_players=max_players,
             rated=rated,
             team_size=team_size,
+            tags=tags,
+            exclude_tags=exclude_tags,
         )
         message = await interaction.followup.send(
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view), wait=True
