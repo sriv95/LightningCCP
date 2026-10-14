@@ -45,7 +45,6 @@ def test_contest_pages_paginates_and_labels():
 def test_handles_group_commands():
     assert {c.name for c in HandlesCog.handle.commands} == {
         "link",
-        "set",
         "show",
         "whois",
         "unlink",

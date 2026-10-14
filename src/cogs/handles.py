@@ -116,19 +116,6 @@ class HandlesCog(commands.Cog, name="Handles"):
         await s.db.delete_pending(guild_id, user_id)
         await interaction.followup.send(f"Linked you to **{user.handle}**.", ephemeral=True)
 
-    @handle.command(name="set", description="Link a member to a handle without verification")
-    @app_commands.describe(member="Server member", handle="Codeforces handle")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def set_handle(
-        self, interaction: discord.Interaction, member: discord.Member, handle: str
-    ) -> None:
-        await interaction.response.defer(ephemeral=True)
-        user = await self.s.cf.user_info(handle)
-        await self.s.db.link_handle(interaction.guild_id, member.id, user.handle, user.rating)
-        await interaction.followup.send(
-            f"Linked {member.mention} to **{user.handle}**.", ephemeral=True
-        )
-
     @handle.command(name="show", description="Show a member's Codeforces profile")
     @app_commands.describe(member="Defaults to you")
     async def show(
