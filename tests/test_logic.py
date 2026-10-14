@@ -5,9 +5,9 @@ from src.errors import BotError
 from src.logic import (
     chunked,
     earliest_solve,
-    elo_deltas,
     filter_problems,
     has_compile_error,
+    match_deltas,
     match_rating,
     parse_minutes,
     parse_tags,
@@ -20,6 +20,7 @@ from src.logic import (
     solved_keys,
     tag_suggestions,
     unsolved_keys,
+    win_gain,
 )
 
 
@@ -202,33 +203,42 @@ def test_solo_delta_elo_against_the_problem():
     assert solo_delta(800, 800, False) == 0  # failing never costs rating
 
 
-def test_elo_deltas_duel():
-    assert elo_deltas([[1], [2]], {1: 800, 2: 800}) == {1: 16, 2: -16}
-    assert elo_deltas([[1], [2]], {1: 800, 2: 1200}) == {1: 29, 2: -29}  # upset pays more
-    assert elo_deltas([[1], [2]], {1: 1200, 2: 800}) == {1: 3, 2: -3}
+def test_win_gain_curve():
+    assert [win_gain(d) for d in (0, 200, 400)] == [95, 67, 20]
+    assert win_gain(100) == 81 and win_gain(300) == 43.5  # linear between the points
+    assert win_gain(900) == 20  # flat past the last point
+    assert win_gain(-200) == 123 and win_gain(-400) == 170  # an upset mirrors around 95
 
 
-def test_elo_deltas_three_players_equal_ratings():
+def test_match_deltas_duel():
+    assert match_deltas([[1], [2]], {1: 800, 2: 800}) == {1: 95, 2: -95}
+    assert match_deltas([[1], [2]], {1: 1200, 2: 800}) == {1: 20, 2: -20}  # favourite wins
+    assert match_deltas([[1], [2]], {1: 800, 2: 1200}) == {1: 170, 2: -170}  # upset
+    assert match_deltas([[1], [2]], {1: 1000, 2: 800}) == {1: 67, 2: -67}
+
+
+def test_match_deltas_three_players_equal_ratings():
     r = {1: 800, 2: 800, 3: 800}
-    assert elo_deltas([[1], [2], [3]], r) == {1: 16, 2: 0, 3: -16}
+    assert match_deltas([[1], [2], [3]], r) == {1: 95, 2: 0, 3: -95}
 
 
-def test_elo_deltas_ties_score_half():
+def test_match_deltas_ties_average_win_and_loss():
     r = {1: 800, 2: 800, 3: 800}
-    assert elo_deltas([[1], [2, 3]], r) == {1: 16, 2: -8, 3: -8}
-    assert elo_deltas([[1, 2]], {1: 800, 2: 800}) == {1: 0, 2: 0}
+    assert match_deltas([[1], [2, 3]], r) == {1: 95, 2: -48, 3: -48}
+    assert match_deltas([[1, 2]], {1: 800, 2: 800}) == {1: 0, 2: 0}
+    assert match_deltas([[1, 2]], {1: 1200, 2: 800}) == {1: -75, 2: 75}  # a tie costs the favourite
 
 
-def test_elo_deltas_equal_ratings_sum_to_zero():
+def test_match_deltas_equal_ratings_sum_to_zero():
     for n in range(2, 11):
-        deltas = elo_deltas([[i] for i in range(n)], dict.fromkeys(range(n), 1500))
+        deltas = match_deltas([[i] for i in range(n)], dict.fromkeys(range(n), 1500))
         assert len(deltas) == n and sum(deltas.values()) == 0
-        assert deltas[0] == 16 and deltas[n - 1] == -16
+        assert deltas[0] == 95 and deltas[n - 1] == -95
 
 
-def test_elo_deltas_needs_two_players():
+def test_match_deltas_needs_two_players():
     with pytest.raises(ValueError):
-        elo_deltas([[1]], {1: 800})
+        match_deltas([[1]], {1: 800})
 
 
 def test_unsolved_keys_attempted_not_solved_newest_first():

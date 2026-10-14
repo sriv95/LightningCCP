@@ -36,7 +36,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/ranklist contest_id` | Official standings of this server's linked members in a contest (private) |
 | `/remind set\|show\|clear` | Contest reminders (needs Manage Server) |
 
-A match is a public message. The lobby has Join, Start and Leave buttons; once the host presses Start, the problem appears with Check and Give Up buttons. Everyone starts at a match rating of 800. With no `rating` argument, `/gimme` and `/match` pick a problem at your match rating (rounded to 100; the players' average for duel and custom). After a match, ratings change by Elo (K = 32): solo is you against the problem and only solving counts, while duel and custom compare every pair of players by solve time. Giving up or running out of time in solo never lowers your rating.
+A match is a public message. The lobby has Join, Start and Leave buttons; once the host presses Start, the problem appears with Check and Give Up buttons. Everyone starts at a match rating of 800. With no `rating` argument, `/gimme` and `/match` pick a problem at your match rating (rounded to 100; the players' average for duel and custom). After a match, ratings change. Solo is Elo (K = 32) against the problem and only solving counts, so giving up or running out of time never lowers your rating. Duel and custom compare every pair of players by solve time: the winner gains 95 at equal ratings, 67 when rated 200 above the loser and 20 when rated 400 or more above (linear in between), and the loser loses the same. An upset pays more, mirrored around 95 (123 at 200 below, 170 at 400 below). Custom matches average these results over the other players.
 
 ## Development
 

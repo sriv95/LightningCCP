@@ -265,8 +265,8 @@ async def test_duel_winner_is_earliest_solve_not_first_click(env):
     solve(cf, "h2", 1100)
     solve(cf, "h1", 1200)
     done = await svc.check(lobby.match.id, 1)  # player 1 clicks, player 2 solved first
-    assert deltas(done) == {2: 16, 1: -16}
-    assert done.ratings == {2: 816, 1: 784}
+    assert deltas(done) == {2: 95, 1: -95}
+    assert done.ratings == {2: 895, 1: 705}
 
 
 async def test_duel_check_without_solves_keeps_running(env):
@@ -293,7 +293,7 @@ async def test_duel_give_up_is_a_forfeit(env):
     await svc.start(lobby.match.id, 1)
     done = await svc.give_up(lobby.match.id, 1)
     assert done.match.status == "finished"
-    assert deltas(done) == {1: -16, 2: 16}
+    assert deltas(done) == {1: -95, 2: 95}
 
 
 async def test_give_up_errors(env):
@@ -328,8 +328,8 @@ async def test_custom_ranks_by_solve_time_and_ties_non_solvers(env):
     assert (await svc.give_up(lobby.match.id, 3)).match.status == "active"
     done = await svc.give_up(lobby.match.id, 4)
     assert done.match.status == "finished"
-    assert deltas(done) == {2: 16, 1: 5, 3: -11, 4: -11}
-    assert done.ratings == {1: 805, 2: 816, 3: 789, 4: 789}
+    assert deltas(done) == {2: 95, 1: 32, 3: -63, 4: -63}
+    assert done.ratings == {1: 832, 2: 895, 3: 737, 4: 737}
 
 
 async def test_custom_everyone_gave_up_moves_no_ratings(env):
@@ -369,7 +369,7 @@ async def test_expiry_ranks_solvers(env):
     solve(cf, "h2", 1500)
     clock.t += MATCH_TTL_SECONDS
     (view,) = await svc.expire_due()
-    assert deltas(view) == {2: 16, 1: -8, 3: -8}
+    assert deltas(view) == {2: 95, 1: -48, 3: -48}
 
 
 async def test_lobby_expiry_cancels(env):
@@ -396,8 +396,8 @@ async def test_concurrent_checks_score_once(env, monkeypatch):
     )
     assert not any(isinstance(r, Exception) and not isinstance(r, MatchClosed) for r in results)
     assert sorted(finishes) == [False, True]  # both reached finish; the guard let one through
-    assert await store.rating(GUILD, 1) == 816
-    assert await store.rating(GUILD, 2) == 784
+    assert await store.rating(GUILD, 1) == 895
+    assert await store.rating(GUILD, 2) == 705
 
 
 async def test_expiry_racing_check_scores_once(env, monkeypatch):
@@ -414,8 +414,8 @@ async def test_expiry_racing_check_scores_once(env, monkeypatch):
     )
     assert not any(isinstance(r, Exception) and not isinstance(r, MatchClosed) for r in results)
     assert sorted(finishes) == [False, True]
-    assert await store.rating(GUILD, 1) == 816
-    assert await store.rating(GUILD, 2) == 784
+    assert await store.rating(GUILD, 1) == 895
+    assert await store.rating(GUILD, 2) == 705
 
 
 async def test_concurrent_starts_start_once(env):
@@ -498,7 +498,7 @@ async def test_expiry_survives_a_failing_handle_lookup(env):
     clock.t += MATCH_TTL_SECONDS
     (view,) = await svc.expire_due()
     assert view.match.status == "finished"
-    assert deltas(view) == {2: 16, 1: -8, 3: -8}
+    assert deltas(view) == {2: 95, 1: -48, 3: -48}
     for uid in (1, 2, 3):
         assert await svc.current(GUILD, uid) is None
 
@@ -531,4 +531,4 @@ async def test_check_tolerates_another_players_failing_lookup(env):
     solve(cf, "h2", 1500)
     view = await svc.check(lobby.match.id, 2)
     assert view.match.status == "finished"
-    assert deltas(view) == {1: -16, 2: 16}
+    assert deltas(view) == {1: -95, 2: 95}

@@ -1,5 +1,6 @@
 import math
 from collections.abc import Iterable, Mapping, Sequence
+from itertools import pairwise
 
 from src.cf.models import Contest, Problem, Submission
 from src.errors import BotError
@@ -121,8 +122,25 @@ def solo_delta(rating: int, problem_rating: int, solved: bool) -> int:
     return _round_away(ELO_K * (1 - _expected(rating, problem_rating))) if solved else 0
 
 
-def elo_deltas(groups: Sequence[Sequence[int]], ratings: Mapping[int, int]) -> dict[int, int]:
-    """Pairwise Elo: each player is scored against every other player, then averaged.
+# (winner's rating minus loser's rating, rating the winner gains); linear in between.
+WIN_CURVE = ((0, 95), (200, 67), (400, 20))
+
+
+def win_gain(diff: float) -> float:
+    """Rating gained for beating a player `diff` below you. An upset (negative diff) mirrors the
+    curve, so a win and the same win seen from the other side always add up to twice the top value."""
+    if diff < 0:
+        return 2 * WIN_CURVE[0][1] - win_gain(-diff)
+    for (x0, y0), (x1, y1) in pairwise(WIN_CURVE):
+        if diff <= x1:
+            return y0 + (y1 - y0) * (diff - x0) / (x1 - x0)
+    return WIN_CURVE[-1][1]  # shortcut: flat past the last point, add points to WIN_CURVE to change
+
+
+def match_deltas(groups: Sequence[Sequence[int]], ratings: Mapping[int, int]) -> dict[int, int]:
+    """Rating changes for a duel or custom match. Every pair of players plays a duel decided by
+    solve order (win_gain for the winner, minus the same for the loser, a tie is the average of
+    the two); each player's results are averaged over the opponents.
 
     groups is ordered best first; players in one group tie.
     """
@@ -134,10 +152,12 @@ def elo_deltas(groups: Sequence[Sequence[int]], ratings: Mapping[int, int]) -> d
     for uid, mine in place.items():
         total = 0.0
         for other, theirs in place.items():
-            if other != uid:
-                result = 1.0 if mine < theirs else 0.5 if mine == theirs else 0.0
-                total += result - _expected(ratings[uid], ratings[other])
-        out[uid] = _round_away(ELO_K * total / (n - 1))
+            if other == uid:
+                continue
+            diff = ratings[uid] - ratings[other]
+            win, loss = win_gain(diff), -win_gain(-diff)
+            total += win if mine < theirs else (win + loss) / 2 if mine == theirs else loss
+        out[uid] = _round_away(total / (n - 1))
     return out
 
 
