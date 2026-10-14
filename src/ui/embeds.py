@@ -116,3 +116,31 @@ def match_embed(view: MatchView) -> discord.Embed:
     if view.note:
         embed.set_footer(text=view.note)
     return embed
+
+
+LEADERBOARD_SIZE = 10
+
+
+def leaderboard_embed(rows: Sequence[tuple[int, str, int, int]], me_id: int) -> discord.Embed:
+    """Top 10, plus the caller's own row when they are ranked lower."""
+
+    def line(rank: int, row: tuple[int, str, int, int]) -> str:
+        user_id, handle, total, played = row
+        text = f"{rank}. <@{user_id}> ({handle}) {total:+d} ({played} matches)"
+        return f"**{text}**" if user_id == me_id else text
+
+    lines = [line(i, r) for i, r in enumerate(rows[:LEADERBOARD_SIZE], 1)]
+    mine = next(((i, r) for i, r in enumerate(rows, 1) if r[0] == me_id), None)
+    footer = None
+    if mine is None:
+        footer = "You have no finished matches yet."
+    elif mine[0] > LEADERBOARD_SIZE:
+        lines += ["...", line(*mine)]
+    embed = discord.Embed(
+        title="Match leaderboard",
+        description="\n".join(lines) or "No finished matches yet.",
+        colour=discord.Colour.gold(),
+    )
+    if footer and lines:
+        embed.set_footer(text=footer)
+    return embed

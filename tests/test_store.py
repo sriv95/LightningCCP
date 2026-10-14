@@ -373,3 +373,15 @@ async def test_match_survives_reconnect(tmp_path):
     assert len(await s2.get_players(mid)) == 2
     assert await s2.active_match_for(1, 2) == mid
     await s2.close()
+
+
+async def test_leaderboard_orders_and_counts_finished_only(store):
+    await store.link_handle(1, 2, "linked2", None)
+    for deltas in ({1: 5, 2: -5}, {1: -2, 2: 2}):
+        mid = await make_match(store, host=1)
+        await store.add_player(mid, 1, 2, "h2", 101)
+        await store.start_match(mid, 1000, "1700A", 200, 7400, [1, 2])
+        await store.finish_match(mid, 500, deltas)
+    await make_match(store, host=3)  # lobby: not counted
+    assert await store.leaderboard(1) == [(1, "h1", 3, 2), (2, "linked2", -3, 2)]
+    assert await store.leaderboard(9) == []

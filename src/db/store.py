@@ -451,6 +451,19 @@ class Store:
         )
         return row[0]
 
+    async def leaderboard(self, guild_id: int) -> list[tuple[int, str, int, int]]:
+        """(user_id, handle, total points, finished matches), best first. Finished matches only."""
+        rows = await self._all(
+            "SELECT mp.user_id, COALESCE(uh.handle, MAX(mp.handle)) AS handle, "
+            "SUM(mp.delta) AS total, COUNT(*) AS played "
+            "FROM match_players mp "
+            "LEFT JOIN user_handle uh ON uh.guild_id = mp.guild_id AND uh.user_id = mp.user_id "
+            "WHERE mp.guild_id = ? AND mp.delta IS NOT NULL "
+            "GROUP BY mp.user_id ORDER BY total DESC, played DESC, handle",
+            (guild_id,),
+        )
+        return [(r["user_id"], r["handle"], r["total"], r["played"]) for r in rows]
+
     async def matches_due(self, lobby_before: int, now: int) -> list[MatchRow]:
         rows = await self._all(
             "SELECT * FROM matches WHERE (status = 'lobby' AND created_at <= ?) "

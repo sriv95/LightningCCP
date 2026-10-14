@@ -9,7 +9,7 @@ from discord.ext import commands, tasks
 from src.errors import BotError, report_error
 from src.logic import MATCH_MAX_PLAYERS
 from src.matches import MatchView
-from src.ui.embeds import match_embed
+from src.ui.embeds import leaderboard_embed, match_embed
 
 log = logging.getLogger(__name__)
 
@@ -149,6 +149,14 @@ class MatchCog(commands.Cog, name="Match"):
         self, interaction: discord.Interaction, players: Players, rating: Rating | None = None
     ) -> None:
         await self._create(interaction, "custom", players, None, rating)
+
+    @app_commands.command(name="leaderboard", description="Top match players in this server")
+    @app_commands.guild_only()
+    async def leaderboard(self, interaction: discord.Interaction) -> None:
+        rows = await self.bot.services.db.leaderboard(interaction.guild_id)
+        await interaction.response.send_message(
+            embed=leaderboard_embed(rows, interaction.user.id), ephemeral=True
+        )
 
     async def on_button(self, interaction: discord.Interaction, action: str, match_id: int) -> None:
         await interaction.response.defer()

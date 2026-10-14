@@ -3,7 +3,7 @@ from src.cogs.contests import ContestsCog
 from src.cogs.handles import HandlesCog, VerifyButton
 from src.cogs.match import MatchButton, MatchCog
 from src.cogs.problems import ProblemsCog
-from src.ui.embeds import contest_pages, problem_embed, profile_embed
+from src.ui.embeds import contest_pages, leaderboard_embed, problem_embed, profile_embed
 
 
 class FakeMember:
@@ -76,3 +76,14 @@ def test_match_button_template_matches_all_actions():
     for action in ("join", "start", "leave", "check", "giveup"):
         assert template.fullmatch(f"match:{action}:42")
     assert not template.fullmatch("match:other:42")
+
+
+def test_leaderboard_embed_shows_caller_below_top_ten():
+    rows = [(i, f"h{i}", 100 - i, 1) for i in range(1, 13)]
+    desc = leaderboard_embed(rows, 12).description
+    assert desc.count("\n") == 11 and "1. <@1>" in desc and "10. <@10>" in desc
+    assert "11." not in desc and desc.endswith("**12. <@12> (h12) +88 (1 matches)**")
+    in_top = leaderboard_embed(rows, 2)
+    assert "..." not in in_top.description and "**2. <@2>" in in_top.description
+    assert leaderboard_embed(rows, 99).footer.text == "You have no finished matches yet."
+    assert leaderboard_embed([], 1).description == "No finished matches yet."

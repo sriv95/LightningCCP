@@ -29,6 +29,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/match solo [rating]` | Practice alone with points |
 | `/match duel [opponent] [rating]` | 1v1 duel; name an opponent or let anyone join |
 | `/match custom players [rating]` | Match for 2-10 players; ranked by solve time |
+| `/leaderboard` | Top 10 by match points, plus your own rank (private) |
 | `/contests upcoming\|running\|recent` | Paginated contest lists |
 | `/remind set\|show\|clear` | Contest reminders (needs Manage Server) |
 
