@@ -1,5 +1,6 @@
 from src.cf.models import Contest, Problem, User
 from src.cogs.handles import HandlesCog, VerifyButton
+from src.cogs.problems import ProblemsCog
 from src.ui.embeds import contest_pages, problem_embed, profile_embed
 
 
@@ -52,3 +53,8 @@ def test_handles_group_commands():
 
 def test_verify_button_template_matches_custom_id():
     assert VerifyButton.__discord_ui_compiled_template__.fullmatch("verify:12345")
+
+
+def test_problems_commands_registered():
+    names = {c.name for c in ProblemsCog.__cog_app_commands__}
+    assert names == {"gimme", "gitgud", "gotgud", "nogud"}
