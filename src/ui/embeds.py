@@ -71,6 +71,37 @@ def profile_embed(user: User, member: discord.abc.User) -> discord.Embed:
     return embed
 
 
+def member_profile_embed(
+    member: discord.abc.User,
+    *,
+    rating: int,
+    rank: int | None,
+    ranked: int,
+    matches: int,
+    contests: int,
+    changes: Sequence[int],
+    peak: int | None,
+    streak: int,
+    codeforces: str,
+) -> discord.Embed:
+    """A member's server card: match rating and rank, games, how their rating moved, daily streak
+    and Codeforces rating. changes: the rating change of each finished game."""
+    place = f"#{rank} of {ranked}" if rank else "unranked"
+    up = sum(c > 0 for c in changes)
+    down = sum(c < 0 for c in changes)
+    lines = [
+        f"Match rating: **{rating}** ({place})",
+        f"Peak: {peak}" if peak else "Peak: none yet",
+        f"Games: {matches} matches, {contests} contests "
+        f"(rating up {up}, down {down}, even {len(changes) - up - down})",
+        f"Daily streak: {streak}",
+        f"Codeforces: {codeforces}",
+    ]
+    return discord.Embed(
+        title=member.display_name, description="\n".join(lines), colour=discord.Colour.blurple()
+    )
+
+
 def _contest_line(c: Contest) -> str:
     hours, minutes = divmod(c.duration // 60, 60)
     when = f"<t:{c.start_time}:f> (<t:{c.start_time}:R>)" if c.start_time else "time not set"

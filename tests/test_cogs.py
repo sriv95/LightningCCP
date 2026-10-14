@@ -98,6 +98,44 @@ def test_stats_embed_shows_caller_below_top_ten():
     assert stats_embed([], 1).description == "No finished games yet."
 
 
+def test_member_profile_embed_shows_rating_games_and_streak():
+    from types import SimpleNamespace
+
+    from src.ui.embeds import member_profile_embed
+
+    me = SimpleNamespace(display_name="Ann")
+    e = member_profile_embed(
+        me,
+        rating=849,
+        rank=2,
+        ranked=7,
+        matches=2,
+        contests=1,
+        changes=[49, -10, 0],
+        peak=859,
+        streak=3,
+        codeforces="h 1500 (specialist)",
+    )
+    assert e.title == "Ann"
+    lines = e.description.splitlines()
+    assert lines[0] == "Match rating: **849** (#2 of 7)" and lines[1] == "Peak: 859"
+    assert lines[2] == "Games: 2 matches, 1 contests (rating up 1, down 1, even 1)"
+    assert lines[3] == "Daily streak: 3" and lines[4] == "Codeforces: h 1500 (specialist)"
+    fresh = member_profile_embed(
+        me,
+        rating=800,
+        rank=None,
+        ranked=7,
+        matches=0,
+        contests=0,
+        changes=[],
+        peak=None,
+        streak=0,
+        codeforces="no linked handle",
+    )
+    assert "(unranked)" in fresh.description and "Peak: none yet" in fresh.description
+
+
 def test_stats_embed_names_the_kind():
     rows = [(1, "a", 900, 2)]
     assert "(2 matches)" in stats_embed(rows, 1, kind="matches").description

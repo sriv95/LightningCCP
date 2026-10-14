@@ -8,13 +8,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from src.errors import BotError, report_error
-from src.logic import MATCH_MAX_PLAYERS, daily_streak, tag_suggestions, utc_day
+from src.errors import BotError, CodeforcesError, report_error
+from src.logic import MATCH_MAX_PLAYERS, daily_streak, rating_series, tag_suggestions, utc_day
 from src.matches import MatchView
 from src.ui.embeds import (
     head_to_head_pages,
     history_pages,
     match_embed,
+    member_profile_embed,
     number_pages,
     stats_embed,
 )
@@ -286,6 +287,50 @@ class MatchCog(commands.Cog, name="Match"):
             embed=stats_embed(rows, interaction.user.id, streaks, sort == "streak", kind),
             ephemeral=True,
         )
+
+    @app_commands.command(name="profile", description="A member's match rating, games and streak")
+    @app_commands.guild_only()
+    @app_commands.describe(member="Defaults to you")
+    async def profile(
+        self, interaction: discord.Interaction, member: discord.Member | None = None
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        s = self.bot.services
+        db, guild_id = s.db, interaction.guild_id
+        target = member or interaction.user
+        rows = await db.stats(guild_id)
+        rank = next((i for i, r in enumerate(rows, 1) if r[0] == target.id), None)
+        counts = [
+            next((r[3] for r in await db.stats(guild_id, kind) if r[0] == target.id), 0)
+            for kind in ("matches", "contests")
+        ]
+        changes = await db.rating_changes(guild_id, target.id)
+        series = rating_series(changes)
+        streak = daily_streak(await db.daily_days(guild_id, target.id), utc_day(int(time.time())))
+        linked = await db.get_handle(guild_id, target.id)
+        codeforces = "no linked handle"
+        if linked:
+            try:
+                user = await s.cf.user_info(linked.handle)
+                rated = f"{user.rating} ({user.rank})" if user.rating is not None else "unrated"
+                codeforces = (
+                    f"[{user.handle}](https://codeforces.com/profile/{user.handle}) {rated}"
+                )
+            except CodeforcesError:
+                codeforces = f"{linked.handle} (Codeforces did not answer)"
+        embed = member_profile_embed(
+            target,
+            rating=await db.rating(guild_id, target.id),
+            rank=rank,
+            ranked=len(rows),
+            matches=counts[0],
+            contests=counts[1],
+            changes=[d for _, d in changes],
+            peak=max((r for _, r in series), default=None),
+            streak=streak,
+            codeforces=codeforces,
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     async def on_button(self, interaction: discord.Interaction, action: str, match_id: int) -> None:
         await interaction.response.defer()
