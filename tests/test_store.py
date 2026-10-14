@@ -159,11 +159,26 @@ async def test_migration_2_drops_challenge_and_adds_match_tables(tmp_path):
     await s.close()
 
 
-async def test_failed_replace_does_not_discard_concurrent_write(store):
+async def test_failed_replace_does_not_discard_concurrent_write(store, monkeypatch):
+    seed = Problem(1, "B", "ok", 800, ())
+    await store.replace_problems([seed])
     dup = [Problem(1, "A", "x", 800, ()), Problem(1, "A", "y", 800, ())]
-    results = await asyncio.gather(
-        store.replace_problems(dup), store.link_handle(1, 1, "a", None), return_exceptions=True
-    )
+    started, release = asyncio.Event(), asyncio.Event()
+    original = store._db.executemany
+
+    async def paused_executemany(*args, **kwargs):
+        started.set()
+        await release.wait()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(store._db, "executemany", paused_executemany)
+    a = asyncio.create_task(store.replace_problems(dup))
+    await started.wait()
+    b = asyncio.create_task(store.link_handle(1, 1, "a", None))
+    await asyncio.wait({b}, timeout=0.2)  # without the lock, b commits the DELETE here
+    release.set()
+    results = await asyncio.gather(a, b, return_exceptions=True)
     assert isinstance(results[0], sqlite3.IntegrityError)
     assert results[1] is None
     assert (await store.get_handle(1, 1)).handle == "a"
+    assert await store.load_problems() == [seed]
