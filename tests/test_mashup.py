@@ -655,10 +655,7 @@ async def test_give_up_keeps_the_place_but_frees_the_player(env):
         await svc.give_up(mid, 4)
     gone = await svc.give_up(mid, 2)
     assert [p.active for p in gone.players] == [True, False, True]
-    assert (
-        "2. h2" in mashup_embed(gone, {}).description
-        or "1. h2" in mashup_embed(gone, {}).description
-    )
+    assert "1. h2 - 1 solved" in mashup_embed(gone, {}).description
     assert "(gave up)" in mashup_embed(gone, {}).description
     with pytest.raises(BotError, match="not playing"):
         await svc.give_up(mid, 2)
