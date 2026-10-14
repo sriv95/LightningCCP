@@ -238,3 +238,19 @@ def test_help_topics_fit_and_cover_every_command():
         "/channel reminder", "/channel recap",
     ):  # fmt: skip
         assert name in text, name
+
+
+def test_esc_stops_markdown_and_link_breaking_brackets():
+    from src.ui.embeds import esc
+
+    assert esc("tourist") == "tourist"
+    assert esc("a_b*c [Rated] ~x~") == "a\\_b\\*c \\[Rated\\] \\~x\\~"
+
+
+def test_names_from_codeforces_cannot_break_the_embeds():
+    contest = Contest(1, "Round *1* [Div. 2] a_b", "CF", "BEFORE", 1000, 7200)
+    line = contest_pages([contest], "T")[0].description
+    assert line.startswith("[Round \\*1\\* \\[Div. 2\\] a\\_b](")
+    ranks = ranklist_pages([(1, 1, "a_b_c", 5.0, 0)], "T")[0].description
+    assert "(a\\_b\\_c)" in ranks
+    assert "(x\\_y)" in stats_pages([(1, "x_y", 800, 1)], 1)[0].description

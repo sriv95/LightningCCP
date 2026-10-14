@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from src.errors import BotError, NotLinked
 from src.logic import rating_series
+from src.ui.embeds import esc
 from src.ui.plots import CF_BANDS, rating_plot
 
 MAX_LINES = 5
@@ -89,7 +90,7 @@ class PlotCog(commands.Cog, name="Plot"):
         if handle is not None:
             user_id = await db.user_for_handle(guild_id, handle)
             if user_id is None:
-                raise BotError(f"No member is linked to {handle}.")
+                raise BotError(f"No member is linked to {esc(handle)}.")
             label = handle
         else:
             target = member or interaction.user

@@ -14,7 +14,7 @@ from src.logic import (
     has_compile_error,
     solved_keys,
 )
-from src.ui.embeds import profile_embed
+from src.ui.embeds import esc, profile_embed
 
 
 class VerifyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"verify:(?P<user>\d+)"):
@@ -74,7 +74,7 @@ class HandlesCog(commands.Cog, name="Handles"):
         user = await s.cf.user_info(handle)
         owner = await s.db.user_for_handle(interaction.guild_id, user.handle)
         if owner is not None and owner != interaction.user.id:
-            raise HandleTaken(f"{user.handle} is already linked to <@{owner}>.")
+            raise HandleTaken(f"{esc(user.handle)} is already linked to <@{owner}>.")
         problems = s.problems.require()
         solved = solved_keys(await s.cf.user_status(user.handle))
         pool = filter_problems(problems, max_rating=LINK_MAX_RATING, solved=solved)
@@ -88,8 +88,8 @@ class HandlesCog(commands.Cog, name="Handles"):
         view = discord.ui.View(timeout=None)
         view.add_item(VerifyButton(interaction.user.id))
         await interaction.followup.send(
-            f"To prove you own **{user.handle}**, submit a **compile error** to "
-            f"[{problem.key} - {problem.name}]({problem.url}) within "
+            f"To prove you own **{esc(user.handle)}**, submit a **compile error** to "
+            f"[{problem.key} - {esc(problem.name)}]({problem.url}) within "
             f"{LINK_WINDOW_SECONDS // 60} minutes, then press **Verify**.",
             view=view,
             ephemeral=True,
@@ -114,7 +114,7 @@ class HandlesCog(commands.Cog, name="Handles"):
         user = await s.cf.user_info(pending.handle)
         await s.db.link_handle(guild_id, user_id, user.handle, user.rating)
         await s.db.delete_pending(guild_id, user_id)
-        await interaction.followup.send(f"Linked you to **{user.handle}**.", ephemeral=True)
+        await interaction.followup.send(f"Linked you to **{esc(user.handle)}**.", ephemeral=True)
 
     @handle.command(name="show", description="Show a member's Codeforces profile")
     @app_commands.describe(
@@ -132,11 +132,13 @@ class HandlesCog(commands.Cog, name="Handles"):
         if handle is not None:
             owner = await self.s.db.user_for_handle(interaction.guild_id, handle)
             if owner is None:
-                raise BotError(f"No member is linked to {handle}.")
+                raise BotError(f"No member is linked to {esc(handle)}.")
             try:
                 member = await interaction.guild.fetch_member(owner)
             except discord.NotFound:
-                raise BotError(f"{handle} is linked to a member who left this server.") from None
+                raise BotError(
+                    f"{esc(handle)} is linked to a member who left this server."
+                ) from None
         target = member or interaction.user
         linked = await self.s.db.get_handle(interaction.guild_id, target.id)
         if linked is None:

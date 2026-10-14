@@ -13,7 +13,7 @@ from src.logic import (
     tag_suggestions,
     unsolved_keys,
 )
-from src.ui.embeds import daily_embed, problem_embed, stalk_pages
+from src.ui.embeds import daily_embed, esc, problem_embed, stalk_pages
 from src.ui.paginator import send_pages
 
 Rating = app_commands.Range[int, 800, 3500]
@@ -129,7 +129,7 @@ class ProblemsCog(commands.Cog, name="Problems"):
         by_key = {p.key: p for p in s.problems.problems}
         pages = stalk_pages(handle, [(k, by_key.get(k)) for k in keys])
         if not pages:
-            raise BotError(f"{handle} has no attempted-but-unsolved problems.")
+            raise BotError(f"{esc(handle)} has no attempted-but-unsolved problems.")
         await send_pages(interaction, pages)
 
 

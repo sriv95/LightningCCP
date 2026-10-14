@@ -106,7 +106,7 @@ def member_profile_embed(
 def _contest_line(c: Contest) -> str:
     hours, minutes = divmod(c.duration // 60, 60)
     when = f"<t:{c.start_time}:f> (<t:{c.start_time}:R>)" if c.start_time else "time not set"
-    return f"[{c.name}]({c.url}) - {when} - {hours}h{minutes:02d}"
+    return f"[{esc(c.name)}]({c.url}) - {when} - {hours}h{minutes:02d}"
 
 
 def contest_pages(
@@ -145,6 +145,12 @@ def _first_solve(players: Sequence[MatchPlayer]) -> int | None:
     return min((p.solved_at for p in players if p.solved_at is not None), default=None)
 
 
+def esc(text: str) -> str:
+    """Text from Codeforces or the user, safe to show in a message: no markdown and no link
+    breaking brackets."""
+    return discord.utils.escape_markdown(text).replace("[", "\\[").replace("]", "\\]")
+
+
 def match_embed(view: MatchView) -> discord.Embed:
     m, players = view.match, view.players
     if m.status == "cancelled":
@@ -157,7 +163,7 @@ def match_embed(view: MatchView) -> discord.Embed:
             colour=discord.Colour.red(),
         )
     if m.status == "lobby":
-        lines = "\n".join(f"<@{p.user_id}> ({p.handle})" for p in players)
+        lines = "\n".join(f"<@{p.user_id}> ({esc(p.handle)})" for p in players)
         desc = f"Host: <@{m.host_id}>\nPlayers {len(players)}/{m.max_players}:\n{lines}"
         if m.invited_id is not None:
             desc += f"\nInvited: <@{m.invited_id}>"
@@ -226,7 +232,7 @@ def stats_pages(
 
     def line(rank: int, row: tuple[int, str, int, int]) -> str:
         user_id, handle, total, played = row
-        text = f"{rank}. <@{user_id}> ({handle}) {total} ({played} {noun})"
+        text = f"{rank}. <@{user_id}> ({esc(handle)}) {total} ({played} {noun})"
         if streaks.get(user_id):
             text += f" \U0001f525{streaks[user_id]}"
         return f"**{text}**" if user_id == me_id else text
@@ -264,7 +270,7 @@ def ranklist_pages(
     def line(e: tuple[int, int, str, float, int]) -> str:
         rank, user_id, handle, points, penalty = e
         extra = f", penalty {penalty}" if penalty else ""
-        return f"{rank}. <@{user_id}> ({handle}) {points:g}{extra}"
+        return f"{rank}. <@{user_id}> ({esc(handle)}) {points:g}{extra}"
 
     groups = chunked(entries, per_page)
     pages = []
@@ -299,7 +305,7 @@ def stalk_pages(
         if problem is None:
             return key
         rating = f" ({problem.rating})" if problem.rating else ""
-        return f"[{key}. {problem.name}]({problem.url}){rating}"
+        return f"[{key}. {esc(problem.name)}]({problem.url}){rating}"
 
     groups = chunked(items, per_page)
     pages = []
@@ -537,10 +543,10 @@ def _bingo_standings(view: MashupView) -> list[str]:
     m = view.mashup
     lines = []
     for r in view.standings:
-        who = r.handle
+        who = esc(r.handle)
         if m.team_size != 1:
             members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
-            who = f"{r.handle} ({members})"
+            who = f"{esc(r.handle)} ({members})"
         lines.append(f"{r.rank}. [{r.user_id}] {who} - {r.solved} squares, {r.lines} lines")
         if m.status == "active" and m.team_size == 1:
             if not next(p for p in view.players if p.team == r.user_id).active:
@@ -598,10 +604,10 @@ def _standings_lines(view: MashupView, letters: dict[str, str]) -> list[str]:
             for k, t in done
         )
         detail = f" ({solved})" if solved else ""
-        who = r.handle
+        who = esc(r.handle)
         if m.team_size != 1:
             members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
-            who = f"{r.handle} ({members})"
+            who = f"{esc(r.handle)} ({members})"
         lines.append(f"{r.rank}. {who} - {r.solved} solved, {format_hm(r.total_seconds)}{detail}")
         if m.status == "active" and m.team_size == 1:
             me = next(p for p in view.players if p.team == r.user_id)
@@ -625,12 +631,16 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
         if m.team_size != 1:
             names = "\n".join(
                 f"Team {t}: "
-                + (", ".join(f"<@{p.user_id}> ({p.handle})" for p in view.players if p.team == t))
+                + (
+                    ", ".join(
+                        f"<@{p.user_id}> ({esc(p.handle)})" for p in view.players if p.team == t
+                    )
+                )
                 for t in range(1, m.teams + 1)
                 if any(p.team == t for p in view.players)
             )
         else:
-            names = "\n".join(f"<@{p.user_id}> ({p.handle})" for p in view.players)
+            names = "\n".join(f"<@{p.user_id}> ({esc(p.handle)})" for p in view.players)
         return discord.Embed(
             title=f"{'Team ' if m.team_size != 1 else ''}{'bingo' if m.mode != 'contest' else 'mashup'} lobby".capitalize(),
             description=(
@@ -649,7 +659,7 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
     lines = [f"Host: <@{m.host_id}> | {_mashup_setup(view)} | {when}", "", "**Problems**"]
     for key, rating in view.problems:
         problem = by_key.get(key)
-        name = f"[{key} {problem.name}]({problem.url})" if problem else key
+        name = f"[{key} {esc(problem.name)}]({problem.url})" if problem else key
         lines.append(f"{letters[key]}. {name} ({rating})")
     lines += ["", "**Standings**", *_standings_lines(view, letters)]
     return discord.Embed(

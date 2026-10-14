@@ -9,7 +9,7 @@ from discord.ext import commands, tasks
 from src.db.store import Reminder
 from src.errors import BotError, CacheNotReady
 from src.logic import parse_minutes, recaps_due, reminders_due, select_contests
-from src.ui.embeds import contest_pages, ranklist_pages, recap_embed
+from src.ui.embeds import contest_pages, esc, ranklist_pages, recap_embed
 from src.ui.paginator import send_pages
 
 log = logging.getLogger(__name__)
@@ -265,7 +265,7 @@ class ContestsCog(commands.Cog, name="Contests"):
                 ping = f"<@&{reminder.role_id}> " if reminder.role_id else ""
                 try:
                     await channel.send(
-                        f"{ping}**[{contest.name}]({contest.url})** starts "
+                        f"{ping}**[{esc(contest.name)}]({contest.url})** starts "
                         f"<t:{contest.start_time}:R>.",
                         allowed_mentions=discord.AllowedMentions(roles=True),
                     )

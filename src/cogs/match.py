@@ -12,6 +12,7 @@ from src.errors import BotError, CodeforcesError, report_error
 from src.logic import MATCH_MAX_PLAYERS, daily_streak, rating_series, tag_suggestions, utc_day
 from src.matches import MatchView
 from src.ui.embeds import (
+    esc,
     head_to_head_pages,
     history_pages,
     match_embed,
@@ -334,11 +335,13 @@ class MatchCog(commands.Cog, name="Match"):
         if handle is not None:
             owner = await db.user_for_handle(guild_id, handle)
             if owner is None:
-                raise BotError(f"No member is linked to {handle}.")
+                raise BotError(f"No member is linked to {esc(handle)}.")
             try:
                 member = await interaction.guild.fetch_member(owner)
             except discord.NotFound:
-                raise BotError(f"{handle} is linked to a member who left this server.") from None
+                raise BotError(
+                    f"{esc(handle)} is linked to a member who left this server."
+                ) from None
         target = member or interaction.user
         rows = await db.stats(guild_id)
         rank = next((i for i, r in enumerate(rows, 1) if r[0] == target.id), None)
@@ -356,10 +359,10 @@ class MatchCog(commands.Cog, name="Match"):
                 user = await s.cf.user_info(linked.handle)
                 rated = f"{user.rating} ({user.rank})" if user.rating is not None else "unrated"
                 codeforces = (
-                    f"[{user.handle}](https://codeforces.com/profile/{user.handle}) {rated}"
+                    f"[{esc(user.handle)}](https://codeforces.com/profile/{user.handle}) {rated}"
                 )
             except CodeforcesError:
-                codeforces = f"{linked.handle} (Codeforces did not answer)"
+                codeforces = f"{esc(linked.handle)} (Codeforces did not answer)"
         embed = member_profile_embed(
             target,
             rating=await db.rating(guild_id, target.id),
