@@ -36,7 +36,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/plot rating [member] [handle]` | Graph of a member's match rating in this server (private; default: you) |
 | `/plot codeforces [member] [handle]` | Graph of a Codeforces rating history, any handle works (private; default: you) |
 | `/contests upcoming\|running\|recent` | Paginated contest lists |
-| `/daily` | Your daily problem, rated your match rating floored to 100; solve it on Codeforces, run `/daily` again to claim double rating. New problem every 00:00 UTC; shows your daily streak |
+| `/daily [rating]` | Your daily problem, rated your match rating floored to 100 (or the `rating` you pick; picking a different rating than today's unsolved daily swaps in a new problem); solve it on Codeforces, run `/daily` again to claim double rating. New problem every 00:00 UTC; shows your daily streak |
 | `/stalk [handle] [member]` | Problems someone tried but never solved (private; default: you) |
 | `/ranklist contest_id` | Official standings of this server's linked members in a contest (private) |
 | `/channel set\|show\|clear` | The server's default bot channel (needs Manage Server). `set` takes the channel, an optional role to ping and the minutes before a contest to remind (default 10,60). The bot posts contest reminders there, and after each contest ends a recap of how your linked members placed (top 10) |

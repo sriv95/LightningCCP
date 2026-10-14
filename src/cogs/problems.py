@@ -87,10 +87,14 @@ class ProblemsCog(commands.Cog, name="Problems"):
         description="Your daily problem: solve it for double rating (resets 00:00 UTC)",
     )
     @app_commands.guild_only()
-    async def daily(self, interaction: discord.Interaction) -> None:
+    @app_commands.describe(
+        rating="Problem rating (default: your match rating, floored to 100). "
+        "A different rating than today's unsolved daily replaces it"
+    )
+    async def daily(self, interaction: discord.Interaction, rating: Rating | None = None) -> None:
         await interaction.response.defer()
         view = await self.s.daily.claim(
-            interaction.guild_id, interaction.channel_id, interaction.user.id
+            interaction.guild_id, interaction.channel_id, interaction.user.id, rating
         )
         await interaction.followup.send(embed=daily_embed(view))
 

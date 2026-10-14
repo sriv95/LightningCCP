@@ -159,3 +159,27 @@ async def test_daily_days_by_user(env):
     await svc.claim(GUILD, 5, 1)
     assert await store.daily_days_by_user(GUILD) == {1: [0]}
     assert await store.daily_days_by_user(2) == {}
+
+
+async def test_chosen_rating_and_reroll_on_a_different_rating(env):
+    svc, store, cf, clock, problems = env
+    problems.problems.append(P900)
+    first = await svc.claim(GUILD, 5, 1, 900)
+    assert first.row.rating == 900 and first.problem == P900
+    assert (await svc.claim(GUILD, 5, 1, 900)).row.problem_key == "1701A"  # same rating: kept
+    assert (await svc.claim(GUILD, 5, 1)).row.problem_key == "1701A"  # no rating: kept
+    clock.t += 10
+    swapped = await svc.claim(GUILD, 5, 1, 800)
+    assert swapped.row.problem_key == "1700A" and swapped.row.issued_at == 1010
+    assert swapped.row.rating == 800
+
+
+async def test_solved_daily_is_claimed_before_a_reroll_and_stays_solved(env):
+    svc, store, cf, clock, problems = env
+    problems.problems.append(P900)
+    await svc.claim(GUILD, 5, 1, 900)
+    cf.subs.append(Submission(1100, 1100, "1701A", "OK"))
+    done = await svc.claim(GUILD, 5, 1, 800)  # solved: claim it, ignore the new rating
+    assert done.row.solved_at is not None and done.delta is not None
+    again = await svc.claim(GUILD, 5, 1, 800)
+    assert again.row.problem_key == "1701A" and again.delta is None

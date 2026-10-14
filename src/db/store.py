@@ -656,9 +656,13 @@ class Store:
     async def issue_daily(
         self, guild_id: int, user_id: int, day: int, problem_key: str, rating: int, now: int
     ) -> None:
+        """Today's problem; an unsolved one is replaced only when it has a different rating."""
         await self._write(
-            "INSERT OR IGNORE INTO daily (guild_id, user_id, day, problem_key, rating, issued_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO daily (guild_id, user_id, day, problem_key, rating, issued_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (guild_id, user_id, day) DO UPDATE SET "
+            "problem_key = excluded.problem_key, rating = excluded.rating, "
+            "issued_at = excluded.issued_at "
+            "WHERE daily.solved_at IS NULL AND daily.rating IS NOT excluded.rating",
             (guild_id, user_id, day, problem_key, rating, now),
         )
 
