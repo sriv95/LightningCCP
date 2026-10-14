@@ -5,7 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from src.errors import BotError
+from src.errors import BotError, CacheNotReady
 from src.logic import parse_minutes, reminders_due, select_contests
 from src.ui.embeds import contest_pages
 from src.ui.paginator import send_pages
@@ -32,6 +32,7 @@ class ContestsCog(commands.Cog, name="Contests"):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._warned_channels: set[tuple[int, int]] = set()
 
     @property
     def s(self):
@@ -44,6 +45,8 @@ class ContestsCog(commands.Cog, name="Contests"):
         self.remind_loop.cancel()
 
     async def _list(self, interaction: discord.Interaction, kind: str) -> None:
+        if not self.s.contests.contests:
+            raise CacheNotReady()
         pages = contest_pages(select_contests(self.s.contests.contests, kind), TITLES[kind])
         if not pages:
             raise BotError(f"No {kind} contests.")
@@ -120,15 +123,33 @@ class ContestsCog(commands.Cog, name="Contests"):
         s = self.s
         now = int(time.time())
         for reminder in await s.db.all_reminders():
+            channel = self.bot.get_channel(reminder.channel_id)
+            if channel is None:
+                key = (reminder.guild_id, reminder.channel_id)
+                if key not in self._warned_channels:
+                    self._warned_channels.add(key)
+                    log.warning(
+                        "Reminder channel %s not found for guild %s",
+                        reminder.channel_id,
+                        reminder.guild_id,
+                    )
+                continue
             sent = await s.db.sent_for_guild(reminder.guild_id)
+            offsets: dict[int, list[int]] = {}
+            contests = {}
             for contest, before in reminders_due(
                 s.contests.contests, reminder.before_mins, sent, now
             ):
-                channel = self.bot.get_channel(reminder.channel_id)
-                # mark first: at most one ping per (guild, contest, offset), even across restarts
-                if channel is None or not await s.db.mark_sent(
-                    reminder.guild_id, contest.id, before
-                ):
+                contests[contest.id] = contest
+                offsets.setdefault(contest.id, []).append(before)
+            for contest_id, befores in offsets.items():
+                contest = contests[contest_id]
+                # mark all due offsets so catch-up posts one message; mark the smallest last
+                # (at most once per (guild, contest, offset), even across restarts)
+                befores.sort(reverse=True)
+                for before in befores[:-1]:
+                    await s.db.mark_sent(reminder.guild_id, contest_id, before)
+                if not await s.db.mark_sent(reminder.guild_id, contest_id, befores[-1]):
                     continue
                 ping = f"<@&{reminder.role_id}> " if reminder.role_id else ""
                 try:
