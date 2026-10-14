@@ -38,11 +38,12 @@ class VerifyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"verify:
         return interaction.user.id == self.user_id
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        cog = interaction.client.get_cog("Handles")
-        await cog.verify(interaction)
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        await report_error(interaction, error)
+        # discord.py never calls DynamicItem.on_error, so report here.
+        try:
+            cog = interaction.client.get_cog("Handles")
+            await cog.verify(interaction)
+        except Exception as exc:
+            await report_error(interaction, exc)
 
 
 class HandlesCog(commands.Cog, name="Handles"):

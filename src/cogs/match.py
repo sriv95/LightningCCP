@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import re
 
@@ -47,11 +48,12 @@ class MatchButton(
         return cls(match["action"], int(match["id"]))
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        cog = interaction.client.get_cog("Match")
-        await cog.on_button(interaction, self.action, self.match_id)
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        await report_error(interaction, error)
+        # discord.py never calls DynamicItem.on_error, so report here.
+        try:
+            cog = interaction.client.get_cog("Match")
+            await cog.on_button(interaction, self.action, self.match_id)
+        except Exception as exc:
+            await report_error(interaction, exc)
 
 
 def match_components(view: MatchView) -> discord.ui.View | None:
@@ -107,7 +109,16 @@ class MatchCog(commands.Cog, name="Match"):
         message = await interaction.followup.send(
             embed=match_embed(view), view=ui if ui is not None else discord.utils.MISSING, wait=True
         )
-        await self.svc.set_message(view.match.id, interaction.channel_id, message.id)
+        old = view.match
+        await self.svc.set_message(old.id, interaction.channel_id, message.id)
+        if old.message_id is not None and old.message_id != message.id:
+            # Re-post: retire the old message so its buttons do not go stale.
+            with contextlib.suppress(discord.HTTPException):
+                await (
+                    self.bot.get_partial_messageable(old.channel_id)
+                    .get_partial_message(old.message_id)
+                    .edit(content=f"This match moved to {message.jump_url}", embed=None, view=None)
+                )
 
     @match.command(name="solo", description="Practice alone for points")
     @app_commands.describe(rating="Problem rating (default: your rating)")
@@ -153,6 +164,16 @@ class MatchCog(commands.Cog, name="Match"):
         await interaction.edit_original_response(
             embed=match_embed(view), view=match_components(view)
         )
+        if action == "check" and view.match.status == "active":
+            me = next((p for p in view.players if p.user_id == interaction.user.id), None)
+            if me is not None and me.solved_at is not None:
+                note = "You solved it. Waiting for the other players."
+            else:
+                note = (
+                    "No accepted submission found yet. "
+                    "Solve the problem on Codeforces, then press Check again."
+                )
+            await interaction.followup.send(note, ephemeral=True)
 
     @tasks.loop(seconds=60)
     async def expire_loop(self) -> None:
@@ -162,7 +183,10 @@ class MatchCog(commands.Cog, name="Match"):
             log.exception("Match expiry failed")
             return
         for view in views:
-            await self._edit_stored_message(view)
+            try:
+                await self._edit_stored_message(view)
+            except Exception:
+                log.exception("Could not update expired match %s", view.match.id)
 
     @expire_loop.before_loop
     async def _before_expire_loop(self) -> None:
@@ -170,12 +194,13 @@ class MatchCog(commands.Cog, name="Match"):
 
     async def _edit_stored_message(self, view: MatchView) -> None:
         m = view.match
-        channel = self.bot.get_channel(m.channel_id)
-        if m.message_id is None or not isinstance(channel, discord.abc.Messageable):
+        if m.message_id is None:
             return
         try:
-            await channel.get_partial_message(m.message_id).edit(
-                embed=match_embed(view), view=match_components(view)
+            await (
+                self.bot.get_partial_messageable(m.channel_id)
+                .get_partial_message(m.message_id)
+                .edit(embed=match_embed(view), view=match_components(view))
             )
         except discord.HTTPException:
             log.warning("Could not edit match message %s", m.message_id, exc_info=True)
