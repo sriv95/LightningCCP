@@ -1,4 +1,5 @@
 from src.cf.models import Contest, Problem, User
+from src.cogs.handles import HandlesCog, VerifyButton
 from src.ui.embeds import contest_pages, problem_embed, profile_embed
 
 
@@ -36,3 +37,18 @@ def test_contest_pages_paginates_and_labels():
     assert pages[0].description.count("\n") == 9  # 10 lines
     assert "<t:1000:f>" in pages[0].description and "2h00" in pages[0].description
     assert contest_pages([], "x") == []
+
+
+def test_handles_group_commands():
+    assert {c.name for c in HandlesCog.handle.commands} == {
+        "link",
+        "set",
+        "show",
+        "whois",
+        "unlink",
+    }
+    assert HandlesCog.handle.guild_only
+
+
+def test_verify_button_template_matches_custom_id():
+    assert VerifyButton.__discord_ui_compiled_template__.fullmatch("verify:12345")
