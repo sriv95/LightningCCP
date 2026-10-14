@@ -150,7 +150,7 @@ class MatchCog(commands.Cog, name="Match"):
     ) -> None:
         await self._create(interaction, "custom", players, None, rating)
 
-    @app_commands.command(name="leaderboard", description="Top match players in this server")
+    @app_commands.command(name="stats", description="Top match players in this server")
     @app_commands.guild_only()
     async def leaderboard(self, interaction: discord.Interaction) -> None:
         rows = await self.bot.services.db.leaderboard(interaction.guild_id)
