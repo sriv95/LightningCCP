@@ -215,13 +215,6 @@ async def test_rating_history_parses():
     assert session.calls[0][0].endswith("user.rating") and session.calls[0][1] == {"handle": "a"}
 
 
-async def test_client_counts_requests_and_rate_limit_answers():
-    client, session, _ = make_client(failed("Call limit exceeded"), ok([{"handle": "a"}]))
-    assert (client.requests, client.rate_limited) == (0, 0)
-    await client.user_info("a")
-    assert (client.requests, client.rate_limited) == (2, 1)
-
-
 def status_row(i, at):
     return {
         "id": i,

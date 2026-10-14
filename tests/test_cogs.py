@@ -237,7 +237,7 @@ def test_help_topics_fit_and_cover_every_command():
         "/handle link", "/gimme", "/daily", "/stalk", "/match solo", "/match duel",
         "/match custom", "/match history", "/ff", "/host contest", "/host virtual", "/host bingo", "/stats",
         "/profile", "/plot rating", "/plot codeforces", "/contests upcoming", "/ranklist",
-        "/channel reminder", "/channel recap", "/status",
+        "/channel reminder", "/channel recap",
     ):  # fmt: skip
         assert name in text, name
 
@@ -292,57 +292,3 @@ def test_solve_log_stamp_shows_the_time_since_the_start():
     assert _stamp(view, 1000 + 59 * 60 + 59) == "<t:4599:T> (+59m)"
     assert _stamp(view, 1000 + 3600 + 5 * 60) == "<t:4900:T> (+1h05m)"
     assert _stamp(view, 900) == "<t:900:T> (+0m)"  # never negative
-
-
-async def test_status_card_and_command(tmp_path):
-    from types import SimpleNamespace
-
-    from src.cogs.help import HelpCog
-    from src.db.store import Store
-    from src.ui.embeds import status_embed
-
-    e = status_embed(
-        latency_ms=42, started_at=100, problems=9000, problems_at=None, contests=800,
-        contests_at=555, requests=12, rate_limited=1, matches=2, mashups=3,
-    )  # fmt: skip
-    lines = e.description.splitlines()
-    assert lines[0] == "Online since <t:100:R>, Discord latency 42 ms"
-    assert lines[1] == "Problems: 9000 (loaded from the database, not fetched yet)"
-    assert lines[2] == "Contests: 800 (fetched <t:555:R>)"
-    assert lines[3] == "Codeforces calls since start: 12 (rate limited 1)"
-    assert lines[4] == "Unfinished in all servers: 2 matches, 3 contests"
-
-    store = Store(tmp_path / "t.db")
-    await store.connect()
-    await store.link_handle(1, 1, "a", None)
-    await store.create_match(
-        guild_id=1,
-        channel_id=5,
-        host_id=1,
-        host_handle="a",
-        mode="duel",
-        max_players=2,
-        now=1,
-        invited_id=None,
-        rating_arg=None,
-    )
-    assert await store.unfinished_counts() == (1, 0)
-    sent = []
-
-    async def send_message(**kw):
-        sent.append(kw)
-
-    services = SimpleNamespace(
-        db=store,
-        problems=SimpleNamespace(problems=[1], refreshed_at=7),
-        contests=SimpleNamespace(contests=[1, 2], refreshed_at=None),
-        cf=SimpleNamespace(requests=4, rate_limited=0),
-    )
-    bot = SimpleNamespace(services=services, latency=0.0421, started_at=9)
-    await HelpCog.status.callback(
-        HelpCog(bot), SimpleNamespace(response=SimpleNamespace(send_message=send_message))
-    )
-    assert sent[0]["ephemeral"] is True
-    assert "latency 42 ms" in sent[0]["embed"].description
-    assert "Unfinished in all servers: 1 matches, 0 contests" in sent[0]["embed"].description
-    await store.close()

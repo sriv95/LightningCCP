@@ -31,8 +31,6 @@ class CodeforcesClient:
         self._clock = clock
         self._lock = asyncio.Lock()
         self._last_call = float("-inf")
-        self.requests = 0  # calls sent to Codeforces since start
-        self.rate_limited = 0  # of those, answered "limit exceeded"
 
     async def _get(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -50,14 +48,12 @@ class CodeforcesClient:
                 if wait > 0:
                     await self._sleep(wait)
                 self._last_call = self._clock()
-                self.requests += 1
                 payload = await self._get(method, params)
             if payload.get("status") == "OK":
                 return payload["result"]
             comment = payload.get("comment", "")
             lowered = comment.lower()
             if "limit exceeded" in lowered:
-                self.rate_limited += 1
                 if attempt + 1 < self._retries:
                     await self._sleep(self._retry_delay)
                 continue

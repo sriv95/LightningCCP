@@ -67,7 +67,7 @@ Slash commands only. The bot uses `Intents.default()` (no `message_content`, no 
 - Match button callbacks must `defer()` then edit the original message (except Rematch on a finished duel, which posts a new lobby with `MatchService.rematch` and leaves the result alone); Start fetches every player's history (about 2 Codeforces calls each). A solve's time is the Codeforces submission time, not the click time; it is compared against the bot's local clock for `started_at`, so a badly skewed host clock can reject a very fast solve.
 - `/channel reminder` (`reminder` table; `channel_id` is NULL after `clear`, which keeps the role, minutes and `exclude` regex; `exclude` is matched with `re.search`, ignoring case, against the contest name before `reminders_due`) merges the given options into the stored row; with no options it shows it.
 - Contest names, problem names and handles shown in a message body (not a title) go through `esc` (`src/ui/embeds.py`): handles such as `a_b_c` and names such as `[Div. 2]` would otherwise format or break links.
-- `/status` (also in `src/cogs/help.py`) reads `refreshed_at` of the two caches, `CodeforcesClient.requests`/`rate_limited`, `Store.unfinished_counts` and `bot.started_at`. `/help [topic]` (`src/cogs/help.py`, text in `src/ui/help.py`) is static text: when a command or option changes, update the matching topic in `HELP_TOPICS` too.
+- `/help [topic]` (`src/cogs/help.py`, text in `src/ui/help.py`) is static text: when a command or option changes, update the matching topic in `HELP_TOPICS` too.
 - Discord does not support per-subcommand default permissions, so admin subcommands use `@app_commands.checks.has_permissions(manage_guild=True)`; the `/channel` group also sets `default_permissions`.
 
 ## Testing notes
