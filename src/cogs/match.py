@@ -1,13 +1,14 @@
 import contextlib
 import logging
 import re
+import time
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
 from src.errors import BotError, report_error
-from src.logic import MATCH_MAX_PLAYERS
+from src.logic import MATCH_MAX_PLAYERS, daily_streak, utc_day
 from src.matches import MatchView
 from src.ui.embeds import (
     head_to_head_pages,
@@ -197,9 +198,15 @@ class MatchCog(commands.Cog, name="Match"):
     @app_commands.command(name="stats", description="Top match players in this server")
     @app_commands.guild_only()
     async def stats(self, interaction: discord.Interaction) -> None:
-        rows = await self.bot.services.db.stats(interaction.guild_id)
+        db = self.bot.services.db
+        rows = await db.stats(interaction.guild_id)
+        today = utc_day(int(time.time()))
+        streaks = {
+            uid: daily_streak(days, today)
+            for uid, days in (await db.daily_days_by_user(interaction.guild_id)).items()
+        }
         await interaction.response.send_message(
-            embed=stats_embed(rows, interaction.user.id), ephemeral=True
+            embed=stats_embed(rows, interaction.user.id, streaks), ephemeral=True
         )
 
     async def on_button(self, interaction: discord.Interaction, action: str, match_id: int) -> None:

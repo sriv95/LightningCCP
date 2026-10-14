@@ -98,6 +98,13 @@ def test_stats_embed_shows_caller_below_top_ten():
     assert stats_embed([], 1).description == "No finished matches yet."
 
 
+def test_stats_embed_shows_daily_streak_with_fire():
+    rows = [(1, "a", 900, 3), (2, "b", 850, 2)]
+    lines = stats_embed(rows, 9, {1: 4, 2: 0}).description.splitlines()
+    assert lines[0].endswith("900 (3 matches) \U0001f5254")
+    assert lines[1].endswith("850 (2 matches)")
+
+
 def test_ranklist_pages_lines_and_paging():
     entries = [(i, i, f"h{i}", 100.0 - i, 0) for i in range(1, 13)]
     entries[1] = (2, 2, "h2", 90.0, 45)

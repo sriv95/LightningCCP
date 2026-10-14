@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import discord
 
@@ -161,12 +161,20 @@ def match_embed(view: MatchView) -> discord.Embed:
 STATS_SIZE = 10
 
 
-def stats_embed(rows: Sequence[tuple[int, str, int, int]], me_id: int) -> discord.Embed:
-    """Top 10, plus the caller's own row when they are ranked lower."""
+def stats_embed(
+    rows: Sequence[tuple[int, str, int, int]],
+    me_id: int,
+    streaks: Mapping[int, int] | None = None,
+) -> discord.Embed:
+    """Top 10, plus the caller's own row when they are ranked lower. streaks: daily streak by
+    user id, shown as a fire emoji and the day count."""
+    streaks = streaks or {}
 
     def line(rank: int, row: tuple[int, str, int, int]) -> str:
         user_id, handle, total, played = row
         text = f"{rank}. <@{user_id}> ({handle}) {total} ({played} matches)"
+        if streaks.get(user_id):
+            text += f" \U0001f525{streaks[user_id]}"
         return f"**{text}**" if user_id == me_id else text
 
     lines = [line(i, r) for i, r in enumerate(rows[:STATS_SIZE], 1)]

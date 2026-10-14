@@ -633,6 +633,18 @@ class Store:
         )
         return [r["day"] for r in rows]
 
+    async def daily_days_by_user(self, guild_id: int) -> dict[int, list[int]]:
+        """Every user's claimed daily days in this server, newest first."""
+        rows = await self._all(
+            "SELECT user_id, day FROM daily WHERE guild_id = ? AND solved_at IS NOT NULL "
+            "ORDER BY day DESC",
+            (guild_id,),
+        )
+        out: dict[int, list[int]] = {}
+        for r in rows:
+            out.setdefault(r["user_id"], []).append(r["day"])
+        return out
+
     async def issue_daily(
         self, guild_id: int, user_id: int, day: int, problem_key: str, rating: int, now: int
     ) -> None:

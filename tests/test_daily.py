@@ -150,3 +150,12 @@ async def test_streak_counts_claimed_days_and_shows_in_embed(env):
     clock.t += 3 * 86400  # days 3, 4 missed
     cf.subs.clear()
     assert (await svc.claim(GUILD, 5, 1)).streak == 0
+
+
+async def test_daily_days_by_user(env):
+    svc, store, cf, clock, _ = env
+    await svc.claim(GUILD, 5, 1)
+    cf.subs.append(Submission(1100, 1100, "1700A", "OK"))
+    await svc.claim(GUILD, 5, 1)
+    assert await store.daily_days_by_user(GUILD) == {1: [0]}
+    assert await store.daily_days_by_user(2) == {}
