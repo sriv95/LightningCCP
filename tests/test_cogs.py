@@ -3,7 +3,14 @@ from src.cogs.contests import ContestsCog
 from src.cogs.handles import HandlesCog, VerifyButton
 from src.cogs.match import MatchButton, MatchCog
 from src.cogs.problems import ProblemsCog
-from src.ui.embeds import contest_pages, problem_embed, profile_embed, ranklist_pages, stats_embed
+from src.ui.embeds import (
+    contest_pages,
+    problem_embed,
+    profile_embed,
+    ranklist_pages,
+    stalk_pages,
+    stats_embed,
+)
 
 
 class FakeMember:
@@ -58,7 +65,7 @@ def test_verify_button_template_matches_custom_id():
 
 def test_problems_commands_registered():
     names = {c.name for c in ProblemsCog.__cog_app_commands__}
-    assert names == {"gimme"}
+    assert names == {"gimme", "stalk"}
 
 
 def test_contests_groups():
@@ -98,3 +105,14 @@ def test_ranklist_pages_lines_and_paging():
     assert pages[0].description.splitlines()[0] == "1. <@1> (h1) 99"
     assert pages[0].description.splitlines()[1] == "2. <@2> (h2) 90, penalty 45"
     assert ranklist_pages([], "T") == []
+
+
+def test_stalk_pages_lines_and_paging():
+    known = Problem(1700, "B", "Foo", 1400, ())
+    items = [("1700B", known), ("9999Z", None)] + [(f"1A{i}", None) for i in range(14)]
+    pages = stalk_pages("tourist", items)
+    assert [p.footer.text for p in pages] == ["Page 1/2 - 16 problems", "Page 2/2 - 16 problems"]
+    first = pages[0].description.splitlines()
+    assert first[0] == f"[1700B. Foo]({known.url}) (1400)" and first[1] == "9999Z"
+    assert pages[0].title == "Unsolved by tourist"
+    assert stalk_pages("x", []) == []

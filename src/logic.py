@@ -68,6 +68,12 @@ def solved_keys(subs: Iterable[Submission]) -> frozenset[str]:
     return frozenset(s.problem_key for s in subs if s.verdict == "OK")
 
 
+def unsolved_keys(subs: Iterable[Submission]) -> list[str]:
+    """Problems attempted but never solved, in order of first appearance (newest attempt first)."""
+    solved = solved_keys(subs)
+    return list(dict.fromkeys(s.problem_key for s in subs if s.problem_key not in solved))
+
+
 def round_rating(rating: int | None) -> int:
     if rating is None:
         return 800

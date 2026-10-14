@@ -19,6 +19,7 @@ from src.logic import (
     select_contests,
     solved_keys,
     tag_suggestions,
+    unsolved_keys,
 )
 
 
@@ -238,3 +239,15 @@ def test_placement_deltas_ten_players_exact():
 def test_placement_deltas_needs_two_players():
     with pytest.raises(ValueError):
         placement_deltas([[1]], 5)
+
+
+def test_unsolved_keys_attempted_not_solved_newest_first():
+    subs = [
+        S("1C", "WRONG_ANSWER", 5),
+        S("1A", "OK", 4),
+        S("1B", "WRONG_ANSWER", 3),
+        S("1C", "TIME_LIMIT_EXCEEDED", 2),
+        S("1A", "WRONG_ANSWER", 1),
+    ]
+    assert unsolved_keys(subs) == ["1C", "1B"]
+    assert unsolved_keys([]) == []

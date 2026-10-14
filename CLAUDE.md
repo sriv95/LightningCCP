@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-LightningCCP is a slash-command-only Discord bot for competitive programmers, modeled on [TLE](https://github.com/cheran-senthil/TLE) but rewritten from scratch (TLE is a behavior reference, not a fork). Phase 1 covers Codeforces handle linking, `/gimme` and `/match`, contest lists, `/ranklist` and reminders. Graphs, starboard, rated virtual contests and rank roles are phase 2 and do not exist yet.
+LightningCCP is a slash-command-only Discord bot for competitive programmers, modeled on [TLE](https://github.com/cheran-senthil/TLE) but rewritten from scratch (TLE is a behavior reference, not a fork). Phase 1 covers Codeforces handle linking, `/gimme` and `/match`, contest lists, `/ranklist`, `/stalk` and reminders. Graphs, starboard, rated virtual contests and rank roles are phase 2 and do not exist yet.
 
 ## Working agreement
 

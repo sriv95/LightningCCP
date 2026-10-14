@@ -4,14 +4,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from src.errors import BotError
+from src.errors import BotError, NotLinked
 from src.logic import (
     filter_problems,
     parse_tags,
     solved_keys,
     tag_suggestions,
+    unsolved_keys,
 )
-from src.ui.embeds import problem_embed
+from src.ui.embeds import problem_embed, stalk_pages
+from src.ui.paginator import send_pages
 
 Rating = app_commands.Range[int, 800, 3500]
 
@@ -73,6 +75,37 @@ class ProblemsCog(commands.Cog, name="Problems"):
             app_commands.Choice(name=value, value=value)
             for value in tag_suggestions(current, self.s.problems.tags)
         ]
+
+    @app_commands.command(name="stalk", description="List problems someone tried but never solved")
+    @app_commands.guild_only()
+    @app_commands.describe(
+        handle="A Codeforces handle",
+        member="A server member with a linked handle (default: you)",
+    )
+    async def stalk(
+        self,
+        interaction: discord.Interaction,
+        handle: str | None = None,
+        member: discord.Member | None = None,
+    ) -> None:
+        if handle is not None and member is not None:
+            raise BotError("Give a handle or a member, not both.")
+        await interaction.response.defer(ephemeral=True)
+        s = self.s
+        if handle is None:
+            target = member or interaction.user
+            linked = await s.db.get_handle(interaction.guild_id, target.id)
+            if linked is None:
+                raise NotLinked(f"{target.display_name} has no linked handle.")
+            handle = linked.handle
+        else:
+            handle = (await s.cf.user_info(handle)).handle  # validates and fixes the casing
+        keys = unsolved_keys(await s.cf.user_status(handle))
+        by_key = {p.key: p for p in s.problems.problems}
+        pages = stalk_pages(handle, [(k, by_key.get(k)) for k in keys])
+        if not pages:
+            raise BotError(f"{handle} has no attempted-but-unsolved problems.")
+        await send_pages(interaction, pages)
 
 
 async def setup(bot: commands.Bot) -> None:

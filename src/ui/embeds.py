@@ -167,3 +167,28 @@ def ranklist_pages(
         embed.set_footer(text=f"Page {i}/{len(groups)}")
         pages.append(embed)
     return pages
+
+
+def stalk_pages(
+    handle: str, items: Sequence[tuple[str, Problem | None]], per_page: int = 15
+) -> list[discord.Embed]:
+    """items: (problem key, problem if the cache knows it), newest attempt first."""
+
+    def line(key: str, problem: Problem | None) -> str:
+        if problem is None:
+            return key
+        rating = f" ({problem.rating})" if problem.rating else ""
+        return f"[{key}. {problem.name}]({problem.url}){rating}"
+
+    groups = chunked(items, per_page)
+    pages = []
+    for i, group in enumerate(groups, start=1):
+        embed = discord.Embed(
+            title=f"Unsolved by {handle}",
+            url=f"https://codeforces.com/profile/{handle}",
+            description="\n".join(line(*item) for item in group),
+            colour=discord.Colour.dark_orange(),
+        )
+        embed.set_footer(text=f"Page {i}/{len(groups)} - {len(items)} problems")
+        pages.append(embed)
+    return pages
