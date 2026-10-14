@@ -4,6 +4,7 @@ from src.cf.models import Contest, Problem, Submission
 from src.errors import BotError
 from src.logic import (
     chunked,
+    duel_gain,
     earliest_solve,
     filter_problems,
     has_compile_error,
@@ -20,7 +21,6 @@ from src.logic import (
     solved_keys,
     tag_suggestions,
     unsolved_keys,
-    win_gain,
 )
 
 
@@ -196,44 +196,49 @@ def test_rank_groups_orders_by_solve_time_then_ties_non_solvers():
     assert rank_groups([(1, None), (2, None)]) == [[1, 2]]
 
 
-def test_solo_delta_elo_against_the_problem():
-    assert solo_delta(800, 800, True) == 16  # even odds: half of K
-    assert solo_delta(800, 1000, True) == 24  # harder problem pays more
-    assert solo_delta(1200, 800, True) == 3  # an easy problem pays little
+def test_solo_delta_is_linear_in_the_gap():
+    assert [solo_delta(1000, p, True) for p in (400, 800, 900, 1000, 1100, 1200, 1400, 2000)] == [
+        1,
+        6,
+        8,
+        10,
+        16,
+        22,
+        33,
+        33,
+    ]  # +1 at 400 or more below, +10 equal, +33 at 400 or more above
     assert solo_delta(800, 800, False) == 0  # failing never costs rating
 
 
-def test_win_gain_curve():
-    assert [win_gain(d) for d in (0, 200, 400)] == [95, 67, 20]
-    assert win_gain(100) == 81 and win_gain(300) == 43.5  # linear between the points
-    assert win_gain(900) == 20  # flat past the last point
-    assert win_gain(-200) == 123 and win_gain(-400) == 170  # an upset mirrors around 95
+def test_duel_gain_staircase():
+    steps = {-500: 16, -400: 16, -399: 33, -200: 33, -199: 49, 0: 49, 199: 49, 200: 67, 399: 67}
+    assert {gap: duel_gain(gap) for gap in steps} == steps
+    assert duel_gain(400) == duel_gain(900) == 95
 
 
-def test_match_deltas_duel():
-    assert match_deltas([[1], [2]], {1: 800, 2: 800}) == {1: 95, 2: -95}
-    assert match_deltas([[1], [2]], {1: 1200, 2: 800}) == {1: 20, 2: -20}  # favourite wins
-    assert match_deltas([[1], [2]], {1: 800, 2: 1200}) == {1: 170, 2: -170}  # upset
-    assert match_deltas([[1], [2]], {1: 1000, 2: 800}) == {1: 67, 2: -67}
+def test_match_deltas_duel_is_zero_sum_staircase():
+    assert match_deltas([[1], [2]], {1: 800, 2: 800}) == {1: 49, 2: -49}
+    assert match_deltas([[1], [2]], {1: 800, 2: 1200}) == {1: 95, 2: -95}  # upset
+    assert match_deltas([[1], [2]], {1: 1200, 2: 800}) == {1: 16, 2: -16}
 
 
-def test_match_deltas_three_players_equal_ratings():
-    r = {1: 800, 2: 800, 3: 800}
-    assert match_deltas([[1], [2], [3]], r) == {1: 95, 2: 0, 3: -95}
+def test_match_deltas_averages_over_opponents():
+    r = dict.fromkeys(range(1, 5), 800)
+    assert match_deltas([[1], [2], [3]], r) == {1: 49, 2: 0, 3: -49}
+    assert match_deltas([[1], [2], [3], [4]], r) == {1: 49, 2: 16, 3: -16, 4: -49}
 
 
-def test_match_deltas_ties_average_win_and_loss():
-    r = {1: 800, 2: 800, 3: 800}
-    assert match_deltas([[1], [2, 3]], r) == {1: 95, 2: -48, 3: -48}
+def test_match_deltas_ties_move_nothing_between_the_tied():
+    r = dict.fromkeys(range(1, 4), 800)
+    assert match_deltas([[1], [2, 3]], r) == {1: 49, 2: -25, 3: -25}  # -24.5 rounds away from 0
     assert match_deltas([[1, 2]], {1: 800, 2: 800}) == {1: 0, 2: 0}
-    assert match_deltas([[1, 2]], {1: 1200, 2: 800}) == {1: -75, 2: 75}  # a tie costs the favourite
 
 
 def test_match_deltas_equal_ratings_sum_to_zero():
     for n in range(2, 11):
         deltas = match_deltas([[i] for i in range(n)], dict.fromkeys(range(n), 1500))
         assert len(deltas) == n and sum(deltas.values()) == 0
-        assert deltas[0] == 95 and deltas[n - 1] == -95
+        assert deltas[0] == 49 and deltas[n - 1] == -49
 
 
 def test_match_deltas_needs_two_players():

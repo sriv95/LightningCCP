@@ -1,6 +1,5 @@
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from itertools import pairwise
 
 from src.cf.models import Contest, Problem, Submission
 from src.errors import BotError
@@ -15,7 +14,10 @@ LOBBY_TTL_SECONDS = 600
 MATCH_TTL_SECONDS = 7200
 MATCH_MAX_PLAYERS = 10
 START_RATING = 800
-ELO_K = 32
+SOLO_MIN = 1
+SOLO_EQUAL = 10
+SOLO_MAX = 33
+SOLO_RANGE = 400
 
 
 def parse_tags(raw: str | None) -> frozenset[str]:
@@ -113,34 +115,31 @@ def _round_away(x: float) -> int:
     return int(math.copysign(math.floor(abs(x) + 0.5), x))
 
 
-def _expected(rating: float, opponent: float) -> float:
-    return 1 / (1 + 10 ** ((opponent - rating) / 400))
-
-
 def solo_delta(rating: int, problem_rating: int, solved: bool) -> int:
-    """Elo against the problem. Failing a solo match never costs rating."""
-    return _round_away(ELO_K * (1 - _expected(rating, problem_rating))) if solved else 0
+    """Linear in the gap to the problem, +1 at 400 or more below you, +10 at equal, +33 at 400
+    or more above. Failing a solo match never costs rating."""
+    if not solved:
+        return 0
+    gap = max(-SOLO_RANGE, min(SOLO_RANGE, problem_rating - rating))
+    if gap < 0:
+        return _round_away(SOLO_MIN + (SOLO_EQUAL - SOLO_MIN) * (gap + SOLO_RANGE) / SOLO_RANGE)
+    return _round_away(SOLO_EQUAL + (SOLO_MAX - SOLO_EQUAL) * gap / SOLO_RANGE)
 
 
-# (winner's rating minus loser's rating, rating the winner gains); linear in between.
-WIN_CURVE = ((0, 95), (200, 67), (400, 20))
-
-
-def win_gain(diff: float) -> float:
-    """Rating gained for beating a player `diff` below you. An upset (negative diff) mirrors the
-    curve, so a win and the same win seen from the other side always add up to twice the top value."""
-    if diff < 0:
-        return 2 * WIN_CURVE[0][1] - win_gain(-diff)
-    for (x0, y0), (x1, y1) in pairwise(WIN_CURVE):
-        if diff <= x1:
-            return y0 + (y1 - y0) * (diff - x0) / (x1 - x0)
-    return WIN_CURVE[-1][1]  # shortcut: flat past the last point, add points to WIN_CURVE to change
+def duel_gain(gap: int) -> int:
+    """Rating a winner gains, by how far the loser is above (positive gap) or below the winner."""
+    if gap <= -400:
+        return 16
+    if gap <= -200:
+        return 33
+    if gap < 200:
+        return 49
+    return 67 if gap < 400 else 95
 
 
 def match_deltas(groups: Sequence[Sequence[int]], ratings: Mapping[int, int]) -> dict[int, int]:
-    """Rating changes for a duel or custom match. Every pair of players plays a duel decided by
-    solve order (win_gain for the winner, minus the same for the loser, a tie is the average of
-    the two); each player's results are averaged over the opponents.
+    """Each pair of players is a duel: the winner gains duel_gain, the loser loses the same, a tie
+    moves nothing. A player's change is the average over their opponents.
 
     groups is ordered best first; players in one group tie.
     """
@@ -150,13 +149,12 @@ def match_deltas(groups: Sequence[Sequence[int]], ratings: Mapping[int, int]) ->
     place = {uid: i for i, g in enumerate(groups) for uid in g}
     out: dict[int, int] = {}
     for uid, mine in place.items():
-        total = 0.0
+        total = 0
         for other, theirs in place.items():
-            if other == uid:
-                continue
-            diff = ratings[uid] - ratings[other]
-            win, loss = win_gain(diff), -win_gain(-diff)
-            total += win if mine < theirs else (win + loss) / 2 if mine == theirs else loss
+            if mine < theirs:
+                total += duel_gain(ratings[other] - ratings[uid])
+            elif mine > theirs:
+                total -= duel_gain(ratings[uid] - ratings[other])
         out[uid] = _round_away(total / (n - 1))
     return out
 

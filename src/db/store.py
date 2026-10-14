@@ -106,7 +106,7 @@ MIGRATIONS = [
     );
     CREATE UNIQUE INDEX one_active_match ON match_players (guild_id, user_id) WHERE active = 1;
     """,
-    # Points became Elo ratings: zero the old point changes so everyone restarts at 800.
+    # Points became match ratings: zero the old point changes so everyone restarts at 800.
     "UPDATE match_players SET delta = 0 WHERE delta IS NOT NULL;",
 ]
 
