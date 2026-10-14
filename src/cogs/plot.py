@@ -89,13 +89,24 @@ class PlotCog(commands.Cog, name="Plot"):
             raise BotError(f"{label} has no finished matches yet.")
         await self._send(interaction, f"Match rating - {label}", [(label, points)])
 
-    @plot.command(name="codeforces", description="Graph a Codeforces rating history")
-    @app_commands.describe(member="Defaults to you", handle="Any Codeforces handle")
+    @plot.command(name="codeforces", description="Graph Codeforces rating histories")
+    @app_commands.describe(
+        member="Defaults to you",
+        handle="Any Codeforces handle",
+        handle2="Compare with another handle",
+        handle3="Compare with another handle",
+        handle4="Compare with another handle",
+        handle5="Compare with another handle",
+    )
     async def codeforces(
         self,
         interaction: discord.Interaction,
         member: discord.Member | None = None,
         handle: str | None = None,
+        handle2: str | None = None,
+        handle3: str | None = None,
+        handle4: str | None = None,
+        handle5: str | None = None,
     ) -> None:
         self._check_args(member, handle)
         await interaction.response.defer(ephemeral=True)
@@ -106,13 +117,27 @@ class PlotCog(commands.Cog, name="Plot"):
             if linked is None:
                 raise NotLinked(f"{target.display_name} has no linked handle.")
             handle = linked.handle
-        else:
-            handle = (await s.cf.user_info(handle)).handle  # validates and fixes the casing
-        changes = await s.cf.rating_history(handle)
-        if not changes:
-            raise BotError(f"{handle} has not taken part in a rated contest.")
-        points = [(c.time, c.rating) for c in changes]
-        await self._send(interaction, f"Codeforces rating - {handle}", [(handle, points)], CF_BANDS)
+        names = [handle, *(h for h in (handle2, handle3, handle4, handle5) if h)]
+        lines, missing, seen = [], [], set()
+        for name in names:
+            name = (await s.cf.user_info(name)).handle  # validates and fixes the casing
+            if name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            changes = await s.cf.rating_history(name)
+            if changes:
+                lines.append((name, [(c.time, c.rating) for c in changes]))
+            else:
+                missing.append(name)
+        if not lines:
+            raise BotError(
+                f"{', '.join(missing)} has not taken part in a rated contest."
+                if len(missing) == 1
+                else "None of them has taken part in a rated contest."
+            )
+        note = f"No rated contest yet: {', '.join(missing)}." if missing else None
+        title = f"Codeforces rating - {lines[0][0]}" if len(lines) == 1 else "Codeforces rating"
+        await self._send(interaction, title, lines, CF_BANDS, note)
 
 
 async def setup(bot: commands.Bot) -> None:
