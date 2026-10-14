@@ -49,6 +49,9 @@ def _reminder_text(r: Reminder) -> str:
     return f"Reminders: {where}{role}, {mins} minutes before start.{skip}"
 
 
+RECAP_MAX_BACKOFF = 1800  # seconds between tries of a failing recap, at most
+
+
 class ContestsCog(commands.Cog, name="Contests"):
     contests = app_commands.Group(
         name="contests", description="List Codeforces contests", guild_only=True
@@ -63,6 +66,8 @@ class ContestsCog(commands.Cog, name="Contests"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._warned_channels: set[tuple[int, int]] = set()
+        # (guild, contest) -> (next try, delay) of a recap that failed; in memory only
+        self._recap_retry: dict[tuple[int, int], tuple[int, int]] = {}
 
     @property
     def s(self):
@@ -282,11 +287,17 @@ class ContestsCog(commands.Cog, name="Contests"):
             if channel is None:
                 continue
             for contest in recaps_due(s.contests.contests, await s.db.recapped(guild_id), now):
+                key = (guild_id, contest.id)
+                if self._recap_retry.get(key, (0, 0))[0] > now:
+                    continue  # failed lately: wait out the back-off
                 try:
                     entries = await self._entries(guild_id, contest.id)
                 except Exception:
+                    delay = min(RECAP_MAX_BACKOFF, self._recap_retry.get(key, (0, 30))[1] * 2)
+                    self._recap_retry[key] = (now + delay, delay)  # 1 min, 2 min ... 30 min
                     log.warning("Could not fetch recap for contest %s", contest.id, exc_info=True)
-                    continue  # not marked: try again next tick
+                    continue  # not marked: try again after the back-off
+                self._recap_retry.pop(key, None)
                 if not await s.db.mark_recapped(guild_id, contest.id) or not entries:
                     continue
                 try:

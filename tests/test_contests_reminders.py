@@ -58,6 +58,7 @@ def build(monkeypatch, **kw):
     cog, bot, db, ch = make_cog(monkeypatch, **kw)
     cog.bot = bot
     cog._warned_channels = set()
+    cog._recap_retry = {}
     return cog, db, ch
 
 
@@ -167,11 +168,33 @@ async def test_recap_skips_empty_and_marks_it(monkeypatch):
     assert ch.embeds == [] and db.recaps == {(1, 7)} and cog.calls == [7]
 
 
-async def test_recap_failure_is_retried_not_marked(monkeypatch):
+async def test_recap_failure_is_retried_with_a_growing_back_off_not_marked(monkeypatch):
     cog, db, ch = build_recap(monkeypatch, RuntimeError("cf down"))
+    clock = [NOW]
+    monkeypatch.setattr("src.cogs.contests.time.time", lambda: clock[0])
     await cog._send_recaps()
+    await cog._send_recaps()  # the same minute: still backing off
+    assert db.recaps == set() and cog.calls == [7]
+    clock[0] += 60
     await cog._send_recaps()
-    assert db.recaps == set() and cog.calls == [7, 7]
+    assert cog.calls == [7, 7]
+    clock[0] += 60  # the delay is 2 minutes now
+    await cog._send_recaps()
+    assert cog.calls == [7, 7]
+    clock[0] += 60
+    await cog._send_recaps()
+    assert cog.calls == [7, 7, 7]
+    for _ in range(10):  # many failures: the wait stops growing at 30 minutes
+        clock[0] += 1800
+        await cog._send_recaps()
+    assert cog._recap_retry[(1, 7)][1] == 1800
+
+
+async def test_recap_back_off_ends_when_it_works(monkeypatch):
+    cog, db, ch = build_recap(monkeypatch, [(1, 10, "a", 3.0, 0)])
+    cog._recap_retry[(1, 7)] = (NOW - 1, 120)
+    await cog._send_recaps()
+    assert len(ch.embeds) == 1 and cog._recap_retry == {}
 
 
 async def test_recap_ignores_old_running_and_upcoming_contests(monkeypatch):
