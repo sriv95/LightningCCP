@@ -138,6 +138,7 @@ class ContestsCog(commands.Cog, name="Contests"):
         before="Minutes before the start, comma-separated (default 10,60)",
         exclude="Regex on the contest name: matching contests get no reminder; clear removes it",
         clear="Stop reminders (forgets the channel only)",
+        clear_role="Stop pinging the role",
     )
     @app_commands.checks.has_permissions(manage_guild=True)
     async def reminder_config(
@@ -148,28 +149,31 @@ class ContestsCog(commands.Cog, name="Contests"):
         before: str | None = None,
         exclude: str | None = None,
         clear: bool = False,
+        clear_role: bool = False,
     ) -> None:
         guild_id = interaction.guild_id
         current = await self.s.db.get_reminder(guild_id) or Reminder(guild_id, None, None, (60, 10))
         if clear:
-            if set or role or before or exclude:
+            if set or role or before or exclude or clear_role:
                 raise BotError("Use clear on its own.")
             if not await self.s.db.clear_reminder(guild_id):
                 raise BotError("No reminder channel set.")
             await interaction.response.send_message("Reminders stopped.", ephemeral=True)
             return
-        if set is None and role is None and before is None and exclude is None:
+        if set is None and role is None and before is None and exclude is None and not clear_role:
             await interaction.response.send_message(_reminder_text(current), ephemeral=True)
             return
         if set and not set.permissions_for(interaction.guild.me).send_messages:
             raise BotError(f"I cannot send messages in {set.mention}.")
+        if clear_role and role:
+            raise BotError("Give a role or clear_role, not both.")
         pattern = current.exclude
         if exclude is not None:
             pattern = "" if exclude.strip().lower() == "clear" else _check_regex(exclude)
         current = Reminder(
             guild_id,
             set.id if set else current.channel_id,
-            role.id if role else current.role_id,
+            None if clear_role else role.id if role else current.role_id,
             parse_minutes(before) if before else current.before_mins,
             pattern,
         )
