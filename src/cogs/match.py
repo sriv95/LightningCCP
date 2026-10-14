@@ -290,13 +290,28 @@ class MatchCog(commands.Cog, name="Match"):
 
     @app_commands.command(name="profile", description="A member's match rating, games and streak")
     @app_commands.guild_only()
-    @app_commands.describe(member="Defaults to you")
+    @app_commands.describe(
+        member="Defaults to you", handle="Find the member who linked this Codeforces handle"
+    )
     async def profile(
-        self, interaction: discord.Interaction, member: discord.Member | None = None
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member | None = None,
+        handle: str | None = None,
     ) -> None:
+        if member is not None and handle is not None:
+            raise BotError("Give a member or a handle, not both.")
         await interaction.response.defer(ephemeral=True)
         s = self.bot.services
         db, guild_id = s.db, interaction.guild_id
+        if handle is not None:
+            owner = await db.user_for_handle(guild_id, handle)
+            if owner is None:
+                raise BotError(f"No member is linked to {handle}.")
+            try:
+                member = await interaction.guild.fetch_member(owner)
+            except discord.NotFound:
+                raise BotError(f"{handle} is linked to a member who left this server.") from None
         target = member or interaction.user
         rows = await db.stats(guild_id)
         rank = next((i for i, r in enumerate(rows, 1) if r[0] == target.id), None)
