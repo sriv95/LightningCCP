@@ -16,6 +16,7 @@ CHOICE_MAX_LEN = 100
 LOBBY_TTL_SECONDS = 600
 MATCH_TTL_SECONDS = 7200
 MATCH_MAX_PLAYERS = 10
+CUSTOM_SCALE = 1.5  # a custom match pays the duel table this many times
 MASHUP_MAX_PLAYERS = 50
 # Codeforces reads per second for running contests; commands get the rest of the 1 per second
 MASHUP_READS_PER_SECOND = 0.5
@@ -247,9 +248,11 @@ def duel_gain(gap: int) -> int:
     return 67 if gap < 400 else 95
 
 
-def match_deltas(groups: Sequence[Sequence[int]], ratings: Mapping[int, int]) -> dict[int, int]:
+def match_deltas(
+    groups: Sequence[Sequence[int]], ratings: Mapping[int, int], scale: float = 1.0
+) -> dict[int, int]:
     """Each pair of players is a duel: the winner gains duel_gain, the loser loses the same, a tie
-    moves nothing. A player's change is the average over their opponents.
+    moves nothing. A player's change is the average over their opponents, times scale.
 
     groups is ordered best first; players in one group tie.
     """
@@ -265,7 +268,7 @@ def match_deltas(groups: Sequence[Sequence[int]], ratings: Mapping[int, int]) ->
                 total += duel_gain(ratings[other] - ratings[uid])
             elif mine > theirs:
                 total -= duel_gain(ratings[uid] - ratings[other])
-        out[uid] = _round_away(total / (n - 1))
+        out[uid] = _round_away(total * scale / (n - 1))
     return out
 
 

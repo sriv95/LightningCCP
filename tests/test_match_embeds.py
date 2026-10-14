@@ -100,6 +100,26 @@ def test_finished_embed_lists_signed_deltas_and_ratings():
     assert "1. <@10> +5" in out and "2. <@11> -5" in out
 
 
+def test_finished_custom_embed_names_the_winner_without_places():
+    match = row(
+        mode="custom",
+        status="finished",
+        problem_key="1700A",
+        rating=1000,
+        max_players=3,
+        finished_at=2500,
+    )
+    players = [
+        player(10, solved_at=2200, delta=-25),
+        player(11, solved_at=2100, delta=74),
+        player(12, delta=-25),
+    ]
+    out = text(match_embed(MatchView(match, players, problem=PROBLEM, ratings={})))
+    assert "Winner <@11> +74" in out and "<@10> -25" in out and "1. " not in out
+    assert history_pages("t", [(match, players)], 10, {}, [])[0].description.endswith("lost, -25")
+    assert history_pages("t", [(match, players)], 11, {}, [])[0].description.endswith("won, +74")
+
+
 def test_finished_embed_nobody_solved():
     view = MatchView(
         row(status="finished", problem_key="1700A", rating=1000),
@@ -145,7 +165,7 @@ def test_history_pages_lines():
     )
     assert lines[1].endswith("- not solved, +0")
     assert lines[2].endswith("vs <@2> - 1st of 2, +49")
-    assert lines[3].endswith("vs <@2>, <@3> - 3rd of 3, -16")
+    assert lines[3].endswith("vs <@2>, <@3> - lost, -16")
     assert lines[4].endswith("vs <@2> - no result, +0")
     assert pages[0].footer.text == "Page 1/1"
     assert history_pages("T", [], 1, {}) == []

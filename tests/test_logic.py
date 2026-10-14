@@ -429,3 +429,10 @@ def test_contest_suggestions_lists_newest_finished_known_contests():
     ]
     assert contest_suggestions(contests, known, "2") == [("2 - Educational Two", 2)]
     assert contest_suggestions(contests, known, "", limit=1) == [("2 - Educational Two", 2)]
+
+
+def test_match_deltas_scale_multiplies_before_rounding():
+    r = dict.fromkeys(range(1, 4), 800)
+    assert match_deltas([[1], [2, 3]], r, 1.5) == {1: 74, 2: -37, 3: -37}  # 73.5 and -36.75
+    assert match_deltas([[1], [2]], r, 1.5) == {1: 74, 2: -74}
+    assert match_deltas([[1], [2]], r) == {1: 49, 2: -49}

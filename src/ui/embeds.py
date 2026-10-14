@@ -109,6 +109,10 @@ def _player_status(p: MatchPlayer) -> str:
     return "gave up" if p.gave_up else "solving"
 
 
+def _first_solve(players: Sequence[MatchPlayer]) -> int | None:
+    return min((p.solved_at for p in players if p.solved_at is not None), default=None)
+
+
 def match_embed(view: MatchView) -> discord.Embed:
     m, players = view.match, view.players
     if m.status == "cancelled":
@@ -150,10 +154,18 @@ def match_embed(view: MatchView) -> discord.Embed:
         results = "Nobody solved it. No ratings changed."
     else:
         ordered = sorted(players, key=lambda p: -(p.delta or 0))
-        results = "\n".join(
-            f"{i}. <@{p.user_id}> {p.delta or 0:+d} (rating {ratings.get(p.user_id, 0)})"
-            for i, p in enumerate(ordered, start=1)
-        )
+        if m.mode == "custom":  # the first solver wins, nobody else is placed
+            first = _first_solve(players)
+            results = "\n".join(
+                ("Winner " if p.solved_at == first else "")
+                + f"<@{p.user_id}> {p.delta or 0:+d} (rating {ratings.get(p.user_id, 0)})"
+                for p in ordered
+            )
+        else:
+            results = "\n".join(
+                f"{i}. <@{p.user_id}> {p.delta or 0:+d} (rating {ratings.get(p.user_id, 0)})"
+                for i, p in enumerate(ordered, start=1)
+            )
     embed.colour = discord.Colour.green()
     embed.add_field(name="Results", value=results, inline=False)
     if view.note:
@@ -276,8 +288,12 @@ def _history_line(
     )
     if match.mode == "solo":
         return f"{head} - {'solved' if me.solved_at is not None else 'not solved'}, {me.delta:+d}"
-    place = placement([p.delta or 0 for p in players], me.delta or 0)
-    result = "no result" if place is None else f"{ordinal(place)} of {len(players)}"
+    if match.mode == "custom":
+        first = _first_solve(players)
+        result = "no result" if first is None else "won" if me.solved_at == first else "lost"
+    else:
+        place = placement([p.delta or 0 for p in players], me.delta or 0)
+        result = "no result" if place is None else f"{ordinal(place)} of {len(players)}"
     others = [f"<@{p.user_id}>" for p in players if p.user_id != me_id]
     vs = f" vs {', '.join(others[:3])}{f' +{len(others) - 3}' if len(others) > 3 else ''}"
     return f"{head}{vs if versus else ''} - {result}, {me.delta:+d}"

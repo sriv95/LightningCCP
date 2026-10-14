@@ -9,6 +9,7 @@ from src.cf.models import Problem
 from src.db.store import MatchPlayer, MatchRow, Store
 from src.errors import BotError, MatchClosed, NotLinked
 from src.logic import (
+    CUSTOM_SCALE,
     LOBBY_TTL_SECONDS,
     MATCH_TTL_SECONDS,
     earliest_solve,
@@ -301,10 +302,10 @@ class MatchService:
         force: bool = False,
         note: str | None = None,
     ) -> MatchView:
+        # the first solve ends every match; a custom match also ends when everyone gave up
+        done = any(p.solved_at is not None for p in players)
         if match.mode == "custom":
-            done = all(p.solved_at is not None or p.gave_up for p in players)
-        else:  # solo and duel end at the first solve
-            done = any(p.solved_at is not None for p in players)
+            done = done or all(p.gave_up for p in players)
         if not (done or force):
             return await self._view(match.id)
         return await self._finish(match, players, note=note)
@@ -328,8 +329,13 @@ class MatchService:
             deltas = match_deltas(groups, ratings)
         elif not any_solved:
             deltas = {p.user_id: 0 for p in players}
-        else:
+        elif match.mode == "duel":
             deltas = match_deltas(rank_groups([(p.user_id, p.solved_at) for p in players]), ratings)
+        else:  # custom: the first solver beats everyone else, who tie
+            first = min(p.solved_at for p in players if p.solved_at is not None)
+            winners = [p.user_id for p in players if p.solved_at == first]
+            losers = [p.user_id for p in players if p.solved_at != first]
+            deltas = match_deltas([winners] + ([losers] if losers else []), ratings, CUSTOM_SCALE)
         # False means another request already finished this match; show its result.
         now = self._now()
         bonus_day = utc_day(now) if match.mode == "solo" else None

@@ -329,32 +329,31 @@ async def test_give_up_errors(env):
     with pytest.raises(MatchClosed):
         await svc.give_up(lobby.match.id, 2)  # lobby: use Leave
     await svc.start(lobby.match.id, 1)
-    solve(cf, "h1", 1100)
-    await svc.check(lobby.match.id, 1)
-    with pytest.raises(BotError):
-        await svc.give_up(lobby.match.id, 1)  # already solved
     assert (await svc.give_up(lobby.match.id, 2)).match.status == "active"  # player 3 still plays
     with pytest.raises(BotError):
         await svc.give_up(lobby.match.id, 2)  # already gave up
     with pytest.raises(BotError):
         await svc.check(lobby.match.id, 2)  # gave up: cannot check
+    solve(cf, "h1", 1100)
+    await svc.check(lobby.match.id, 1)
+    with pytest.raises(MatchClosed):
+        await svc.give_up(lobby.match.id, 1)  # the first solve ended the match
 
 
-async def test_custom_ranks_by_solve_time_and_ties_non_solvers(env):
+async def test_custom_ends_at_the_first_solve_and_pays_the_duel_table_one_and_a_half_times(env):
     svc, store, cf, clock = env
     lobby = await make(svc, 1, "custom", 4)
     for uid in (2, 3, 4):
         await svc.join(lobby.match.id, uid)
     await svc.start(lobby.match.id, 1)
-    solve(cf, "h2", 1100)
-    solve(cf, "h1", 1200)
-    view = await svc.check(lobby.match.id, 1)
-    assert view.match.status == "active"  # 3 and 4 are still playing
     assert (await svc.give_up(lobby.match.id, 3)).match.status == "active"
-    done = await svc.give_up(lobby.match.id, 4)
+    solve(cf, "h2", 1100)
+    solve(cf, "h1", 1200)  # solved too, but later: no placement among the others
+    done = await svc.check(lobby.match.id, 1)
     assert done.match.status == "finished"
-    assert deltas(done) == {2: 49, 1: 16, 3: -33, 4: -33}
-    assert done.ratings == {1: 816, 2: 849, 3: 767, 4: 767}
+    # 3 duels at 49: 147 * 1.5 / 3 = 73.5 for the winner, -49 * 1.5 / 3 = -24.5 for each loser
+    assert deltas(done) == {2: 74, 1: -25, 3: -25, 4: -25}
+    assert done.ratings == {2: 874, 1: 775, 3: 775, 4: 775}
 
 
 async def test_custom_everyone_gave_up_moves_no_ratings(env):
@@ -385,7 +384,7 @@ async def test_expiry_without_solvers_moves_no_ratings(env):
     assert await svc.expire_due() == []
 
 
-async def test_expiry_ranks_solvers(env):
+async def test_custom_expiry_after_a_solve_scores_it(env):
     svc, store, cf, clock = env
     lobby = await make(svc, 1, "custom", 3)
     await svc.join(lobby.match.id, 2)
@@ -394,7 +393,7 @@ async def test_expiry_ranks_solvers(env):
     solve(cf, "h2", 1500)
     clock.t += MATCH_TTL_SECONDS
     (view,) = await svc.expire_due()
-    assert deltas(view) == {2: 49, 1: -25, 3: -25}
+    assert deltas(view) == {2: 74, 1: -37, 3: -37}
 
 
 async def test_lobby_expiry_cancels(env):
@@ -523,7 +522,7 @@ async def test_expiry_survives_a_failing_handle_lookup(env):
     clock.t += MATCH_TTL_SECONDS
     (view,) = await svc.expire_due()
     assert view.match.status == "finished"
-    assert deltas(view) == {2: 49, 1: -25, 3: -25}
+    assert deltas(view) == {2: 74, 1: -37, 3: -37}
     for uid in (1, 2, 3):
         assert await svc.current(GUILD, uid) is None
 
