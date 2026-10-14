@@ -151,6 +151,8 @@ class MatchService:
     async def _start(self, match_id: int) -> MatchView:
         match = await self._match(match_id)
         players = await self._store.get_players(match_id)
+        if match.mode != "solo" and len(players) < 2:
+            raise BotError("You need at least 2 players to start.")
         problems = self._problems.require()
         ratings: list[int | None] = []
         solved: set[str] = set()
@@ -166,8 +168,15 @@ class MatchService:
         problem = random.choice(pool)
         now = self._now()
         if not await self._store.start_match(
-            match_id, rating, problem.key, now, now + MATCH_TTL_SECONDS
+            match_id,
+            rating,
+            problem.key,
+            now,
+            now + MATCH_TTL_SECONDS,
+            [p.user_id for p in players],
         ):
+            if (await self._match(match_id)).status == "lobby":
+                raise BotError("The players changed while starting. Press Start again.")
             raise MatchClosed()
         return await self._view(match_id)
 
@@ -212,7 +221,7 @@ class MatchService:
                         views.append(await self._view(match.id, note="The lobby expired."))
                 else:
                     players = await self._refresh_solves(
-                        match, await self._store.get_players(match.id)
+                        match, await self._store.get_players(match.id), tolerant=True
                     )
                     views.append(
                         await self._maybe_finish(match, players, force=True, note="Time is up.")
@@ -222,13 +231,22 @@ class MatchService:
         return views
 
     async def _refresh_solves(
-        self, match: MatchRow, players: list[MatchPlayer]
+        self, match: MatchRow, players: list[MatchPlayer], *, tolerant: bool = False
     ) -> list[MatchPlayer]:
         found: dict[int, int] = {}
         for p in players:
             if p.solved_at is not None or p.gave_up:
                 continue
-            subs = await self._cf.user_status(p.handle, count=100)
+            try:
+                subs = await self._cf.user_status(p.handle, count=100)
+            except Exception:
+                if not tolerant:
+                    raise
+                # Expiry must still finish when one handle is persistently unreachable.
+                log.warning(
+                    "Skipping %s while expiring match %s", p.handle, match.id, exc_info=True
+                )
+                continue
             solved_at = earliest_solve(subs, match.problem_key, match.started_at)
             if solved_at is not None:
                 found[p.user_id] = solved_at

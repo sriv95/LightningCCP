@@ -4,7 +4,15 @@ import pytest
 
 from src.cf.models import Problem, Submission, User
 from src.db.store import Store
-from src.errors import AlreadyInMatch, BotError, CacheNotReady, MatchClosed, MatchFull, NotLinked
+from src.errors import (
+    AlreadyInMatch,
+    BotError,
+    CacheNotReady,
+    HandleNotFound,
+    MatchClosed,
+    MatchFull,
+    NotLinked,
+)
 from src.logic import LOBBY_TTL_SECONDS, MATCH_TTL_SECONDS
 from src.matches import MatchService
 
@@ -16,11 +24,18 @@ class FakeCF:
     def __init__(self):
         self.ratings: dict[str, int | None] = {}
         self.subs: dict[str, list[Submission]] = {}
+        self.errors: dict[str, Exception] = {}
+        self.before_status = None  # optional async callable(handle), runs mid-fetch
 
     async def user_info(self, handle):
         return User(handle, self.ratings.get(handle, 1000), None, None)
 
     async def user_status(self, handle, count=None):
+        await asyncio.sleep(0)  # yield, so concurrent requests interleave like real network calls
+        if self.before_status:
+            await self.before_status(handle)
+        if handle in self.errors:
+            raise self.errors[handle]
         return list(self.subs.get(handle, []))
 
 
@@ -63,6 +78,19 @@ async def make(svc, host, mode, max_players, **kw):
     return await svc.create(
         guild_id=GUILD, channel_id=5, host_id=host, mode=mode, max_players=max_players, **kw
     )
+
+
+def record_finishes(store, monkeypatch):
+    """Wrap store.finish_match and return the list of its results."""
+    results: list[bool] = []
+    original = store.finish_match
+
+    async def wrapper(*args, **kwargs):
+        results.append(await original(*args, **kwargs))
+        return results[-1]
+
+    monkeypatch.setattr(store, "finish_match", wrapper)
+    return results
 
 
 def deltas(view):
@@ -224,11 +252,11 @@ async def test_duel_winner_is_earliest_solve_not_first_click(env):
     lobby = await make(svc, 1, "duel", 2)
     await svc.join(lobby.match.id, 2)
     await svc.start(lobby.match.id, 1)
-    solve(cf, "h1", 1100)
-    solve(cf, "h2", 1200)
-    done = await svc.check(lobby.match.id, 2)  # player 2 clicks, player 1 solved first
-    assert deltas(done) == {1: 5, 2: -5}
-    assert done.totals == {1: 5, 2: -5}
+    solve(cf, "h2", 1100)
+    solve(cf, "h1", 1200)
+    done = await svc.check(lobby.match.id, 1)  # player 1 clicks, player 2 solved first
+    assert deltas(done) == {2: 5, 1: -5}
+    assert done.totals == {2: 5, 1: -5}
 
 
 async def test_duel_check_without_solves_keeps_running(env):
@@ -344,7 +372,7 @@ async def test_lobby_expiry_cancels(env):
     assert await svc.current(GUILD, 1) is None
 
 
-async def test_concurrent_checks_score_once(env):
+async def test_concurrent_checks_score_once(env, monkeypatch):
     # Review Focus 1
     svc, store, cf, clock = env
     lobby = await make(svc, 1, "duel", 2)
@@ -352,12 +380,128 @@ async def test_concurrent_checks_score_once(env):
     await svc.start(lobby.match.id, 1)
     solve(cf, "h1", 1100)
     solve(cf, "h2", 1200)
+    finishes = record_finishes(store, monkeypatch)
     results = await asyncio.gather(
         svc.check(lobby.match.id, 1), svc.check(lobby.match.id, 2), return_exceptions=True
     )
-    assert all(isinstance(r, MatchClosed) or r.match.status == "finished" for r in results)
+    assert not any(isinstance(r, Exception) and not isinstance(r, MatchClosed) for r in results)
+    assert sorted(finishes) == [False, True]  # both reached finish; the guard let one through
     assert await store.points_total(GUILD, 1) == 5
     assert await store.points_total(GUILD, 2) == -5
+
+
+async def test_expiry_racing_check_scores_once(env, monkeypatch):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "duel", 2)
+    await svc.join(lobby.match.id, 2)
+    await svc.start(lobby.match.id, 1)
+    solve(cf, "h1", 1100)
+    solve(cf, "h2", 1200)
+    clock.t += MATCH_TTL_SECONDS
+    finishes = record_finishes(store, monkeypatch)
+    results = await asyncio.gather(
+        svc.check(lobby.match.id, 1), svc.expire_due(), return_exceptions=True
+    )
+    assert not any(isinstance(r, Exception) and not isinstance(r, MatchClosed) for r in results)
+    assert sorted(finishes) == [False, True]
+    assert await store.points_total(GUILD, 1) == 5
+    assert await store.points_total(GUILD, 2) == -5
+
+
+async def test_concurrent_starts_start_once(env):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "duel", 2)
+    await svc.join(lobby.match.id, 2)
+    results = await asyncio.gather(
+        svc.start(lobby.match.id, 1), svc.start(lobby.match.id, 1), return_exceptions=True
+    )
+    views = [r for r in results if not isinstance(r, Exception)]
+    assert len(views) == 1 and views[0].match.status == "active"
+    (error,) = [r for r in results if isinstance(r, Exception)]
+    assert isinstance(error, MatchClosed)
+    match = await store.get_match(lobby.match.id)
+    assert match.status == "active" and match.started_at == views[0].match.started_at
+
+
+async def test_leave_during_start_keeps_lobby(env):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "custom", 3)
+    await svc.join(lobby.match.id, 2)
+    await svc.join(lobby.match.id, 3)
+    left = []
+
+    async def hook(handle):
+        if handle == "h1" and not left:
+            left.append(True)
+            await svc.leave(lobby.match.id, 2)
+
+    cf.before_status = hook
+    with pytest.raises(BotError, match="changed"):
+        await svc.start(lobby.match.id, 1)
+    assert (await store.get_match(lobby.match.id)).status == "lobby"
+    assert [p.user_id for p in await store.get_players(lobby.match.id)] == [1, 3]
+
+
+async def test_leave_during_duel_start_does_not_activate_one_player(env):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "duel", 2)
+    await svc.join(lobby.match.id, 2)
+
+    async def hook(handle):
+        if handle == "h1":
+            cf.before_status = None
+            await svc.leave(lobby.match.id, 2)
+
+    cf.before_status = hook
+    with pytest.raises(BotError):
+        await svc.start(lobby.match.id, 1)
+    assert (await store.get_match(lobby.match.id)).status == "lobby"
+    assert [p.user_id for p in await store.get_players(lobby.match.id)] == [1]
+
+
+async def test_join_during_start_keeps_lobby(env):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "custom", 4)
+    await svc.join(lobby.match.id, 2)
+    joined = []
+
+    async def hook(handle):
+        if handle == "h1" and not joined:
+            joined.append(True)
+            await svc.join(lobby.match.id, 3)
+
+    cf.before_status = hook
+    with pytest.raises(BotError, match="changed"):
+        await svc.start(lobby.match.id, 1)
+    assert (await store.get_match(lobby.match.id)).status == "lobby"
+    assert [p.user_id for p in await store.get_players(lobby.match.id)] == [1, 2, 3]
+
+
+async def test_expiry_survives_a_failing_handle_lookup(env):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "custom", 3)
+    await svc.join(lobby.match.id, 2)
+    await svc.join(lobby.match.id, 3)
+    await svc.start(lobby.match.id, 1)
+    solve(cf, "h2", 1500)
+    cf.errors["h3"] = HandleNotFound()  # e.g. a renamed handle
+    clock.t += MATCH_TTL_SECONDS
+    (view,) = await svc.expire_due()
+    assert view.match.status == "finished"
+    assert deltas(view) == {2: 5, 1: -3, 3: -3}
+    for uid in (1, 2, 3):
+        assert await svc.current(GUILD, uid) is None
+
+
+async def test_check_with_failing_own_lookup_still_raises(env):
+    svc, store, cf, clock = env
+    lobby = await make(svc, 1, "duel", 2)
+    await svc.join(lobby.match.id, 2)
+    await svc.start(lobby.match.id, 1)
+    cf.errors["h2"] = HandleNotFound()
+    with pytest.raises(HandleNotFound):
+        await svc.check(lobby.match.id, 2)
+    assert (await store.get_match(lobby.match.id)).status == "active"
 
 
 async def test_set_message_is_reflected(env):

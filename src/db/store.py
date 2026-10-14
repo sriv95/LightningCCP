@@ -382,14 +382,32 @@ class Store:
             return True
 
     async def start_match(
-        self, match_id: int, rating: int, problem_key: str, now: int, expires_at: int
+        self,
+        match_id: int,
+        rating: int,
+        problem_key: str,
+        now: int,
+        expires_at: int,
+        player_ids: Sequence[int],
     ) -> bool:
-        n = await self._write(
-            "UPDATE matches SET status = 'active', rating = ?, problem_key = ?, started_at = ?, "
-            "expires_at = ? WHERE id = ? AND status = 'lobby'",
-            (rating, problem_key, now, expires_at, match_id),
-        )
-        return n > 0
+        """Activate a lobby only if its players are still exactly `player_ids`, the set the
+        problem was chosen for."""
+        async with self._tx() as db:
+            cur = await db.execute("SELECT status FROM matches WHERE id = ?", (match_id,))
+            match = await cur.fetchone()
+            if match is None or match["status"] != "lobby":
+                return False
+            cur = await db.execute(
+                "SELECT user_id FROM match_players WHERE match_id = ?", (match_id,)
+            )
+            if {r["user_id"] for r in await cur.fetchall()} != set(player_ids):
+                return False
+            await db.execute(
+                "UPDATE matches SET status = 'active', rating = ?, problem_key = ?, "
+                "started_at = ?, expires_at = ? WHERE id = ?",
+                (rating, problem_key, now, expires_at, match_id),
+            )
+            return True
 
     async def mark_gave_up(self, match_id: int, user_id: int) -> bool:
         n = await self._write(
