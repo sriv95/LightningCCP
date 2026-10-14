@@ -567,3 +567,21 @@ async def test_rematch_copies_the_settings_for_a_player(env):
     )
     assert (m.penalty_minutes, m.exclude_tags, m.rated) == (5, "graphs", 0)
     assert mashup_components(done) is not None and mashup_components(new) is not None
+
+
+async def test_virtual_contest_replays_a_contests_rated_problems(env):
+    svc, store, cf, clock = env
+    svc._problems.problems += [
+        Problem(500, "B", "Second", 1400, ()),
+        Problem(500, "A", "First", 900, ()),
+        Problem(500, "C", "Unrated", None, ()),
+    ]
+    sub(cf, "h1", "500A", 100)  # solved long ago: still part of the contest
+    view = await lobby(svc, contest_id=500, tags="dp", count=9, min_rating=2000)
+    m = view.mashup
+    assert (m.contest_id, m.count, m.min_rating, m.max_rating, m.tags) == (500, 2, 900, 1400, "")
+    assert "virtual contest 500" in mashup_embed(view, {}).description
+    started_ = await svc.start(m.id, 1)
+    assert started_.problems == [("500A", 900), ("500B", 1400)]
+    with pytest.raises(BotError, match="no rated problems"):
+        await lobby(svc, host=2, contest_id=12345)

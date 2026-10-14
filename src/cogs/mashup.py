@@ -32,6 +32,10 @@ OPTIONS = {
     "tags": TAGS_HELP,
     "exclude_tags": EXCLUDE_HELP,
 }
+VIRTUAL = {
+    "contest_id": "Codeforces contest id to replay (it must have finished)",
+    "penalty": OPTIONS["penalty"],
+}
 PLAYERS = "Maximum number of players (default 20)"
 TEAMS = "Number of teams (default 2)"
 TEAM_SIZE = "Maximum players in each team (default: no cap, 20 players in all)"
@@ -264,6 +268,59 @@ class MashupCog(commands.Cog, name="Mashup"):
             exclude_tags=exclude_tags,
         )
 
+    @host_rated.command(
+        name="virtual", description="Open a rated lobby that replays a finished Codeforces contest"
+    )
+    @app_commands.describe(**VIRTUAL, players=PLAYERS)
+    async def rated_virtual(
+        self,
+        interaction: discord.Interaction,
+        contest_id: int,
+        penalty: app_commands.Range[int, 0, 120] = 0,
+        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] = MASHUP_MAX_PLAYERS,
+    ) -> None:
+        await self._virtual(interaction, contest_id, penalty, players, True)
+
+    @host_unrated.command(
+        name="virtual",
+        description="Open an unrated lobby that replays a finished Codeforces contest",
+    )
+    @app_commands.describe(**VIRTUAL, players=PLAYERS)
+    async def unrated_virtual(
+        self,
+        interaction: discord.Interaction,
+        contest_id: int,
+        penalty: app_commands.Range[int, 0, 120] = 0,
+        players: app_commands.Range[int, 1, MASHUP_MAX_PLAYERS] = MASHUP_MAX_PLAYERS,
+    ) -> None:
+        await self._virtual(interaction, contest_id, penalty, players, False)
+
+    async def _virtual(
+        self,
+        interaction: discord.Interaction,
+        contest_id: int,
+        penalty: int,
+        players: int,
+        rated: bool,
+    ) -> None:
+        contest = next((c for c in self.bot.services.contests.contests if c.id == contest_id), None)
+        if contest is None:
+            raise BotError("I do not know that contest id. See /contests recent.")
+        if contest.phase != "FINISHED":
+            raise BotError("That contest has not finished yet.")
+        await self._open(
+            interaction,
+            800,
+            3500,
+            1,
+            contest.duration // 3600,
+            contest.duration % 3600 // 60,
+            penalty,
+            max_players=players,
+            rated=rated,
+            contest_id=contest_id,
+        )
+
     @rated_contest.autocomplete("tags")
     @rated_contest.autocomplete("exclude_tags")
     @rated_team_contest.autocomplete("tags")
@@ -295,6 +352,7 @@ class MashupCog(commands.Cog, name="Mashup"):
         team_size: int = 0,
         tags: str | None = None,
         exclude_tags: str | None = None,
+        contest_id: int | None = None,
     ) -> None:
         await interaction.response.defer()
         view = await self.svc.create(
@@ -312,6 +370,7 @@ class MashupCog(commands.Cog, name="Mashup"):
             team_size=team_size,
             tags=tags,
             exclude_tags=exclude_tags,
+            contest_id=contest_id,
         )
         await self._post(interaction, view)
 

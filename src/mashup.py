@@ -4,11 +4,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from src.cf.models import Problem
 from src.db.store import MashupPlayer, MashupRow, Store
 from src.errors import BotError, MatchClosed, NotLinked
 from src.logic import (
     LOBBY_TTL_SECONDS,
     MASHUP_MAX_PLAYERS,
+    MASHUP_MAX_PROBLEMS,
     MashupRank,
     first_solve,
     mashup_standings,
@@ -121,6 +123,18 @@ class MashupService:
             raise MatchClosed("That contest no longer exists.")
         return mashup
 
+    def _contest_problems(self, contest_id: int) -> list[Problem]:
+        """The rated problems of a Codeforces contest in contest order."""
+        found = sorted(
+            (p for p in self._problems.require() if p.contest_id == contest_id and p.rating),
+            key=lambda p: p.index,
+        )
+        if not found:
+            raise BotError(f"I know no rated problems of contest {contest_id} yet.")
+        if len(found) > MASHUP_MAX_PROBLEMS:
+            raise BotError(f"That contest has more than {MASHUP_MAX_PROBLEMS} rated problems.")
+        return found
+
     async def create(
         self,
         *,
@@ -138,7 +152,14 @@ class MashupService:
         team_size: int = 0,
         tags: str | None = None,
         exclude_tags: str | None = None,
+        contest_id: int | None = None,
     ) -> MashupView:
+        if contest_id is not None:  # a virtual contest: the problems are the contest's own
+            problems = self._contest_problems(contest_id)
+            min_rating = min(p.rating for p in problems)
+            max_rating = max(p.rating for p in problems)
+            count = len(problems)
+            tags = exclude_tags = None
         if min_rating > max_rating:
             raise BotError("min_rating cannot be higher than max_rating.")
         if not 1 <= max_players <= MASHUP_MAX_PLAYERS:
@@ -165,6 +186,7 @@ class MashupService:
             team_size=team_size,
             tags=normalize_tags(tags),
             exclude_tags=normalize_tags(exclude_tags),
+            contest_id=contest_id,
         )
         return await self.view(mashup_id)
 
@@ -195,6 +217,7 @@ class MashupService:
             team_size=m.team_size,
             tags=m.tags,
             exclude_tags=m.exclude_tags,
+            contest_id=m.contest_id,
         )
 
     async def join(self, mashup_id: int, user_id: int, team: int | None = None) -> MashupView:
@@ -246,19 +269,21 @@ class MashupService:
         if mashup.status != "lobby":
             raise MatchClosed()
         players = await self._store.mashup_players(mashup_id)
-        problems = self._problems.require()
-        solved: set[str] = set()
-        for p in players:
-            solved |= solved_keys(await self._cf.user_status(p.handle))
-        picked = pick_mashup(
-            problems,
-            mashup.min_rating,
-            mashup.max_rating,
-            mashup.count,
-            frozenset(solved),
-            tags=parse_tags(mashup.tags),
-            exclude_tags=parse_tags(mashup.exclude_tags),
-        )
+        if mashup.contest_id is not None:
+            picked = self._contest_problems(mashup.contest_id)  # earlier solves do not matter
+        else:
+            solved: set[str] = set()
+            for p in players:
+                solved |= solved_keys(await self._cf.user_status(p.handle))
+            picked = pick_mashup(
+                self._problems.require(),
+                mashup.min_rating,
+                mashup.max_rating,
+                mashup.count,
+                frozenset(solved),
+                tags=parse_tags(mashup.tags),
+                exclude_tags=parse_tags(mashup.exclude_tags),
+            )
         if picked is None:
             raise BotError(
                 f"Not enough problems rated {mashup.min_rating}-{mashup.max_rating} "

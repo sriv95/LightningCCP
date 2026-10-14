@@ -361,6 +361,7 @@ def _mashup_setup(view: MashupView) -> str:
         f"{format_hm(m.duration_seconds)} long, {penalty}"
         + (f", {m.teams} teams" if m.teams else "")
         + (f" of up to {m.team_size}" if m.team_size else "")
+        + (f", virtual contest {m.contest_id}" if m.contest_id else "")
         + (f", tags {m.tags.replace(',', ', ')}" if m.tags else "")
         + (f", without {m.exclude_tags.replace(',', ', ')}" if m.exclude_tags else "")
         + ("" if m.rated else ", unrated")

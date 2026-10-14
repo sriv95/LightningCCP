@@ -238,6 +238,8 @@ MIGRATIONS = [
     ALTER TABLE mashups ADD COLUMN tags TEXT NOT NULL DEFAULT '';
     ALTER TABLE mashups ADD COLUMN exclude_tags TEXT NOT NULL DEFAULT '';
     """,
+    # A virtual contest replays a finished Codeforces contest (NULL for a random mashup).
+    "ALTER TABLE mashups ADD COLUMN contest_id INTEGER;",
 ]
 
 
@@ -323,6 +325,7 @@ class MashupRow:
     team_size: int = 0
     tags: str = ""
     exclude_tags: str = ""
+    contest_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -877,6 +880,7 @@ class Store:
         team_size: int = 0,
         tags: str = "",
         exclude_tags: str = "",
+        contest_id: int | None = None,
     ) -> int:
         try:
             async with self._tx() as db:
@@ -885,8 +889,8 @@ class Store:
                 cur = await db.execute(
                     "INSERT INTO mashups (guild_id, channel_id, host_id, min_rating, max_rating, "
                     "count, duration_seconds, penalty_minutes, status, created_at, teams, "
-                    "max_players, rated, team_size, tags, exclude_tags) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?, ?, ?, ?, ?)",
+                    "max_players, rated, team_size, tags, exclude_tags, contest_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby', ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         guild_id,
                         channel_id,
@@ -903,6 +907,7 @@ class Store:
                         team_size,
                         tags,
                         exclude_tags,
+                        contest_id,
                     ),
                 )
                 mashup_id = cur.lastrowid

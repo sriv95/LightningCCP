@@ -152,7 +152,7 @@ def test_rating_plot_renders_png():
 
 def test_mashup_group_commands_and_button_template():
     for group in (MashupCog.host_rated, MashupCog.host_unrated):
-        assert {c.name for c in group.commands} == {"contest", "team-contest"}
+        assert {c.name for c in group.commands} == {"contest", "team-contest", "virtual"}
         assert group.guild_only
     template = MashupButton.__discord_ui_compiled_template__
     for action in ("join", "start", "leave", "check", "rematch"):
