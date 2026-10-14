@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from src.cf.models import Problem, Submission
+from src.cogs.mashup import mashup_components
 from src.db.store import Store
 from src.errors import AlreadyInMatch, BotError, CacheNotReady, MatchClosed, MatchFull, NotLinked
 from src.logic import LOBBY_TTL_SECONDS, MASHUP_MAX_PLAYERS
@@ -544,3 +545,25 @@ async def test_tags_filter_the_problems_and_show_in_the_lobby(env):
     await svc.leave(view.mashup.id, 1)
     plain = await lobby(svc, exclude_tags="dp")
     assert (await svc.start(plain.mashup.id, 1)).mashup.status == "active"
+
+
+async def test_rematch_copies_the_settings_for_a_player(env):
+    svc, store, cf, clock = env
+    view = await started(svc, 2, tags="", exclude_tags="graphs", penalty_minutes=5, rated=False)
+    with pytest.raises(MatchClosed):
+        await svc.rematch(view.mashup.id, 2, 77)  # still running
+    done = await finish_contest(svc, cf, clock, view, {})
+    with pytest.raises(BotError, match="players"):
+        await svc.rematch(done.mashup.id, 9, 77)
+    new = await svc.rematch(done.mashup.id, 2, 77)
+    m, old = new.mashup, done.mashup
+    assert (m.status, m.host_id, m.channel_id) == ("lobby", 2, 77)
+    assert [p.user_id for p in new.players] == [2]
+    assert (m.min_rating, m.max_rating, m.count, m.duration_seconds) == (
+        old.min_rating,
+        old.max_rating,
+        old.count,
+        old.duration_seconds,
+    )
+    assert (m.penalty_minutes, m.exclude_tags, m.rated) == (5, "graphs", 0)
+    assert mashup_components(done) is not None and mashup_components(new) is not None

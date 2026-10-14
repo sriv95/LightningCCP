@@ -173,6 +173,30 @@ class MashupService:
         if team is None or not 1 <= team <= teams:
             raise BotError(f"Pick a team number from 1 to {teams}.")
 
+    async def rematch(self, mashup_id: int, user_id: int, channel_id: int) -> MashupView:
+        """New lobby with the same settings, hosted by whoever pressed Rematch."""
+        m = await self._mashup(mashup_id)
+        if m.status != "finished":
+            raise MatchClosed("Only a finished contest can be rematched.")
+        if user_id not in {p.user_id for p in await self._store.mashup_players(mashup_id)}:
+            raise BotError("Only the players of this contest can ask for a rematch.")
+        return await self.create(
+            guild_id=m.guild_id,
+            channel_id=channel_id,
+            host_id=user_id,
+            min_rating=m.min_rating,
+            max_rating=m.max_rating,
+            count=m.count,
+            duration_seconds=m.duration_seconds,
+            penalty_minutes=m.penalty_minutes,
+            teams=m.teams,
+            max_players=m.max_players,
+            rated=bool(m.rated),
+            team_size=m.team_size,
+            tags=m.tags,
+            exclude_tags=m.exclude_tags,
+        )
+
     async def join(self, mashup_id: int, user_id: int, team: int | None = None) -> MashupView:
         mashup = await self._mashup(mashup_id)
         if mashup.status != "lobby":

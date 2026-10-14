@@ -20,6 +20,7 @@ BUTTONS = {
     "start": ("Start", discord.ButtonStyle.primary),
     "leave": ("Leave", discord.ButtonStyle.secondary),
     "check": ("Check", discord.ButtonStyle.primary),
+    "rematch": ("Rematch", discord.ButtonStyle.primary),
 }
 OPTIONS = {
     "min_rating": "Easiest problem rating (default 800)",
@@ -34,12 +35,16 @@ OPTIONS = {
 PLAYERS = "Maximum number of players (default 20)"
 TEAMS = "Number of teams (default 2)"
 TEAM_SIZE = "Maximum players in each team (default: no cap, 20 players in all)"
-ACTIONS = {"lobby": ("join", "start", "leave"), "active": ("check",)}
+ACTIONS = {
+    "lobby": ("join", "start", "leave"),
+    "active": ("check",),
+    "finished": ("rematch",),
+}
 
 
 class MashupButton(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"mashup:(?P<action>join|start|leave|check):(?P<id>\d+)",
+    template=r"mashup:(?P<action>join|start|leave|check|rematch):(?P<id>\d+)",
 ):
     """Persistent button keyed by contest id, so contests keep working across restarts."""
 
@@ -308,6 +313,9 @@ class MashupCog(commands.Cog, name="Mashup"):
             tags=tags,
             exclude_tags=exclude_tags,
         )
+        await self._post(interaction, view)
+
+    async def _post(self, interaction: discord.Interaction, view: MashupView) -> None:
         message = await interaction.followup.send(
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view), wait=True
         )
@@ -316,6 +324,14 @@ class MashupCog(commands.Cog, name="Mashup"):
     async def on_button(
         self, interaction: discord.Interaction, action: str, mashup_id: int
     ) -> None:
+        if action == "rematch":
+            # A new lobby in a new message; the final standings stay as they are.
+            await interaction.response.defer()
+            await self._post(
+                interaction,
+                await self.svc.rematch(mashup_id, interaction.user.id, interaction.channel_id),
+            )
+            return
         if action == "join":
             mashup = await self.bot.services.db.get_mashup(mashup_id)
             if mashup is not None and mashup.status == "lobby" and mashup.teams:
