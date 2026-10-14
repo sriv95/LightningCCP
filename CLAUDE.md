@@ -15,6 +15,7 @@ Python is managed with `uv`. This is an application, not a package (`[tool.uv] p
 ```
 uv sync                                  # install deps
 uv run python -m src                     # run the bot (needs BOT_TOKEN in .env)
+docker compose up -d --build            # run in Docker (needs .env; DB in the bot-data volume)
 uv run pytest                            # all tests
 uv run pytest tests/test_logic.py::test_name -v   # one test
 uv run ruff check . && uv run ruff format --check .   # lint (both must pass)

@@ -9,6 +9,16 @@ Slash-command Discord bot for competitive programmers, modeled on [TLE](https://
 3. `uv sync`
 4. `uv run python -m src`
 
+### Docker
+
+```
+cp .env.example .env   # set BOT_TOKEN
+docker compose up -d --build
+docker compose logs -f
+```
+
+The SQLite database lives in the `bot-data` named volume, so it survives rebuilds. Update with `git pull && docker compose up -d --build`. `docker compose down` keeps the data; add `-v` to delete it.
+
 ## Commands
 
 | Command | What it does |

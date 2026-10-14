@@ -1,0 +1,15 @@
+.git
+.venv
+.env
+.env.*
+!.env.example
+docs
+.superpowers
+tests
+data
+*.db
+__pycache__
+.pytest_cache
+.ruff_cache
+Dockerfile
+docker-compose.yaml
