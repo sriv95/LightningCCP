@@ -11,7 +11,7 @@ import aiosqlite
 
 from src.cf.models import Contest, Problem
 from src.errors import AlreadyInMatch, HandleTaken, MatchClosed, MatchFull
-from src.logic import START_RATING
+from src.logic import DAILY_MULTIPLIER, START_RATING
 
 MIGRATIONS = [
     """
@@ -191,6 +191,21 @@ MIGRATIONS = [
         PRIMARY KEY (mashup_id, user_id, problem_key)
     );
     """,
+    # One daily problem per user per UTC day. A solo match solved first that day claims the day
+    # without a problem (problem_key stays NULL).
+    """
+    CREATE TABLE daily (
+        guild_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        day INTEGER NOT NULL,
+        problem_key TEXT,
+        rating INTEGER,
+        issued_at INTEGER,
+        solved_at INTEGER,
+        match_id INTEGER REFERENCES matches (id),
+        PRIMARY KEY (guild_id, user_id, day)
+    );
+    """,
 ]
 
 
@@ -238,6 +253,18 @@ class MatchPlayer:
     gave_up: bool
     delta: int | None
     active: bool
+
+
+@dataclass(frozen=True)
+class DailyRow:
+    guild_id: int
+    user_id: int
+    day: int
+    problem_key: str | None
+    rating: int | None
+    issued_at: int | None
+    solved_at: int | None
+    match_id: int | None
 
 
 @dataclass(frozen=True)
@@ -548,7 +575,11 @@ class Store:
                 [(t, match_id, uid, match_id) for uid, t in solves.items()],
             )
 
-    async def finish_match(self, match_id: int, now: int, deltas: Mapping[int, int]) -> bool:
+    async def finish_match(
+        self, match_id: int, now: int, deltas: Mapping[int, int], bonus_day: int | None = None
+    ) -> bool:
+        """bonus_day (solo only): the UTC day; a solve that is the user's first claim of that day
+        doubles the rating change."""
         async with self._tx() as db:
             cur = await db.execute(
                 "UPDATE matches SET status = 'finished', finished_at = ? "
@@ -557,11 +588,100 @@ class Store:
             )
             if cur.rowcount == 0:
                 return False
+            if bonus_day is not None:
+                ((uid, gain),) = deltas.items()
+                cur = await db.execute("SELECT guild_id FROM matches WHERE id = ?", (match_id,))
+                guild_id = (await cur.fetchone())["guild_id"]
+                if gain > 0 and await self._claim_daily(
+                    db, guild_id, uid, bonus_day, now, match_id
+                ):
+                    deltas = {uid: gain * DAILY_MULTIPLIER}
             await db.executemany(
                 "UPDATE match_players SET delta = ? WHERE match_id = ? AND user_id = ?",
                 [(d, match_id, uid) for uid, d in deltas.items()],
             )
             await db.execute("UPDATE match_players SET active = 0 WHERE match_id = ?", (match_id,))
+            return True
+
+    @staticmethod
+    async def _claim_daily(
+        db: aiosqlite.Connection, guild_id: int, user_id: int, day: int, now: int, match_id: int
+    ) -> bool:
+        cur = await db.execute(
+            "INSERT INTO daily (guild_id, user_id, day, solved_at, match_id) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT (guild_id, user_id, day) DO UPDATE SET "
+            "solved_at = excluded.solved_at, match_id = excluded.match_id "
+            "WHERE daily.solved_at IS NULL",
+            (guild_id, user_id, day, now, match_id),
+        )
+        return cur.rowcount > 0
+
+    # --- daily problem ---
+    async def get_daily(self, guild_id: int, user_id: int, day: int) -> DailyRow | None:
+        row = await self._one(
+            "SELECT * FROM daily WHERE guild_id = ? AND user_id = ? AND day = ?",
+            (guild_id, user_id, day),
+        )
+        return DailyRow(**dict(row)) if row else None
+
+    async def issue_daily(
+        self, guild_id: int, user_id: int, day: int, problem_key: str, rating: int, now: int
+    ) -> None:
+        await self._write(
+            "INSERT OR IGNORE INTO daily (guild_id, user_id, day, problem_key, rating, issued_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (guild_id, user_id, day, problem_key, rating, now),
+        )
+
+    async def record_daily_solve(
+        self,
+        *,
+        guild_id: int,
+        channel_id: int,
+        user_id: int,
+        handle: str,
+        day: int,
+        solved_at: int,
+        delta: int,
+        now: int,
+    ) -> bool:
+        """Mark the issued daily solved and book its rating change as a finished solo match.
+        False when it was already solved (by a concurrent request or a solo match)."""
+        async with self._tx() as db:
+            cur = await db.execute(
+                "SELECT problem_key, rating, issued_at FROM daily "
+                "WHERE guild_id = ? AND user_id = ? AND day = ? AND solved_at IS NULL",
+                (guild_id, user_id, day),
+            )
+            daily = await cur.fetchone()
+            if daily is None:
+                return False
+            cur = await db.execute(
+                "INSERT INTO matches (guild_id, channel_id, host_id, mode, max_players, rating, "
+                "problem_key, status, created_at, started_at, finished_at) "
+                "VALUES (?, ?, ?, 'solo', 1, ?, ?, 'finished', ?, ?, ?)",
+                (
+                    guild_id,
+                    channel_id,
+                    user_id,
+                    daily["rating"],
+                    daily["problem_key"],
+                    daily["issued_at"],
+                    daily["issued_at"],
+                    now,
+                ),
+            )
+            match_id = cur.lastrowid
+            await db.execute(
+                "INSERT INTO match_players (match_id, guild_id, user_id, handle, joined_at, "
+                "solved_at, delta, active) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+                (match_id, guild_id, user_id, handle, daily["issued_at"], solved_at, delta),
+            )
+            await db.execute(
+                "UPDATE daily SET solved_at = ?, match_id = ? "
+                "WHERE guild_id = ? AND user_id = ? AND day = ?",
+                (now, match_id, guild_id, user_id, day),
+            )
             return True
 
     async def rating(self, guild_id: int, user_id: int) -> int:

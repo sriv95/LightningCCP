@@ -9,6 +9,7 @@ from src.cache.contests import ContestCache
 from src.cache.problems import ProblemCache
 from src.cf.client import CodeforcesClient
 from src.config import Config
+from src.daily import DailyService
 from src.db.store import Store
 from src.errors import report_error
 from src.mashup import MashupService
@@ -51,6 +52,7 @@ class LightningBot(commands.Bot):
             contests=ContestCache(cf, store),
             matches=MatchService(store, cf, problems),
             mashups=MashupService(store, cf, problems),
+            daily=DailyService(store, cf, problems),
             session=session,
         )
         await self.services.problems.start()

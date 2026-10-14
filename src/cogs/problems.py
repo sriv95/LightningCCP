@@ -13,7 +13,7 @@ from src.logic import (
     tag_suggestions,
     unsolved_keys,
 )
-from src.ui.embeds import problem_embed, stalk_pages
+from src.ui.embeds import daily_embed, problem_embed, stalk_pages
 from src.ui.paginator import send_pages
 
 Rating = app_commands.Range[int, 800, 3500]
@@ -81,6 +81,18 @@ class ProblemsCog(commands.Cog, name="Problems"):
             app_commands.Choice(name=value, value=value)
             for value in tag_suggestions(current, self.s.problems.tags)
         ]
+
+    @app_commands.command(
+        name="daily",
+        description="Your daily problem: solve it for double rating (resets 00:00 UTC)",
+    )
+    @app_commands.guild_only()
+    async def daily(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer()
+        view = await self.s.daily.claim(
+            interaction.guild_id, interaction.channel_id, interaction.user.id
+        )
+        await interaction.followup.send(embed=daily_embed(view))
 
     @app_commands.command(name="stalk", description="List problems someone tried but never solved")
     @app_commands.guild_only()

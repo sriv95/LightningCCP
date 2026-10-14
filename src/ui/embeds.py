@@ -3,8 +3,10 @@ from collections.abc import Sequence
 import discord
 
 from src.cf.models import Contest, Problem, User
+from src.daily import DailyView
 from src.db.store import MatchPlayer, MatchRow
 from src.logic import (
+    DAY_SECONDS,
     LOBBY_TTL_SECONDS,
     MASHUP_MAX_PLAYERS,
     chunked,
@@ -26,6 +28,28 @@ def problem_embed(problem: Problem, *, footer: str | None = None) -> discord.Emb
     if footer:
         embed.set_footer(text=footer)
     return embed
+
+
+def daily_embed(view: DailyView) -> discord.Embed:
+    row = view.row
+    resets = f"<t:{(row.day + 1) * DAY_SECONDS}:R>"
+    if row.solved_at is None:
+        footer = "Solve it on Codeforces, then run /daily again to claim double rating."
+        if view.problem is None:  # dropped from the problem cache since it was issued
+            embed = discord.Embed(title=f"Daily: {row.problem_key}", colour=discord.Colour.blue())
+            embed.set_footer(text=footer)
+        else:
+            embed = problem_embed(view.problem, footer=footer)
+            embed.title = f"Daily: {embed.title}"
+        embed.description = f"New daily problem {resets}."
+        return embed
+    if view.delta is not None:
+        text = f"Daily solved: {view.delta:+d} rating (double). Next problem {resets}."
+    elif row.problem_key is None:
+        text = f"Today's daily is done: your first solo win counted double. Next {resets}."
+    else:
+        text = f"Today's daily is already done. Next problem {resets}."
+    return discord.Embed(title="Daily", description=text, colour=discord.Colour.green())
 
 
 def profile_embed(user: User, member: discord.abc.User) -> discord.Embed:

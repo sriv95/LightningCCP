@@ -22,6 +22,8 @@ SOLO_MIN = 1
 SOLO_EQUAL = 10
 SOLO_MAX = 33
 SOLO_RANGE = 400
+DAILY_MULTIPLIER = 2
+DAY_SECONDS = 86400
 
 
 def parse_tags(raw: str | None) -> frozenset[str]:
@@ -114,6 +116,15 @@ def round_rating(rating: int | None) -> int:
     if rating is None:
         return 800
     return max(800, min(3500, (rating + 50) // 100 * 100))
+
+
+def floor_rating(rating: int) -> int:
+    return max(800, min(3500, rating // 100 * 100))
+
+
+def utc_day(now: int) -> int:
+    """Days since the epoch; the daily problem resets when this changes (midnight UTC)."""
+    return now // DAY_SECONDS
 
 
 def earliest_solve(subs: Iterable[Submission], problem_key: str, since: int) -> int | None:

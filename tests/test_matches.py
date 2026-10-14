@@ -103,11 +103,36 @@ async def test_solo_solve_raises_rating(env):
     solve(cf, "h1", 1100)
     done = await svc.check(view.match.id, 1)
     assert done.match.status == "finished"
-    assert deltas(done) == {1: 10}  # an 800 problem at rating 800
-    assert done.ratings == {1: 810}
+    assert deltas(done) == {1: 20}  # 10 for an 800 problem at rating 800, doubled: first solo today
+    assert done.ratings == {1: 820}
+    assert "Daily bonus" in done.note
     with pytest.raises(MatchClosed):
         await svc.check(view.match.id, 1)
     assert await svc.current(GUILD, 1) is None
+
+
+async def test_only_first_solo_win_of_the_day_is_doubled(env):
+    svc, store, cf, clock = env
+    first = await make(svc, 1, "solo", 1)
+    solve(cf, "h1", 1100)
+    assert deltas(await svc.check(first.match.id, 1)) == {1: 20}
+    cf.subs.clear()  # PROBLEM is the only one: solve it again after the first match
+    second = await make(svc, 1, "solo", 1)
+    solve(cf, "h1", 1200)
+    again = await svc.check(second.match.id, 1)
+    assert deltas(again) == {1: 10} and again.note is None
+    clock.t += 86400  # the next UTC day doubles again
+    cf.subs.clear()
+    third = await make(svc, 1, "solo", 1)
+    solve(cf, "h1", clock.t + 100)
+    assert deltas(await svc.check(third.match.id, 1)) == {1: 18}  # rating 830: a 9 gain, doubled
+
+
+async def test_failed_solo_does_not_use_up_the_bonus(env):
+    svc, store, cf, clock = env
+    lost = await make(svc, 1, "solo", 1)
+    assert deltas(await svc.give_up(lost.match.id, 1)) == {1: 0}
+    assert await store.get_daily(GUILD, 1, 0) is None
 
 
 async def test_solo_give_up_scores_zero_and_frees_player(env):

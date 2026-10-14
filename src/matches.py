@@ -18,6 +18,7 @@ from src.logic import (
     rank_groups,
     solo_delta,
     solved_keys,
+    utc_day,
 )
 
 log = logging.getLogger(__name__)
@@ -316,5 +317,11 @@ class MatchService:
         else:
             deltas = match_deltas(rank_groups([(p.user_id, p.solved_at) for p in players]), ratings)
         # False means another request already finished this match; show its result.
-        await self._store.finish_match(match.id, self._now(), deltas)
+        now = self._now()
+        bonus_day = utc_day(now) if match.mode == "solo" else None
+        finished = await self._store.finish_match(match.id, now, deltas, bonus_day)
+        if finished and bonus_day is not None:
+            daily = await self._store.get_daily(match.guild_id, players[0].user_id, bonus_day)
+            if daily and daily.match_id == match.id:
+                note = note or "Daily bonus: your first solo win of the day counts double."
         return await self._view(match.id, note=note)
