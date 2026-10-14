@@ -484,7 +484,10 @@ def log_message(view: MashupView, entry: LogEntry, by_key: dict[str, Problem]) -
     if m.mode == "contest":
         letter = chr(ord("A") + [k for k, _ in view.problems].index(entry.key))
         text = f"{_stamp(view, entry.at)} {who} solved {letter}. {name} ({entry.rating})"
-        return text + (f", {entry.wrong} wrong before" if entry.wrong else "")
+        text += f", {entry.wrong} wrong before" if entry.wrong else ""
+        # view.log is oldest first, so the first entry of a problem is its first solve.
+        first = next(e for e in view.log if e.key == entry.key)
+        return text + (" - first solve!" if first == entry else "")
     text = f"{_stamp(view, entry.at)} {who} claimed {name} ({entry.rating})"
     cell = next(c for c in view.cells if c.key == entry.key)
     new = next((c for c in view.cells if c.cell == cell.cell and c.idx > cell.idx), None)
