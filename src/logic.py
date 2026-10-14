@@ -24,6 +24,7 @@ SOLO_MAX = 33
 SOLO_RANGE = 400
 DAILY_MULTIPLIER = 2
 DAY_SECONDS = 86400
+STREAK_GAP = 2  # days between claims that keep a streak alive: one missed day is forgiven
 
 
 def parse_tags(raw: str | None) -> frozenset[str]:
@@ -125,6 +126,19 @@ def floor_rating(rating: int) -> int:
 def utc_day(now: int) -> int:
     """Days since the epoch; the daily problem resets when this changes (midnight UTC)."""
     return now // DAY_SECONDS
+
+
+def daily_streak(days: Sequence[int], today: int) -> int:
+    """Claimed daily days (newest first) in a row, allowing one missed day between claims. Missing
+    two days in a row ends the streak, so it is already over once the newest claim is 3+ days old."""
+    if not days or today - days[0] > STREAK_GAP:
+        return 0
+    streak = 1
+    for newer, older in zip(days, days[1:], strict=False):
+        if newer - older > STREAK_GAP:
+            break
+        streak += 1
+    return streak
 
 
 def earliest_solve(subs: Iterable[Submission], problem_key: str, since: int) -> int | None:

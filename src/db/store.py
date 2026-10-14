@@ -624,6 +624,15 @@ class Store:
         )
         return DailyRow(**dict(row)) if row else None
 
+    async def daily_days(self, guild_id: int, user_id: int) -> list[int]:
+        """UTC days on which the user claimed the daily, newest first."""
+        rows = await self._all(
+            "SELECT day FROM daily WHERE guild_id = ? AND user_id = ? AND solved_at IS NOT NULL "
+            "ORDER BY day DESC",
+            (guild_id, user_id),
+        )
+        return [r["day"] for r in rows]
+
     async def issue_daily(
         self, guild_id: int, user_id: int, day: int, problem_key: str, rating: int, now: int
     ) -> None:

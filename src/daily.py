@@ -9,6 +9,7 @@ from src.db.store import DailyRow, Store
 from src.errors import BotError, NotLinked
 from src.logic import (
     DAILY_MULTIPLIER,
+    daily_streak,
     earliest_solve,
     filter_problems,
     floor_rating,
@@ -23,6 +24,7 @@ class DailyView:
     row: DailyRow
     problem: Problem | None
     delta: int | None = None  # rating change booked by this call, when it just solved the daily
+    streak: int = 0  # consecutive claimed days, one missed day forgiven
 
 
 class DailyService:
@@ -39,6 +41,10 @@ class DailyService:
     def _problem(self, row: DailyRow) -> Problem | None:
         return next((p for p in self._problems.problems if p.key == row.problem_key), None)
 
+    async def _view(self, row: DailyRow, delta: int | None = None) -> DailyView:
+        days = await self._store.daily_days(row.guild_id, row.user_id)
+        return DailyView(row, self._problem(row), delta, daily_streak(days, row.day))
+
     async def claim(self, guild_id: int, channel_id: int, user_id: int) -> DailyView:
         """Issue today's problem, or check whether the user solved it since it was issued."""
         linked = await self._store.get_handle(guild_id, user_id)
@@ -48,7 +54,7 @@ class DailyService:
         day = utc_day(now)
         row = await self._store.get_daily(guild_id, user_id, day)
         if row is not None and row.solved_at is not None:
-            return DailyView(row, self._problem(row))
+            return await self._view(row)
         if row is None:
             rating = floor_rating(await self._store.rating(guild_id, user_id))
             solved = solved_keys(await self._cf.user_status(linked.handle))
@@ -61,11 +67,11 @@ class DailyService:
                 guild_id, user_id, day, random.choice(pool).key, rating, now
             )
             row = await self._store.get_daily(guild_id, user_id, day)
-            return DailyView(row, self._problem(row))
+            return await self._view(row)
         subs = await self._cf.user_status(linked.handle, count=100)
         solved_at = earliest_solve(subs, row.problem_key, row.issued_at)
         if solved_at is None:
-            return DailyView(row, self._problem(row))
+            return await self._view(row)
         mine = await self._store.rating(guild_id, user_id)
         delta = DAILY_MULTIPLIER * solo_delta(mine, row.rating, True)
         booked = await self._store.record_daily_solve(
@@ -79,4 +85,4 @@ class DailyService:
             now=now,
         )
         row = await self._store.get_daily(guild_id, user_id, day)
-        return DailyView(row, self._problem(row), delta if booked else None)
+        return await self._view(row, delta if booked else None)

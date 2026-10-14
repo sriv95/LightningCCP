@@ -30,6 +30,10 @@ def problem_embed(problem: Problem, *, footer: str | None = None) -> discord.Emb
     return embed
 
 
+def _days(n: int) -> str:
+    return f"{n} day{'' if n == 1 else 's'}"
+
+
 def daily_embed(view: DailyView) -> discord.Embed:
     row = view.row
     resets = f"<t:{(row.day + 1) * DAY_SECONDS}:R>"
@@ -42,6 +46,8 @@ def daily_embed(view: DailyView) -> discord.Embed:
             embed = problem_embed(view.problem, footer=footer)
             embed.title = f"Daily: {embed.title}"
         embed.description = f"New daily problem {resets}."
+        if view.streak:
+            embed.add_field(name="Streak", value=_days(view.streak))
         return embed
     if view.delta is not None:
         text = f"Daily solved: {view.delta:+d} rating (double). Next problem {resets}."
@@ -49,7 +55,9 @@ def daily_embed(view: DailyView) -> discord.Embed:
         text = f"Today's daily is done: your first solo win counted double. Next {resets}."
     else:
         text = f"Today's daily is already done. Next problem {resets}."
-    return discord.Embed(title="Daily", description=text, colour=discord.Colour.green())
+    embed = discord.Embed(title="Daily", description=text, colour=discord.Colour.green())
+    embed.add_field(name="Streak", value=_days(view.streak))
+    return embed
 
 
 def profile_embed(user: User, member: discord.abc.User) -> discord.Embed:

@@ -4,8 +4,9 @@ from src.cf.models import Problem, Submission
 from src.daily import DailyService
 from src.db.store import Store
 from src.errors import BotError, NotLinked
-from src.logic import floor_rating, utc_day
+from src.logic import daily_streak, floor_rating, utc_day
 from src.matches import MatchService
+from src.ui.embeds import daily_embed
 
 GUILD = 1
 P800 = Problem(1700, "A", "Foo", 800, ())
@@ -122,3 +123,30 @@ async def test_errors(env):
     cf.subs.append(Submission(1, 1, "1700A", "OK"))  # the only 800 problem is already solved
     with pytest.raises(BotError):
         await svc.claim(GUILD, 5, 1)
+
+
+def test_daily_streak_forgives_one_missed_day():
+    assert daily_streak([], 10) == 0
+    assert daily_streak([10, 9, 8], 10) == 3
+    assert daily_streak([10, 8, 6], 10) == 3  # one missed day between claims keeps it alive
+    assert daily_streak([10, 7, 6], 10) == 1  # two missed days in a row end it
+    assert daily_streak([8], 10) == 1  # one day missed so far, still claimable
+    assert daily_streak([7], 10) == 0  # two days missed: over
+
+
+async def test_streak_counts_claimed_days_and_shows_in_embed(env):
+    svc, store, cf, clock, _ = env
+    assert (await svc.claim(GUILD, 5, 1)).streak == 0
+    cf.subs.append(Submission(1100, 1100, "1700A", "OK"))
+    assert (await svc.claim(GUILD, 5, 1)).streak == 1
+    assert (await store.daily_days(GUILD, 1)) == [0]
+    clock.t += 2 * 86400  # day 2, day 1 missed
+    cf.subs.clear()
+    assert (await svc.claim(GUILD, 5, 1)).streak == 1  # new problem issued, streak alive
+    cf.subs.append(Submission(clock.t, clock.t + 1, "1700A", "OK"))
+    view = await svc.claim(GUILD, 5, 1)
+    assert view.streak == 2
+    assert {f.name: f.value for f in daily_embed(view).fields} == {"Streak": "2 days"}
+    clock.t += 3 * 86400  # days 3, 4 missed
+    cf.subs.clear()
+    assert (await svc.claim(GUILD, 5, 1)).streak == 0
