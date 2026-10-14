@@ -211,41 +211,53 @@ class MatchCog(commands.Cog, name="Match"):
         ]
 
     @match.command(name="history", description="Show finished matches")
-    @app_commands.describe(member="Defaults to you; also shows your matches against them")
+    @app_commands.describe(
+        member="Defaults to you; also shows your matches against them",
+        kind="Show matches and contests (default), only matches, or only contests",
+    )
     async def history(
-        self, interaction: discord.Interaction, member: discord.Member | None = None
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member | None = None,
+        kind: Literal["all", "matches", "contests"] = "all",
     ) -> None:
         await interaction.response.defer(ephemeral=True)
         s = self.bot.services
         me, guild_id = interaction.user, interaction.guild_id
         by_key = {p.key: p for p in s.problems.problems}
-        mine = await s.db.finished_matches(guild_id, me.id)
+        none = {"all": "matches or mashups", "matches": "matches", "contests": "contests"}[kind]
+
+        async def matches(user_id: int):
+            return await s.db.finished_matches(guild_id, user_id) if kind != "contests" else []
+
+        async def contests(user_id: int):
+            return await s.mashups.history(guild_id, user_id) if kind != "matches" else []
+
+        mine = await matches(me.id)
         if member is None or member.id == me.id:
             pages = history_pages(
-                f"Match history - {me.display_name}",
-                mine,
-                me.id,
-                by_key,
-                await s.mashups.history(guild_id, me.id),
+                f"Match history - {me.display_name}", mine, me.id, by_key, await contests(me.id)
             )
             if not pages:
-                raise BotError("You have no finished matches or mashups yet.")
+                raise BotError(f"You have no finished {none} yet.")
         else:
-            theirs = await s.db.finished_matches(guild_id, member.id)
-            pages = head_to_head_pages(
-                f"You vs {member.display_name}", mine, me.id, member.id, by_key
-            ) + (
+            head = (
+                head_to_head_pages(f"You vs {member.display_name}", mine, me.id, member.id, by_key)
+                if kind != "contests"
+                else []
+            )
+            pages = head + (
                 history_pages(
                     f"Match history - {member.display_name}",
-                    theirs,
+                    await matches(member.id),
                     member.id,
                     by_key,
-                    await s.mashups.history(guild_id, member.id),
+                    await contests(member.id),
                 )
                 or [
                     discord.Embed(
                         title=f"Match history - {member.display_name}",
-                        description="No finished matches or mashups yet.",
+                        description=f"No finished {none} yet.",
                     )
                 ]
             )
