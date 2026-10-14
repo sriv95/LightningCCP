@@ -72,7 +72,7 @@ def test_problems_commands_registered():
 def test_contests_groups():
     assert {c.name for c in ContestsCog.contests.commands} == {"upcoming", "running", "recent"}
     assert "ranklist" in {c.name for c in ContestsCog.__cog_app_commands__}
-    assert {c.name for c in ContestsCog.remind.commands} == {"set", "show", "clear"}
+    assert {c.name for c in ContestsCog.channel.commands} == {"set", "show", "clear"}
 
 
 def test_match_group_commands():

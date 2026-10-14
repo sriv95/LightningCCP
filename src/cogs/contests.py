@@ -23,9 +23,9 @@ class ContestsCog(commands.Cog, name="Contests"):
     contests = app_commands.Group(
         name="contests", description="List Codeforces contests", guild_only=True
     )
-    remind = app_commands.Group(
-        name="remind",
-        description="Contest reminders",
+    channel = app_commands.Group(
+        name="channel",
+        description="Default bot channel for contest reminders and recaps",
         guild_only=True,
         default_permissions=discord.Permissions(manage_guild=True),
     )
@@ -99,9 +99,9 @@ class ContestsCog(commands.Cog, name="Contests"):
             raise BotError("No linked member took part in that contest.")
         await send_pages(interaction, pages)
 
-    @remind.command(name="set", description="Post contest reminders in a channel")
+    @channel.command(name="set", description="Set the default bot channel for reminders and recaps")
     @app_commands.describe(
-        channel="Where to post",
+        channel="Where to post reminders and recaps",
         role="Role to ping (optional)",
         before="Minutes before the start, comma-separated (default 10,60)",
     )
@@ -120,16 +120,16 @@ class ContestsCog(commands.Cog, name="Contests"):
             interaction.guild_id, channel.id, role.id if role else None, mins
         )
         await interaction.response.send_message(
-            f"Reminders go to {channel.mention} {', '.join(str(m) for m in mins)} minutes before start.",
+            f"Default channel is {channel.mention}: reminders {', '.join(str(m) for m in mins)} minutes before start, and contest recaps.",
             ephemeral=True,
         )
 
-    @remind.command(name="show", description="Show reminder settings")
+    @channel.command(name="show", description="Show the default bot channel settings")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def show_reminder(self, interaction: discord.Interaction) -> None:
         reminder = await self.s.db.get_reminder(interaction.guild_id)
         if reminder is None:
-            raise BotError("No reminders configured. Use /remind set.")
+            raise BotError("No default channel set. Use /channel set.")
         role = f" pinging <@&{reminder.role_id}>" if reminder.role_id else ""
         await interaction.response.send_message(
             f"<#{reminder.channel_id}>{role}, "
@@ -137,12 +137,14 @@ class ContestsCog(commands.Cog, name="Contests"):
             ephemeral=True,
         )
 
-    @remind.command(name="clear", description="Stop contest reminders")
+    @channel.command(name="clear", description="Clear the default bot channel")
     @app_commands.checks.has_permissions(manage_guild=True)
     async def clear_reminder(self, interaction: discord.Interaction) -> None:
         if not await self.s.db.clear_reminder(interaction.guild_id):
-            raise BotError("No reminders configured.")
-        await interaction.response.send_message("Reminders cleared.", ephemeral=True)
+            raise BotError("No default channel set.")
+        await interaction.response.send_message(
+            "Default channel cleared. No more reminders or recaps.", ephemeral=True
+        )
 
     @tasks.loop(seconds=60)
     async def remind_loop(self) -> None:
