@@ -338,6 +338,7 @@ class MashupService:
             now,
             now + mashup.duration_seconds,
             [p.user_id for p in players],
+            solved if mashup.mode == "replace" else (),
         ):
             if (await self._mashup(mashup_id)).status == "lobby":
                 raise BotError("The players changed while starting. Press Start again.")
@@ -401,12 +402,12 @@ class MashupService:
         return new
 
     async def _replace_claimed(self, mashup: MashupRow) -> None:
-        """Gives every claimed square of a replace bingo a new problem rated 100 higher. The new
-        problem counts from the claim; problems the players solved earlier are not excluded
-        (shortcut: that would cost a full history read per player)."""
+        """Gives the newest problem of every claimed cell of a replace bingo a successor rated 100
+        higher, which counts from the claim and lets another team take the cell over. It is a
+        problem nobody in the lobby had solved before the start (attempts are not checked)."""
         view = await self.view(mashup.id)
         claims = view.board.claims
-        used = frozenset(c.key for c in view.cells)
+        used = frozenset(c.key for c in view.cells) | await self._store.mashup_excluded(mashup.id)
         newest = {c.cell: c for c in view.cells}  # the cells come in the order they were added
         for cell, current in newest.items():
             if current.key not in claims:

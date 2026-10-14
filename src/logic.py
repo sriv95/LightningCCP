@@ -483,10 +483,11 @@ def bingo_lines(size: int) -> list[tuple[int, ...]]:
 
 @dataclass(frozen=True)
 class BingoBoard:
-    squares: list[tuple[str, int, int | None]]  # per cell: (problem key, rating, owning team)
+    squares: list[tuple[str, int, int | None]]  # per cell: (current problem key, rating, holder)
     claims: dict[str, tuple[int, int]]  # claimed problem key -> (team, solve time)
-    lines: dict[int, int]  # team -> full lines (classic only)
-    over: bool  # classic: a team holds a line (first-line win) or every square is claimed
+    holders: dict[int, tuple[int, int]]  # cell -> (team holding it, time of its latest claim)
+    lines: dict[int, int]  # team -> full lines held
+    over: bool  # a team holds a line (win "line") or, classic only, every square is claimed
 
 
 def bingo_board(
@@ -500,78 +501,65 @@ def bingo_board(
     they were put on the board (a replace bingo has several problems per cell, the last is the
     current one); `solves` is team -> problem key -> (solve time, wrong attempts).
 
-    The team with the earliest solve of a problem claims it. In a classic board the claimed
-    problem fills its cell and, with win == "line", the claims stop at the one that gives a team
-    its first full line (that team wins). A replace board has no lines: every claim scores."""
+    The team with the earliest solve of a problem claims it and holds its cell. A classic cell
+    has one problem, so a claim is final; a replace cell gets a new problem after each claim and
+    another team's claim of it takes the cell over. With win == "line" the claims stop at the one
+    that gives a team its first full line (that team wins)."""
     first: dict[str, tuple[int, int]] = {}  # problem key -> (solve time, team)
     for team, mine in solves.items():
         for key, (at, _) in mine.items():
             if key not in first or (at, team) < first[key]:
                 first[key] = (at, team)
     cell_of = {key: cell for key, _, cell in cells}
-    owner: dict[int, int] = {}
+    holders: dict[int, tuple[int, int]] = {}
     kept: list[tuple[str, int, int]] = []
     over = False
     lines = bingo_lines(size)
+
+    def holds(team: int) -> list[tuple[int, ...]]:
+        return [line for line in lines if all(holders.get(c, (0,))[0] == team for c in line)]
+
     for key, (at, team) in sorted(first.items(), key=lambda kv: kv[1]):
         if key not in cell_of:
             continue
         kept.append((key, team, at))
-        if mode != "classic":
-            continue
-        owner[cell_of[key]] = team
-        if win == "line" and any(
-            cell_of[key] in line and all(owner.get(c) == team for c in line) for line in lines
-        ):
+        holders[cell_of[key]] = (team, at)
+        if win == "line" and any(cell_of[key] in line for line in holds(team)):
             over = True
             break
     if mode == "classic":
         over = over or len(kept) == size * size
     claims = {key: (team, at) for key, team, at in kept}
-    held = {
-        team: n
-        for team in set(owner.values())
-        if (n := sum(all(owner.get(c) == team for c in line) for line in lines))
-    }
+    held = {team: n for team in {t for t, _ in holders.values()} if (n := len(holds(team)))}
     latest = {cell: (key, rating) for key, rating, cell in cells}
-    squares = [
-        (*latest[c], claims[latest[c][0]][0] if latest[c][0] in claims else None)
-        for c in range(size * size)
-    ]
-    return BingoBoard(squares, claims, held, over)
+    squares = [(*latest[c], holders[c][0] if c in holders else None) for c in range(size * size)]
+    return BingoBoard(squares, claims, holders, held, over)
 
 
 def bingo_standings(
     players: Iterable[tuple[int, str, int]], board: BingoBoard, started_at: int
 ) -> list[MashupRank]:
-    """Teams by full lines, then claimed squares, then who reached that score first; equal
+    """Teams by full lines held, then squares held, then who reached that score first; equal
     scores share a rank. players are (team, handle, joined_at)."""
     rows = []
     for team, handle, joined_at in players:
-        mine = {k: at for k, (t, at) in board.claims.items() if t == team}
+        mine = [at for t, at in board.holders.values() if t == team]
         held = board.lines.get(team, 0)
         rows.append(
-            (
-                (-held, -len(mine), max(mine.values(), default=0), joined_at),
-                team,
-                handle,
-                mine,
-                held,
-            )
+            ((-held, -len(mine), max(mine, default=0), joined_at), team, handle, mine, held)
         )
     rows.sort(key=lambda r: r[0])
     ranked: list[MashupRank] = []
     for i, (score, team, handle, mine, held) in enumerate(rows):
         same = ranked and rows[i - 1][0][:3] == score[:3]
-        times = {k: max(0, at - started_at) for k, at in mine.items()}
         ranked.append(
             MashupRank(
                 ranked[-1].rank if same else i + 1,
                 team,
                 handle,
                 len(mine),
-                max(times.values(), default=0),
-                times,
+                max(0, score[2] - started_at) if mine else 0,
+                {},
                 {},
                 held,
             )

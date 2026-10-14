@@ -58,13 +58,27 @@ def test_continuous_board_ends_only_when_full_and_counts_lines():
     assert bingo_board(3, "classic", "continuous", cells(9), solves).over
 
 
-def test_replace_board_scores_every_claim_and_shows_the_newest_problem():
+def test_replace_board_lets_another_team_take_a_square_over():
     rows = cells(9) + [("9A", 900, 0)]  # cell 0 was replaced by 9A
-    solves = {1: {"0A": (10, 0), "9A": (50, 1)}, 2: {"1A": (20, 0)}}
+    solves = {1: {"0A": (10, 0), "1A": (12, 0)}, 2: {"9A": (50, 1), "0A": (60, 0)}}
+    board = bingo_board(3, "replace", "line", rows, solves)
+    assert not board.over  # a replace board is never "full"
+    assert board.claims == {"0A": (1, 10), "1A": (1, 12), "9A": (2, 50)}  # 0A: only the first
+    assert board.holders == {0: (2, 50), 1: (1, 12)}
+    assert board.squares[0] == ("9A", 900, 2) and board.squares[1] == ("1A", 900, 1)
+    assert board.squares[2] == ("2A", 1000, None)
+
+
+def test_replace_line_must_be_held_when_the_last_square_is_claimed():
+    rows = cells(9) + [("9A", 900, 0)]
+    solves = {
+        1: {"0A": (10, 0), "1A": (11, 0), "2A": (30, 0)},
+        2: {"9A": (20, 0)},  # steals cell 0 before team 1 completes the row
+    }
     board = bingo_board(3, "replace", "line", rows, solves)
     assert not board.over and board.lines == {}
-    assert board.claims == {"0A": (1, 10), "9A": (1, 50), "1A": (2, 20)}
-    assert board.squares[0] == ("9A", 900, 1) and board.squares[1] == ("1A", 900, 2)
+    solves[1]["9A"] = (15, 0)  # team 1 takes it first instead
+    assert bingo_board(3, "replace", "line", rows, solves).over
 
 
 def test_bingo_standings_rank_by_lines_then_squares_then_time():
@@ -77,7 +91,7 @@ def test_bingo_standings_rank_by_lines_then_squares_then_time():
         (3, 3, 0),
         (4, 3, 0),
     ]
-    assert ranks[0].total_seconds == 15 and ranks[0].times == {"3A": 5, "4A": 15}
+    assert ranks[0].total_seconds == 15
 
 
 def test_pick_replacement_goes_100_up_then_higher_then_same_at_the_top():
@@ -210,48 +224,63 @@ async def test_a_full_classic_board_ends_the_bingo(env):
     assert (await svc.view(view.mashup.id)).mashup.status == "finished"
 
 
-async def test_replace_gives_a_solved_square_a_problem_100_higher(env):
+async def test_replace_gives_a_claimed_square_a_problem_100_higher_to_steal(env):
     svc, store, cf, clock = env
     view = await bingo(svc, 2, mode="replace")
-    first = next(c for c in view.cells if c.cell == 0)
+    first = next(c for c in view.cells if c.rating == 800)  # shuffled; not the top rating
     sub(cf, "h1", first.key, 1010)
     clock.t = 1020
     after = await svc.check(view.mashup.id, 1)
-    newest = [c for c in after.cells if c.cell == 0][-1]
+    newest = [c for c in after.cells if c.cell == first.cell][-1]
     assert newest.idx > first.idx and newest.key != first.key
     assert newest.rating == first.rating + 100 and newest.since == 1010
-    assert after.board.squares[0][:2] == (newest.key, newest.rating)
-    assert after.board.squares[0][2] is None  # open again
+    assert after.board.squares[first.cell] == (newest.key, newest.rating, 1)  # still held by team 1
     # Checking again does not stack a second replacement on the same cell.
     again = await svc.check(view.mashup.id, 1)
-    assert len([c for c in again.cells if c.cell == 0]) == 2
-    # Only a solve after the claim counts for the new problem; a later one claims it.
+    assert len([c for c in again.cells if c.cell == first.cell]) == 2
+    # A solve before the claim does not count for the new problem; a later one takes the square.
     sub(cf, "h2", newest.key, 1005)
-    sub(cf, "h2", again.cells[-1].key, 1500, verdict="WRONG_ANSWER")
     clock.t = 1100
-    assert (await svc.check(view.mashup.id, 2)).board.claims.keys() == {first.key}
+    assert (await svc.check(view.mashup.id, 2)).board.squares[first.cell][2] == 1
     sub(cf, "h2", newest.key, 1060)
     third = await svc.check(view.mashup.id, 2)
-    assert third.board.claims[newest.key] == (2, 1060)
-    assert len([c for c in third.cells if c.cell == 0]) == 3
+    assert third.board.squares[first.cell][2] == 2
+    assert len([c for c in third.cells if c.cell == first.cell]) == 3
     ranks = third.standings
-    assert [(r.handle, r.solved, r.lines) for r in ranks] == [("h1", 1, 0), ("h2", 1, 0)]
-    assert ranks[0].rank == 1 and ranks[1].rank == 2  # equal squares: h1 got there first
+    assert [(r.handle, r.solved) for r in ranks] == [("h2", 1), ("h1", 0)]
 
 
-async def test_replace_runs_until_time_is_up_and_ranks_by_squares(env):
+async def test_replace_never_picks_a_problem_someone_in_the_lobby_solved(env):
+    svc, store, cf, clock = env
+    solved_1100 = [p for p in BINGO_PROBLEMS if p.rating == 1100]
+    for p in solved_1100:  # h1 solved every problem rated 1100
+        sub(cf, "h1", p.key, 10)
+    view = await bingo(svc, 2, mode="replace", min_rating=800, max_rating=1000)
+    assert await store.mashup_excluded(view.mashup.id) >= {p.key for p in solved_1100}
+    assert {c.rating for c in view.cells} <= {800, 900, 1000}
+    top = next(c for c in view.cells if c.rating == 1000)
+    sub(cf, "h2", top.key, 1010)
+    clock.t = 1020
+    after = await svc.check(view.mashup.id, 2)
+    newest = [c for c in after.cells if c.cell == top.cell][-1]
+    assert newest.rating == 1200  # 1100 is all solved, so the next rating up
+
+
+async def test_replace_ends_at_the_first_line_and_continuous_runs_on(env):
     svc, store, cf, clock = env
     view = await bingo(svc, 2, mode="replace")
-    for c in view.cells[:2]:
-        sub(cf, "h2", c.key, 1010)
-    clock.t = 1100
-    await svc.tick()
-    assert (await svc.view(view.mashup.id)).mashup.status == "active"
-    clock.t = view.mashup.ends_at
+    cells_by = {c.cell: c.key for c in view.cells}
+    for i, at in zip((0, 1, 2), (1010, 1020, 1030), strict=True):
+        sub(cf, "h1", cells_by[i], at)
+    clock.t = 1040
+    await svc.check(view.mashup.id, 1)  # stores the solves and adds the replacements
     await svc.tick()
     done = await svc.view(view.mashup.id)
     assert done.mashup.status == "finished"
-    assert [(r.handle, r.solved) for r in done.standings] == [("h2", 2), ("h1", 0)]
+    assert [(r.handle, r.rank, r.solved, r.lines) for r in done.standings] == [
+        ("h1", 1, 3, 1),
+        ("h2", 2, 0, 0),
+    ]
 
 
 async def test_bingo_embeds_and_rematch(env):

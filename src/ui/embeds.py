@@ -415,18 +415,14 @@ def _mashup_change(view: MashupView, rank) -> int | None:
 def _mashup_setup(view: MashupView) -> str:
     m = view.mashup
     penalty = f"{m.penalty_minutes} min per wrong attempt" if m.penalty_minutes else "no penalty"
-    if m.mode == "classic":
-        head = f"{m.size}x{m.size} classic bingo, " + (
+    if m.mode != "contest":
+        head = f"{m.size}x{m.size} {m.mode} bingo, " + (
             "the first full line wins" if m.win == "line" else "most lines at the end wins"
         )
+        if m.mode == "replace":
+            head += f", a claimed square gets a problem {BINGO_REPLACE_STEP} higher to take it over"
         head += (
             f", problems rated {m.min_rating}-{m.max_rating}, {format_hm(m.duration_seconds)} long"
-        )
-    elif m.mode == "replace":
-        head = (
-            f"{m.size}x{m.size} replace bingo, a solved square gets a problem rated "
-            f"{BINGO_REPLACE_STEP} higher, problems start at {m.min_rating}-{m.max_rating}, "
-            f"{format_hm(m.duration_seconds)} long"
         )
     else:
         head = (
@@ -445,12 +441,18 @@ def _mashup_setup(view: MashupView) -> str:
 
 
 def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
-    """The board (open squares show their problem, claimed ones [team]), the open problems by
-    row and the standings."""
+    """The board (a classic claimed square shows [team] instead of its problem; a replace one
+    shows its problem and the holder), the open problems by row and the standings."""
     m = view.mashup
     board = view.board
     finished = m.status == "finished"
-    shown = [f"[{team}]" if team is not None else key for key, _, team in board.squares]
+    replace = m.mode == "replace"
+    shown = [
+        key + (f"[{team}]" if team is not None else "")
+        if replace
+        else (f"[{team}]" if team is not None else key)
+        for key, _, team in board.squares
+    ]
     width = max(len(text) for text in shown)
     grid = "\n".join(
         "  ".join(text.ljust(width) for text in shown[r * m.size : (r + 1) * m.size]).rstrip()
@@ -464,7 +466,7 @@ def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
         if m.team_size != 1:
             members = ", ".join(f"<@{p.user_id}>" for p in view.players if p.team == r.user_id)
             who = f"{r.handle} ({members})"
-        score = f"{r.solved} squares" + (f", {r.lines} lines" if m.mode == "classic" else "")
+        score = f"{r.solved} squares, {r.lines} lines"
         lines.append(f"{r.rank}. [{r.user_id}] {who} - {score}")
         if m.status == "active" and m.team_size == 1:
             if not next(p for p in view.players if p.team == r.user_id).active:
@@ -483,7 +485,7 @@ def _bingo_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
         for r in range(m.size):  # open problems by row, linked (a field holds 1024 characters)
             row = []
             for key, rating, team in board.squares[r * m.size : (r + 1) * m.size]:
-                if team is None:
+                if team is None or replace:
                     problem = by_key.get(key)
                     row.append(f"[{key}]({problem.url}) {rating}" if problem else f"{key} {rating}")
             if row:

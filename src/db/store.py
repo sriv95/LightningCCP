@@ -1,7 +1,7 @@
 import asyncio
 import json
 import sqlite3
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -280,6 +280,15 @@ MIGRATIONS = [
     ALTER TABLE mashups ADD COLUMN win TEXT NOT NULL DEFAULT 'line';
     ALTER TABLE mashup_problems ADD COLUMN cell INTEGER;
     ALTER TABLE mashup_problems ADD COLUMN since INTEGER;
+    """,
+    # A replace bingo never replaces a square with a problem someone in the lobby solved: the
+    # keys solved before the start.
+    """
+    CREATE TABLE mashup_excluded (
+        mashup_id INTEGER NOT NULL REFERENCES mashups (id),
+        problem_key TEXT NOT NULL,
+        PRIMARY KEY (mashup_id, problem_key)
+    );
     """,
 ]
 
@@ -1160,8 +1169,10 @@ class Store:
         started_at: int,
         ends_at: int,
         player_ids: Sequence[int],
+        excluded: Iterable[str] = (),
     ) -> bool:
-        """Starts the contest only if it is still a lobby with exactly these players."""
+        """Starts the contest only if it is still a lobby with exactly these players. `excluded`
+        are problem keys later replacements must avoid."""
         async with self._tx() as db:
             cur = await db.execute("SELECT status FROM mashups WHERE id = ?", (mashup_id,))
             row = await cur.fetchone()
@@ -1181,7 +1192,17 @@ class Store:
                 "VALUES (?, ?, ?, ?, ?)",
                 [(mashup_id, i, key, rating, i) for i, (key, rating) in enumerate(problems)],
             )
+            await db.executemany(
+                "INSERT INTO mashup_excluded (mashup_id, problem_key) VALUES (?, ?)",
+                [(mashup_id, key) for key in set(excluded)],
+            )
             return True
+
+    async def mashup_excluded(self, mashup_id: int) -> frozenset[str]:
+        rows = await self._all(
+            "SELECT problem_key FROM mashup_excluded WHERE mashup_id = ?", (mashup_id,)
+        )
+        return frozenset(r[0] for r in rows)
 
     async def record_mashup_solves(
         self, mashup_id: int, user_id: int, solves: Mapping[str, tuple[int, int]]

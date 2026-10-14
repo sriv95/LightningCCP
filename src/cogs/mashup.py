@@ -57,8 +57,8 @@ VIRTUAL = {
 }
 BINGO = {
     "size": f"Squares on each side of the board, {BINGO_MIN_SIZE}-{BINGO_MAX_SIZE} (default 5)",
-    "mode": "classic: claimed squares stay; replace: a solved square gets a problem rated 100 higher",
-    "win": "Classic only. line (default): the first full line wins; continuous: play to the end",
+    "mode": "classic: a claimed square stays; replace: a claimed square gets a +100 problem to steal",
+    "win": "line (default): the first full line wins; continuous: play to the end, rank by lines",
     "min_rating": OPTIONS["min_rating"],
     "max_rating": OPTIONS["max_rating"],
     "hour": OPTIONS["hour"],
