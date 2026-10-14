@@ -6,7 +6,7 @@ import pytest
 
 from src.cf.models import Contest, Problem
 from src.db.store import MIGRATIONS, Store
-from src.errors import HandleTaken
+from src.errors import AlreadyInMatch, HandleTaken, MatchClosed, MatchFull
 
 
 @pytest.fixture
@@ -182,3 +182,182 @@ async def test_failed_replace_does_not_discard_concurrent_write(store, monkeypat
     assert results[1] is None
     assert (await store.get_handle(1, 1)).handle == "a"
     assert await store.load_problems() == [seed]
+
+
+async def make_match(store, host=1, mode="duel", max_players=2, invited=None, guild=1, now=100):
+    await store.link_handle(guild, host, f"h{host}", 1000)
+    return await store.create_match(
+        guild_id=guild,
+        channel_id=5,
+        host_id=host,
+        host_handle=f"h{host}",
+        mode=mode,
+        max_players=max_players,
+        invited_id=invited,
+        rating_arg=None,
+        now=now,
+    )
+
+
+async def test_create_match_adds_host_player(store):
+    mid = await make_match(store)
+    match = await store.get_match(mid)
+    assert (match.status, match.mode, match.host_id, match.max_players) == ("lobby", "duel", 1, 2)
+    players = await store.get_players(mid)
+    assert [(p.user_id, p.handle, p.active, p.gave_up) for p in players] == [(1, "h1", True, False)]
+    assert await store.active_match_for(1, 1) == mid
+    assert await store.get_match(999) is None
+
+
+async def test_one_active_match_per_user(store):
+    # Review Focus 5
+    await make_match(store, host=1)
+    with pytest.raises(AlreadyInMatch):
+        await make_match(store, host=1)
+    other = await make_match(store, host=2)
+    with pytest.raises(AlreadyInMatch):
+        await store.add_player(other, 1, 1, "h1", 101)
+    assert await store.active_match_for(1, 3) is None
+    assert await store.active_match_for(2, 1) is None  # guild scoped
+
+
+async def test_add_player_rules(store):
+    mid = await make_match(store, host=1, mode="custom", max_players=3)
+    await store.add_player(mid, 1, 2, "h2", 101)
+    with pytest.raises(AlreadyInMatch):
+        await store.add_player(mid, 1, 2, "h2", 102)
+    await store.add_player(mid, 1, 3, "h3", 103)
+    with pytest.raises(MatchFull):
+        await store.add_player(mid, 1, 4, "h4", 104)
+    assert [p.user_id for p in await store.get_players(mid)] == [1, 2, 3]
+    assert await store.cancel_match(mid, 110) is True
+    with pytest.raises(MatchClosed):
+        await store.add_player(mid, 1, 4, "h4", 111)
+
+
+async def test_remove_player_only_in_lobby(store):
+    mid = await make_match(store, mode="custom", max_players=3)
+    await store.add_player(mid, 1, 2, "h2", 101)
+    assert await store.remove_player(mid, 2) is True
+    assert await store.remove_player(mid, 2) is False
+    assert await store.active_match_for(1, 2) is None
+    await store.add_player(mid, 1, 2, "h2", 102)
+    assert await store.start_match(mid, 1000, "1700A", 200, 7400) is True
+    assert await store.remove_player(mid, 2) is False  # started: cannot leave
+
+
+async def test_cancel_match_frees_everyone_once(store):
+    mid = await make_match(store)
+    await store.add_player(mid, 1, 2, "h2", 101)
+    assert await store.cancel_match(mid, 150) is True
+    assert await store.cancel_match(mid, 151) is False
+    assert (await store.get_match(mid)).status == "cancelled"
+    assert await store.active_match_for(1, 1) is None
+    assert await store.active_match_for(1, 2) is None
+
+
+async def test_start_after_cancel_is_rejected(store):
+    # Review Focus 2
+    mid = await make_match(store)
+    await store.cancel_match(mid, 150)
+    assert await store.start_match(mid, 1000, "1700A", 200, 7400) is False
+    assert (await store.get_match(mid)).status == "cancelled"
+
+
+async def test_start_match_sets_fields_once(store):
+    mid = await make_match(store)
+    assert await store.start_match(mid, 1000, "1700A", 200, 7400) is True
+    assert await store.start_match(mid, 1100, "1700B", 300, 7500) is False
+    m = await store.get_match(mid)
+    assert (m.status, m.rating, m.problem_key, m.started_at, m.expires_at) == (
+        "active",
+        1000,
+        "1700A",
+        200,
+        7400,
+    )
+
+
+async def test_give_up_frees_slot_once_and_only_when_active(store):
+    mid = await make_match(store)
+    await store.add_player(mid, 1, 2, "h2", 101)
+    assert await store.mark_gave_up(mid, 2) is False  # lobby
+    await store.start_match(mid, 1000, "1700A", 200, 7400)
+    assert await store.mark_gave_up(mid, 2) is True
+    assert await store.mark_gave_up(mid, 2) is False
+    p2 = [p for p in await store.get_players(mid) if p.user_id == 2][0]
+    assert p2.gave_up is True and p2.active is False
+    assert await store.active_match_for(1, 2) is None
+    assert await store.active_match_for(1, 1) == mid
+
+
+async def test_record_solves_sets_time_once(store):
+    mid = await make_match(store)
+    await store.add_player(mid, 1, 2, "h2", 101)
+    await store.record_solves(mid, {1: 300})  # lobby: ignored
+    await store.start_match(mid, 1000, "1700A", 200, 7400)
+    await store.record_solves(mid, {1: 300, 2: 400})
+    await store.record_solves(mid, {1: 999})
+    assert {p.user_id: p.solved_at for p in await store.get_players(mid)} == {1: 300, 2: 400}
+    assert await store.mark_gave_up(mid, 1) is False  # solved players cannot give up
+
+
+async def test_finish_match_is_once(store):
+    # Review Focus 1
+    mid = await make_match(store)
+    await store.add_player(mid, 1, 2, "h2", 101)
+    await store.start_match(mid, 1000, "1700A", 200, 7400)
+    assert await store.finish_match(mid, 500, {1: 5, 2: -5}) is True
+    assert await store.finish_match(mid, 501, {1: 50, 2: -50}) is False
+    assert {p.user_id: p.delta for p in await store.get_players(mid)} == {1: 5, 2: -5}
+    assert (await store.get_match(mid)).status == "finished"
+    assert await store.points_total(1, 1) == 5
+    assert await store.points_total(1, 2) == -5
+    assert await store.active_match_for(1, 1) is None
+
+
+async def test_points_total_sums_across_matches_and_guilds(store):
+    for _ in range(2):
+        mid = await make_match(store, mode="solo", max_players=1)
+        await store.start_match(mid, 1000, "1700A", 200, 7400)
+        await store.finish_match(mid, 500, {1: 5})
+    other = await make_match(store, guild=2, mode="solo", max_players=1)
+    await store.start_match(other, 1000, "1700A", 200, 7400)
+    await store.finish_match(other, 500, {1: 7})
+    assert await store.points_total(1, 1) == 10
+    assert await store.points_total(2, 1) == 7
+    assert await store.points_total(1, 99) == 0
+
+
+async def test_matches_due(store):
+    lobby = await make_match(store, host=1, now=100)
+    active = await make_match(store, host=2, now=100)
+    await store.start_match(active, 1000, "1700A", 200, 7400)
+    assert await store.matches_due(lobby_before=99, now=7399) == []
+    assert [m.id for m in await store.matches_due(lobby_before=100, now=7399)] == [lobby]
+    due = await store.matches_due(lobby_before=100, now=7400)
+    assert sorted(m.id for m in due) == sorted([lobby, active])
+
+
+async def test_set_message(store):
+    mid = await make_match(store)
+    await store.set_message(mid, 77, 88)
+    m = await store.get_match(mid)
+    assert (m.channel_id, m.message_id) == (77, 88)
+
+
+async def test_match_survives_reconnect(tmp_path):
+    # Review Focus 6
+    path = tmp_path / "t.db"
+    s = Store(path)
+    await s.connect()
+    mid = await make_match(s)
+    await s.add_player(mid, 1, 2, "h2", 101)
+    await s.start_match(mid, 1000, "1700A", 200, 7400)
+    await s.close()
+    s2 = Store(path)
+    await s2.connect()
+    assert (await s2.get_match(mid)).status == "active"
+    assert len(await s2.get_players(mid)) == 2
+    assert await s2.active_match_for(1, 2) == mid
+    await s2.close()

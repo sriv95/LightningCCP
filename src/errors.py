@@ -38,6 +38,23 @@ class CacheNotReady(BotError):
         super().__init__("Codeforces data is still loading. Try again in a minute.")
 
 
+class AlreadyInMatch(BotError):
+    def __init__(self):
+        super().__init__(
+            "You are already in a match. Finish it, give up, or leave the lobby first."
+        )
+
+
+class MatchClosed(BotError):
+    def __init__(self, message: str = "This match is no longer open."):
+        super().__init__(message)
+
+
+class MatchFull(BotError):
+    def __init__(self):
+        super().__init__("This match is full.")
+
+
 async def report_error(interaction: discord.Interaction, error: Exception) -> None:
     """Send a user-facing ephemeral message for any command or component error."""
     original = getattr(error, "original", error)

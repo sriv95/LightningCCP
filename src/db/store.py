@@ -1,7 +1,7 @@
 import asyncio
 import json
 import sqlite3
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,7 +10,7 @@ from typing import Any
 import aiosqlite
 
 from src.cf.models import Contest, Problem
-from src.errors import HandleTaken
+from src.errors import AlreadyInMatch, HandleTaken, MatchClosed, MatchFull
 
 MIGRATIONS = [
     """
@@ -119,6 +119,50 @@ class Pending:
     handle: str
     problem_key: str
     issued_at: int
+
+
+@dataclass(frozen=True)
+class MatchRow:
+    id: int
+    guild_id: int
+    channel_id: int
+    message_id: int | None
+    host_id: int
+    mode: str
+    max_players: int
+    invited_id: int | None
+    rating_arg: int | None
+    rating: int | None
+    problem_key: str | None
+    status: str
+    created_at: int
+    started_at: int | None
+    expires_at: int | None
+    finished_at: int | None
+
+
+@dataclass(frozen=True)
+class MatchPlayer:
+    match_id: int
+    guild_id: int
+    user_id: int
+    handle: str
+    joined_at: int
+    solved_at: int | None
+    gave_up: bool
+    delta: int | None
+    active: bool
+
+
+def _match(row: aiosqlite.Row) -> MatchRow:
+    return MatchRow(**dict(row))
+
+
+def _player(row: aiosqlite.Row) -> MatchPlayer:
+    data = dict(row)
+    data["gave_up"] = bool(data["gave_up"])
+    data["active"] = bool(data["active"])
+    return MatchPlayer(**data)
 
 
 @dataclass(frozen=True)
@@ -235,6 +279,167 @@ class Store:
         await self._write(
             "DELETE FROM pending_link WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
         )
+
+    # --- matches ---
+    async def create_match(
+        self,
+        *,
+        guild_id: int,
+        channel_id: int,
+        host_id: int,
+        host_handle: str,
+        mode: str,
+        max_players: int,
+        invited_id: int | None,
+        rating_arg: int | None,
+        now: int,
+    ) -> int:
+        try:
+            async with self._tx() as db:
+                cur = await db.execute(
+                    "INSERT INTO matches (guild_id, channel_id, host_id, mode, max_players, "
+                    "invited_id, rating_arg, status, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 'lobby', ?)",
+                    (guild_id, channel_id, host_id, mode, max_players, invited_id, rating_arg, now),
+                )
+                match_id = cur.lastrowid
+                await db.execute(
+                    "INSERT INTO match_players (match_id, guild_id, user_id, handle, joined_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (match_id, guild_id, host_id, host_handle, now),
+                )
+                return match_id
+        except sqlite3.IntegrityError as exc:
+            raise AlreadyInMatch() from exc
+
+    async def get_match(self, match_id: int) -> MatchRow | None:
+        row = await self._one("SELECT * FROM matches WHERE id = ?", (match_id,))
+        return _match(row) if row else None
+
+    async def get_players(self, match_id: int) -> list[MatchPlayer]:
+        rows = await self._all(
+            "SELECT * FROM match_players WHERE match_id = ? ORDER BY joined_at, rowid", (match_id,)
+        )
+        return [_player(r) for r in rows]
+
+    async def active_match_for(self, guild_id: int, user_id: int) -> int | None:
+        row = await self._one(
+            "SELECT mp.match_id FROM match_players mp JOIN matches m ON m.id = mp.match_id "
+            "WHERE mp.guild_id = ? AND mp.user_id = ? AND mp.active = 1 "
+            "AND m.status IN ('lobby', 'active')",
+            (guild_id, user_id),
+        )
+        return row["match_id"] if row else None
+
+    async def set_message(self, match_id: int, channel_id: int, message_id: int) -> None:
+        await self._write(
+            "UPDATE matches SET channel_id = ?, message_id = ? WHERE id = ?",
+            (channel_id, message_id, match_id),
+        )
+
+    async def add_player(
+        self, match_id: int, guild_id: int, user_id: int, handle: str, now: int
+    ) -> None:
+        try:
+            async with self._tx() as db:
+                cur = await db.execute(
+                    "SELECT status, max_players FROM matches WHERE id = ?", (match_id,)
+                )
+                match = await cur.fetchone()
+                if match is None or match["status"] != "lobby":
+                    raise MatchClosed()
+                cur = await db.execute(
+                    "SELECT COUNT(*) FROM match_players WHERE match_id = ?", (match_id,)
+                )
+                if (await cur.fetchone())[0] >= match["max_players"]:
+                    raise MatchFull()
+                await db.execute(
+                    "INSERT INTO match_players (match_id, guild_id, user_id, handle, joined_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (match_id, guild_id, user_id, handle, now),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise AlreadyInMatch() from exc
+
+    async def remove_player(self, match_id: int, user_id: int) -> bool:
+        n = await self._write(
+            "DELETE FROM match_players WHERE match_id = ? AND user_id = ? "
+            "AND EXISTS (SELECT 1 FROM matches WHERE id = ? AND status = 'lobby')",
+            (match_id, user_id, match_id),
+        )
+        return n > 0
+
+    async def cancel_match(self, match_id: int, now: int) -> bool:
+        async with self._tx() as db:
+            cur = await db.execute(
+                "UPDATE matches SET status = 'cancelled', finished_at = ? "
+                "WHERE id = ? AND status = 'lobby'",
+                (now, match_id),
+            )
+            if cur.rowcount == 0:
+                return False
+            await db.execute("UPDATE match_players SET active = 0 WHERE match_id = ?", (match_id,))
+            return True
+
+    async def start_match(
+        self, match_id: int, rating: int, problem_key: str, now: int, expires_at: int
+    ) -> bool:
+        n = await self._write(
+            "UPDATE matches SET status = 'active', rating = ?, problem_key = ?, started_at = ?, "
+            "expires_at = ? WHERE id = ? AND status = 'lobby'",
+            (rating, problem_key, now, expires_at, match_id),
+        )
+        return n > 0
+
+    async def mark_gave_up(self, match_id: int, user_id: int) -> bool:
+        n = await self._write(
+            "UPDATE match_players SET gave_up = 1, active = 0 "
+            "WHERE match_id = ? AND user_id = ? AND gave_up = 0 AND solved_at IS NULL "
+            "AND EXISTS (SELECT 1 FROM matches WHERE id = ? AND status = 'active')",
+            (match_id, user_id, match_id),
+        )
+        return n > 0
+
+    async def record_solves(self, match_id: int, solves: Mapping[int, int]) -> None:
+        async with self._tx() as db:
+            await db.executemany(
+                "UPDATE match_players SET solved_at = ? WHERE match_id = ? AND user_id = ? "
+                "AND solved_at IS NULL "
+                "AND EXISTS (SELECT 1 FROM matches WHERE id = ? AND status = 'active')",
+                [(t, match_id, uid, match_id) for uid, t in solves.items()],
+            )
+
+    async def finish_match(self, match_id: int, now: int, deltas: Mapping[int, int]) -> bool:
+        async with self._tx() as db:
+            cur = await db.execute(
+                "UPDATE matches SET status = 'finished', finished_at = ? "
+                "WHERE id = ? AND status = 'active'",
+                (now, match_id),
+            )
+            if cur.rowcount == 0:
+                return False
+            await db.executemany(
+                "UPDATE match_players SET delta = ? WHERE match_id = ? AND user_id = ?",
+                [(d, match_id, uid) for uid, d in deltas.items()],
+            )
+            await db.execute("UPDATE match_players SET active = 0 WHERE match_id = ?", (match_id,))
+            return True
+
+    async def points_total(self, guild_id: int, user_id: int) -> int:
+        row = await self._one(
+            "SELECT COALESCE(SUM(delta), 0) FROM match_players "
+            "WHERE guild_id = ? AND user_id = ? AND delta IS NOT NULL",
+            (guild_id, user_id),
+        )
+        return row[0]
+
+    async def matches_due(self, lobby_before: int, now: int) -> list[MatchRow]:
+        rows = await self._all(
+            "SELECT * FROM matches WHERE (status = 'lobby' AND created_at <= ?) "
+            "OR (status = 'active' AND expires_at <= ?)",
+            (lobby_before, now),
+        )
+        return [_match(r) for r in rows]
 
     # --- reminders ---
     async def set_reminder(
