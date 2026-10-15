@@ -190,10 +190,7 @@ def test_handle_list_pages_lines_and_paging():
         "Page 2/2 - 12 linked members",
     ]
     assert pages[0].description.splitlines()[0] == "1. <@1> (h1) 1999 (master)"
-    assert (
-        pages[1].description.splitlines()[1] == "12. <@99> (a\\_b\\_) unrated"
-        or "unrated" in pages[1].description
-    )
+    assert pages[1].description.splitlines()[1] == "12. <@99> (a\\_b) unrated"
     assert handle_list_pages([]) == []
 
 
