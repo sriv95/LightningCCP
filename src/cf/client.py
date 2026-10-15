@@ -74,6 +74,32 @@ class CodeforcesClient:
             rank=data.get("rank"),
         )
 
+    async def users_info(self, handles: Sequence[str], chunk: int = 300) -> list[User]:
+        """Profiles of the given handles; handles Codeforces does not know are skipped."""
+        out: list[User] = []
+        for i in range(0, len(handles), chunk):
+            out += await self._users_info(list(handles[i : i + chunk]))
+        return out
+
+    async def _users_info(self, handles: list[str]) -> list[User]:
+        try:
+            data = await self._call("user.info", {"handles": ";".join(handles)})
+        except HandleNotFound:
+            # One renamed or deleted handle fails the whole call: split to find and drop it.
+            if len(handles) == 1:
+                return []
+            mid = len(handles) // 2
+            return await self._users_info(handles[:mid]) + await self._users_info(handles[mid:])
+        return [
+            User(
+                handle=d["handle"],
+                rating=d.get("rating"),
+                max_rating=d.get("maxRating"),
+                rank=d.get("rank"),
+            )
+            for d in data
+        ]
+
     async def problemset(self) -> list[Problem]:
         data = await self._call("problemset.problems", {})
         return [

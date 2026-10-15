@@ -26,6 +26,7 @@ The SQLite database lives in the `bot-data` named volume, so it survives rebuild
 | `/help [topic]` | A private guide: no topic gives an overview; topics are start, problems, matches, contests, ratings and contest-list |
 | `/handle link <handle>` | Link a Codeforces handle; prove it by submitting a compile error |
 | `/handle show [member] [handle]` | Profile of a member (default: you) or of whoever linked a handle |
+| `/handle list` | Everyone in this server who linked a handle, ranked by Codeforces rating (unrated last), 10 per page with Prev and Next buttons (private). It asks Codeforces for up to 300 handles per call |
 | `/handle unlink` | Remove your link |
 | `/gimme [rating] [min_rating] [max_rating] [tags] [exclude_tags] [contest_id]` | Random problem, hides ones you solved; `contest_id` limits it to one contest (it autocompletes the newest finished contests by id or name); with no rating arguments and no contest it aims at your match rating |
 | `/match solo [rating] [tags] [exclude_tags]` | Practice alone; solving raises your match rating |

@@ -49,7 +49,7 @@ Slash commands only. The bot uses `Intents.default()` (no `message_content`, no 
 
 **Plots.** `src/cogs/plot.py` (`/plot rating|codeforces`) renders with `matplotlib.figure.Figure` in `src/ui/plots.py` (never pyplot) inside `asyncio.to_thread`, so drawing does not block the event loop. Match rating history is rebuilt from the stored deltas of finished matches (`Store.rating_changes`, `logic.rating_series`).
 
-**Codeforces client.** One request per second enforced through a lock plus an injected clock and sleep (tests inject fakes); retries on "limit exceeded"; non-JSON or network failures become `CodeforcesError`; a "not found" comment starting with "handle" becomes `HandleNotFound` (other not-found errors, such as an unknown contest, stay `CodeforcesError`). `standings` splits a failing chunk of handles in halves to drop an unknown handle.
+**Codeforces client.** One request per second enforced through a lock plus an injected clock and sleep (tests inject fakes); retries on "limit exceeded"; non-JSON or network failures become `CodeforcesError`; a "not found" comment starting with "handle" becomes `HandleNotFound` (other not-found errors, such as an unknown contest, stay `CodeforcesError`). `standings` and `users_info` (behind `/handle list`, 300 handles per call) split a failing chunk of handles in halves to drop an unknown handle.
 
 **Caches.** `ProblemCache` refreshes every 6h, `ContestCache` every 30 min (5 min while a contest is running). On a failed or empty refresh the old data is kept and the loop retries in 5 minutes. `ProblemCache.require()` raises `CacheNotReady` when empty.
 

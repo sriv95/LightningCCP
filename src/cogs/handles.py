@@ -14,7 +14,8 @@ from src.logic import (
     has_compile_error,
     solved_keys,
 )
-from src.ui.embeds import esc, profile_embed
+from src.ui.embeds import esc, handle_list_pages, profile_embed
+from src.ui.paginator import send_pages
 
 
 class VerifyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"verify:(?P<user>\d+)"):
@@ -145,6 +146,18 @@ class HandlesCog(commands.Cog, name="Handles"):
             raise NotLinked(f"{target.display_name} has no linked handle.")
         user = await self.s.cf.user_info(linked.handle)
         await interaction.followup.send(embed=profile_embed(user, target), ephemeral=True)
+
+    @handle.command(name="list", description="Linked members ranked by Codeforces rating")
+    async def list_handles(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        linked = await self.s.db.linked_handles(interaction.guild_id)
+        if not linked:
+            raise BotError("No member has linked a handle yet.")
+        owners = {h.casefold(): uid for uid, h in linked}
+        users = await self.s.cf.users_info([h for _, h in linked])
+        entries = [(owners[u.handle.casefold()], u.handle, u.rating, u.rank) for u in users]
+        entries.sort(key=lambda e: (e[2] is None, -(e[2] or 0), e[1].casefold()))
+        await send_pages(interaction, handle_list_pages(entries))
 
     @handle.command(name="unlink", description="Remove your linked handle")
     async def unlink(self, interaction: discord.Interaction) -> None:

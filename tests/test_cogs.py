@@ -7,6 +7,7 @@ from src.cogs.plot import PlotCog
 from src.cogs.problems import ProblemsCog
 from src.ui.embeds import (
     contest_pages,
+    handle_list_pages,
     problem_embed,
     profile_embed,
     ranklist_pages,
@@ -55,6 +56,7 @@ def test_handles_group_commands():
     assert {c.name for c in HandlesCog.handle.commands} == {
         "link",
         "show",
+        "list",
         "unlink",
     }
     assert HandlesCog.handle.guild_only
@@ -180,6 +182,21 @@ def test_ranklist_pages_lines_and_paging():
     assert ranklist_pages([], "T") == []
 
 
+def test_handle_list_pages_lines_and_paging():
+    entries = [(i, f"h{i}", 2000 - i, "master") for i in range(1, 12)] + [(99, "a_b", None, None)]
+    pages = handle_list_pages(entries)
+    assert [p.footer.text for p in pages] == [
+        "Page 1/2 - 12 linked members",
+        "Page 2/2 - 12 linked members",
+    ]
+    assert pages[0].description.splitlines()[0] == "1. <@1> (h1) 1999 (master)"
+    assert (
+        pages[1].description.splitlines()[1] == "12. <@99> (a\\_b\\_) unrated"
+        or "unrated" in pages[1].description
+    )
+    assert handle_list_pages([]) == []
+
+
 def test_stalk_pages_lines_and_paging():
     known = Problem(1700, "B", "Foo", 1400, ())
     items = [("1700B", known), ("9999Z", None)] + [(f"1A{i}", None) for i in range(14)]
@@ -234,7 +251,7 @@ def test_help_topics_fit_and_cover_every_command():
         assert len(help_embed(key).description) < 4096
     text = " ".join(body for _, body in HELP_TOPICS.values())
     for name in (
-        "/handle link", "/gimme", "/daily", "/stalk", "/match solo", "/match duel",
+        "/handle link", "/handle list", "/gimme", "/daily", "/stalk", "/match solo", "/match duel",
         "/match custom", "/match history", "/ff", "/host contest", "/host virtual", "/host bingo", "/stats",
         "/profile", "/plot rating", "/plot codeforces", "/contests upcoming", "/ranklist",
         "/channel reminder", "/channel recap",

@@ -248,3 +248,21 @@ async def test_user_status_since_stops_on_a_short_page_and_caps_the_pages():
     full = [ok([status_row(i, 5000 - i) for i in range(2)]) for _ in range(9)]
     client, session, _ = make_client(*full)
     assert len(await client.user_status("a", count=2, since=1000)) == 10  # 5 pages at most
+
+
+async def test_users_info_chunks_and_splits_to_drop_unknown_handle():
+    client, session, _ = make_client(
+        ok([{"handle": "A", "rating": 1500, "rank": "specialist"}, {"handle": "c"}]),  # a;c
+    )
+    users = await client.users_info(["a", "c"], chunk=2)
+    assert [(u.handle, u.rating) for u in users] == [("A", 1500), ("c", None)]
+    assert session.calls[0][1] == {"handles": "a;c"}
+
+    not_found = "handles: User with handle b not found"
+    client, session, _ = make_client(
+        failed(not_found),  # a;b
+        ok([{"handle": "a"}]),  # a
+        failed(not_found),  # b
+    )
+    assert [u.handle for u in await client.users_info(["a", "b"])] == ["a"]
+    assert [c[1]["handles"] for c in session.calls] == ["a;b", "a", "b"]

@@ -287,6 +287,30 @@ def ranklist_pages(
     return pages
 
 
+def handle_list_pages(
+    entries: Sequence[tuple[int, str, int | None, str | None]], per_page: int = 10
+) -> list[discord.Embed]:
+    """entries: (user_id, handle, Codeforces rating, rank), highest rating first, unrated last."""
+
+    def line(i: int, e: tuple[int, str, int | None, str | None]) -> str:
+        user_id, handle, rating, rank = e
+        info = f"{rating} ({rank})" if rating is not None and rank else "unrated"
+        return f"{i}. <@{user_id}> ({esc(handle)}) {info}"
+
+    groups = chunked(entries, per_page)
+    pages = []
+    for n, group in enumerate(groups, start=1):
+        first = (n - 1) * per_page + 1
+        embed = discord.Embed(
+            title="Linked handles",
+            description="\n".join(line(first + i, e) for i, e in enumerate(group)),
+            colour=discord.Colour.blue(),
+        )
+        embed.set_footer(text=f"Page {n}/{len(groups)} - {len(entries)} linked members")
+        pages.append(embed)
+    return pages
+
+
 def recap_embed(
     contest: Contest, entries: Sequence[tuple[int, int, str, float, int]]
 ) -> discord.Embed:
