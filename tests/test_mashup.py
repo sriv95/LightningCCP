@@ -6,7 +6,7 @@ from src.cf.models import Problem, Submission
 from src.cogs.mashup import mashup_components
 from src.db.store import Store
 from src.errors import AlreadyInMatch, BotError, CacheNotReady, MatchClosed, MatchFull, NotLinked
-from src.logic import LOBBY_TTL_SECONDS, MASHUP_MAX_PLAYERS, MASHUP_MAX_TEAMS
+from src.logic import MASHUP_LOBBY_TTL_SECONDS, MASHUP_MAX_PLAYERS, MASHUP_MAX_TEAMS
 from src.mashup import MashupService
 from src.matches import MatchService
 from src.ui.embeds import mashup_embed
@@ -242,7 +242,7 @@ async def test_tick_ends_the_contest_frees_players_and_ignores_a_failing_handle(
 async def test_tick_cancels_an_expired_lobby(env):
     svc, store, cf, clock = env
     await lobby(svc)
-    clock.t += LOBBY_TTL_SECONDS - 1
+    clock.t += MASHUP_LOBBY_TTL_SECONDS - 1
     assert await svc.tick() == []
     clock.t += 1
     (view,) = await svc.tick()

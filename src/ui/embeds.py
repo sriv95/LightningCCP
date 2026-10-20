@@ -9,6 +9,7 @@ from src.logic import (
     BINGO_REPLACE_STEP,
     DAY_SECONDS,
     LOBBY_TTL_SECONDS,
+    MASHUP_LOBBY_TTL_SECONDS,
     chunked,
     format_hm,
     ordinal,
@@ -692,7 +693,7 @@ def mashup_embed(view: MashupView, by_key: dict[str, Problem]) -> discord.Embed:
             title=f"{'Team ' if m.team_size != 1 else ''}{'bingo' if m.mode != 'contest' else 'mashup'} lobby".capitalize(),
             description=(
                 f"Host: <@{m.host_id}>\n{_mashup_setup(view)}\n{players}:\n{names}\n"
-                f"Expires <t:{m.created_at + LOBBY_TTL_SECONDS}:R>. "
+                f"Expires <t:{m.created_at + MASHUP_LOBBY_TTL_SECONDS}:R>. "
                 + (f"Join asks for a team number (1-{m.teams}). " if m.team_size != 1 else "")
                 + "The host presses Start; nobody can join after that."
             ),

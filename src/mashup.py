@@ -12,7 +12,7 @@ from src.errors import BotError, MatchClosed, MatchFull, NotLinked
 from src.logic import (
     BINGO_MAX_SIZE,
     BINGO_MIN_SIZE,
-    LOBBY_TTL_SECONDS,
+    MASHUP_LOBBY_TTL_SECONDS,
     MASHUP_MAX_INTERVAL,
     MASHUP_MAX_PLAYERS,
     MASHUP_MAX_PROBLEMS,
@@ -512,7 +512,7 @@ class MashupService:
             try:
                 if mashup.status == "active":
                     running.append(mashup)
-                elif now - mashup.created_at >= LOBBY_TTL_SECONDS and (
+                elif now - mashup.created_at >= MASHUP_LOBBY_TTL_SECONDS and (
                     await self._store.cancel_mashup(mashup.id)
                 ):
                     views.append(await self.view(mashup.id, note="The lobby expired."))

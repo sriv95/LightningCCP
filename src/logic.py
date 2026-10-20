@@ -14,6 +14,7 @@ MAX_REMINDER_COUNT = 5
 RECAP_WINDOW_SECONDS = 86400  # only contests that ended this recently get a recap
 CHOICE_MAX_LEN = 100
 LOBBY_TTL_SECONDS = 600
+MASHUP_LOBBY_TTL_SECONDS = 7200  # /host lobbies wait for a team contest to fill
 MATCH_TTL_SECONDS = 7200
 MATCH_MAX_PLAYERS = 10
 CUSTOM_SCALE = 1.5  # a custom match pays the duel table this many times

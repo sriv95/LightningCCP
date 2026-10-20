@@ -42,7 +42,7 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "`exclude_tags`, `rated`.\n"
         "`/host virtual <contest_id>` replays a finished Codeforces contest with its problems "
         "and length (it also has `rated`).\n"
-        "Press Join in the lobby (10 minutes), the host presses Start. Solve on Codeforces; "
+        "Press Join in the lobby (2 hours), the host presses Start. Solve on Codeforces; "
         "the scoreboard updates, Check reads you at once, Give Up leaves. A finished contest "
         "has a Rematch button. The host pressing Start opens a thread on the message that logs every solve; the "
         "newest thread message shows the standings, and a closing message ends it.\n"
