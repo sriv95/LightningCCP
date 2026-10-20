@@ -8,8 +8,15 @@ from discord.ext import commands, tasks
 
 from src.db.store import Reminder
 from src.errors import BotError, CacheNotReady
-from src.logic import parse_minutes, recaps_due, reminders_due, select_contests
-from src.ui.embeds import contest_pages, esc, ranklist_pages, recap_embed
+from src.logic import (
+    parse_minutes,
+    recaps_due,
+    reminders_due,
+    select_contests,
+    week_start,
+    weekly_board,
+)
+from src.ui.embeds import contest_pages, esc, ranklist_pages, recap_embed, weekly_embed
 from src.ui.paginator import send_pages
 
 log = logging.getLogger(__name__)
@@ -58,7 +65,7 @@ class ContestsCog(commands.Cog, name="Contests"):
     )
     channel = app_commands.Group(
         name="channel",
-        description="Channels for contest reminders and recaps",
+        description="Channels for contest reminders, recaps and the weekly leaderboard",
         guild_only=True,
         default_permissions=discord.Permissions(manage_guild=True),
     )
@@ -217,6 +224,43 @@ class ContestsCog(commands.Cog, name="Contests"):
         await self.s.db.set_recap(guild_id, set.id)
         await interaction.response.send_message(f"Recaps go to {set.mention}.", ephemeral=True)
 
+    @channel.command(
+        name="leaderboard",
+        description="Where to post the leaderboard every Sunday 00:00 UTC; no options shows it",
+    )
+    @app_commands.describe(set="Channel to post the weekly leaderboard in", clear="Stop it")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def leaderboard_config(
+        self,
+        interaction: discord.Interaction,
+        set: discord.TextChannel | None = None,
+        clear: bool = False,
+    ) -> None:
+        guild_id = interaction.guild_id
+        if clear:
+            if set:
+                raise BotError("Use clear on its own.")
+            if not await self.s.db.clear_weekly(guild_id):
+                raise BotError("No weekly leaderboard channel set.")
+            await interaction.response.send_message("Weekly leaderboard stopped.", ephemeral=True)
+            return
+        if set is None:
+            channel_id = await self.s.db.get_weekly(guild_id)
+            text = (
+                f"The leaderboard goes to <#{channel_id}> every Sunday 00:00 UTC."
+                if channel_id
+                else "No weekly leaderboard channel set."
+            )
+            await interaction.response.send_message(text, ephemeral=True)
+            return
+        if not set.permissions_for(interaction.guild.me).send_messages:
+            raise BotError(f"I cannot send messages in {set.mention}.")
+        await self.s.db.set_weekly(guild_id, set.id, week_start(int(time.time())))
+        await interaction.response.send_message(
+            f"The leaderboard goes to {set.mention} every Sunday 00:00 UTC, starting next Sunday.",
+            ephemeral=True,
+        )
+
     @tasks.loop(seconds=60)
     async def remind_loop(self) -> None:
         try:
@@ -227,6 +271,10 @@ class ContestsCog(commands.Cog, name="Contests"):
             await self._send_recaps()
         except Exception:
             log.exception("Recap loop failed")
+        try:
+            await self._send_weekly()
+        except Exception:
+            log.exception("Weekly leaderboard loop failed")
 
     @remind_loop.before_loop
     async def _before_remind_loop(self) -> None:
@@ -304,6 +352,25 @@ class ContestsCog(commands.Cog, name="Contests"):
                     await channel.send(embed=recap_embed(contest, entries))
                 except discord.HTTPException:
                     log.warning("Could not send recap to %s", channel_id, exc_info=True)
+
+    async def _send_weekly(self) -> None:
+        """Post the leaderboard of the week that just ended in every server that set a channel.
+        At most once per server and week."""
+        s = self.s
+        week = week_start(int(time.time()))
+        for guild_id, channel_id, last_sent in await s.db.all_weeklies():
+            channel = self.bot.get_channel(channel_id)
+            if channel is None or last_sent >= week:
+                continue
+            if not await s.db.mark_weekly(guild_id, week):
+                continue
+            rows = weekly_board(await s.db.rating_events(guild_id), week)
+            if not rows:
+                continue
+            try:
+                await channel.send(embed=weekly_embed(rows))
+            except discord.HTTPException:
+                log.warning("Could not send leaderboard to %s", channel_id, exc_info=True)
 
 
 async def setup(bot: commands.Bot) -> None:

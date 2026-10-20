@@ -436,3 +436,33 @@ def test_match_deltas_scale_multiplies_before_rounding():
     assert match_deltas([[1], [2, 3]], r, 1.5) == {1: 74, 2: -37, 3: -37}  # 73.5 and -36.75
     assert match_deltas([[1], [2]], r, 1.5) == {1: 74, 2: -74}
     assert match_deltas([[1], [2]], r) == {1: 49, 2: -49}
+
+
+def test_week_start_is_sunday_midnight_utc():
+    from src.logic import week_start
+
+    sunday = 1_700_000_000 // 86400 * 86400  # 2023-11-14 is a Tuesday
+    sunday -= 2 * 86400  # 2023-11-12
+    assert week_start(sunday) == sunday
+    assert week_start(sunday + 6 * 86400 + 86399) == sunday
+    assert week_start(sunday + 7 * 86400) == sunday + 7 * 86400
+
+
+def test_weekly_board_ranks_gain_and_moves():
+    from src.logic import DAY_SECONDS, START_RATING, weekly_board
+
+    week = 14 * DAY_SECONDS
+    events = [
+        (1, "a", 1 * DAY_SECONDS, 10),  # before last week's cutoff
+        (2, "b", 2 * DAY_SECONDS, 5),
+        (2, "b", 8 * DAY_SECONDS, 20),  # this week: b passes a
+        (3, "c", 9 * DAY_SECONDS, 1),  # first game this week
+        (1, "a", 14 * DAY_SECONDS, 99),  # at the cutoff: not yet
+    ]
+    rows = weekly_board(events, week)
+    assert [(r.rank, r.user_id, r.rating, r.gain, r.moved) for r in rows] == [
+        (1, 2, START_RATING + 25, 20, 1),
+        (2, 1, START_RATING + 10, 0, -1),
+        (3, 3, START_RATING + 1, 1, None),
+    ]
+    assert weekly_board([], week) == []

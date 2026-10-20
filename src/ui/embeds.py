@@ -10,6 +10,7 @@ from src.logic import (
     DAY_SECONDS,
     LOBBY_TTL_SECONDS,
     MASHUP_LOBBY_TTL_SECONDS,
+    WeeklyRow,
     chunked,
     format_hm,
     ordinal,
@@ -215,6 +216,24 @@ def match_embed(view: MatchView) -> discord.Embed:
 
 
 STATS_SIZE = 10
+
+
+def weekly_embed(rows: Sequence[WeeklyRow]) -> discord.Embed:
+    """The top STATS_SIZE of the weekly leaderboard: rating, this week's gain and places moved."""
+
+    def move(moved: int | None) -> str:
+        if moved is None:
+            return "new"
+        return f"\u25b2{moved}" if moved > 0 else f"\u25bc{-moved}" if moved < 0 else "-"
+
+    return discord.Embed(
+        title="Weekly leaderboard",
+        description="\n".join(
+            f"{r.rank}. <@{r.user_id}> ({esc(r.handle)}) {r.rating} ({r.gain:+d}) {move(r.moved)}"
+            for r in rows[:STATS_SIZE]
+        ),
+        colour=discord.Colour.gold(),
+    ).set_footer(text="Rating, change this week, places moved since last week")
 
 
 def stats_pages(

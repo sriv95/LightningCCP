@@ -71,7 +71,8 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "contests.\n`/ranklist <contest_id>` shows how this server's linked members placed.\n"
         "Admins (Manage Server) can set channels: `/channel reminder` posts a reminder before "
         "each contest (optional role ping, minutes, and an `exclude` regex on the name), and "
-        "`/channel recap` posts how linked members placed after it ends. Set each one you want.",
+        "`/channel recap` posts how linked members placed after it ends, and "
+        "`/channel leaderboard` posts the leaderboard every Sunday 00:00 UTC. Set each one you want.",
     ),
 }
 

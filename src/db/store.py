@@ -302,6 +302,15 @@ MIGRATIONS = [
     """,
     # The thread message that carries the board (only the newest log message does).
     "ALTER TABLE mashups ADD COLUMN log_board_id INTEGER;",
+    # The weekly leaderboard channel; last_sent is the start of the week (Sunday 00:00 UTC) whose
+    # leaderboard was posted last, so each week posts at most once.
+    """
+    CREATE TABLE weekly (
+        guild_id INTEGER PRIMARY KEY,
+        channel_id INTEGER NOT NULL,
+        last_sent INTEGER NOT NULL
+    );
+    """,
 ]
 
 
@@ -1363,6 +1372,51 @@ class Store:
     async def clear_recap(self, guild_id: int) -> bool:
         await self._write("DELETE FROM recap_sent WHERE guild_id = ?", (guild_id,))
         return await self._write("DELETE FROM recap WHERE guild_id = ?", (guild_id,)) > 0
+
+    async def set_weekly(self, guild_id: int, channel_id: int, week: int) -> None:
+        """week is the current week's start: a new channel waits for the next Sunday."""
+        await self._write(
+            "INSERT INTO weekly (guild_id, channel_id, last_sent) VALUES (?, ?, ?) "
+            "ON CONFLICT (guild_id) DO UPDATE SET channel_id = excluded.channel_id",
+            (guild_id, channel_id, week),
+        )
+
+    async def get_weekly(self, guild_id: int) -> int | None:
+        row = await self._one("SELECT channel_id FROM weekly WHERE guild_id = ?", (guild_id,))
+        return row["channel_id"] if row else None
+
+    async def all_weeklies(self) -> list[tuple[int, int, int]]:
+        """(guild_id, channel_id, last_sent)"""
+        rows = await self._all("SELECT guild_id, channel_id, last_sent FROM weekly")
+        return [(r["guild_id"], r["channel_id"], r["last_sent"]) for r in rows]
+
+    async def clear_weekly(self, guild_id: int) -> bool:
+        return await self._write("DELETE FROM weekly WHERE guild_id = ?", (guild_id,)) > 0
+
+    async def mark_weekly(self, guild_id: int, week: int) -> bool:
+        """True only the first time for this week, which makes the post at-most-once."""
+        n = await self._write(
+            "UPDATE weekly SET last_sent = ? WHERE guild_id = ? AND last_sent < ?",
+            (week, guild_id, week),
+        )
+        return n > 0
+
+    async def rating_events(self, guild_id: int) -> list[tuple[int, str, int, int]]:
+        """(user_id, handle, finished_at, rating change) of every finished match and mashup."""
+        rows = await self._all(
+            "SELECT e.user_id, COALESCE(uh.handle, e.handle) AS handle, e.at, e.delta FROM ("
+            "SELECT mp.guild_id, mp.user_id, mp.handle, m.finished_at AS at, mp.delta "
+            "FROM match_players mp JOIN matches m ON m.id = mp.match_id "
+            "WHERE mp.delta IS NOT NULL AND m.status = 'finished' "
+            "UNION ALL "
+            "SELECT kp.guild_id, kp.user_id, kp.handle, k.ends_at, kp.delta "
+            "FROM mashup_players kp JOIN mashups k ON k.id = kp.mashup_id "
+            "WHERE kp.delta IS NOT NULL AND k.status = 'finished') e "
+            "LEFT JOIN user_handle uh ON uh.guild_id = e.guild_id AND uh.user_id = e.user_id "
+            "WHERE e.guild_id = ?",
+            (guild_id,),
+        )
+        return [(r["user_id"], r["handle"], r["at"], r["delta"]) for r in rows]
 
     async def mark_sent(self, guild_id: int, contest_id: int, before_min: int) -> bool:
         n = await self._write(

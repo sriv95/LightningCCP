@@ -456,6 +456,22 @@ async def test_rating_changes_lists_finished_matches_oldest_first(store):
     assert await store.rating_changes(1, 2) == [] and await store.rating_changes(2, 1) == []
 
 
+async def test_weekly_channel_marks_each_week_once_and_lists_events(store):
+    assert await store.get_weekly(1) is None
+    await store.set_weekly(1, 7, 1000)
+    await store.set_weekly(1, 8, 2000)  # a new channel keeps last_sent
+    assert await store.get_weekly(1) == 8 and await store.all_weeklies() == [(1, 8, 1000)]
+    assert await store.mark_weekly(1, 2000) is True
+    assert await store.mark_weekly(1, 2000) is False
+    assert await store.clear_weekly(1) is True and await store.clear_weekly(1) is False
+    mid = await make_match(store, mode="solo", max_players=1)
+    await store.start_match(mid, 100, "1700A", 200, 7400, [1])
+    await store.finish_match(mid, 500, {1: 5})
+    await make_match(store, host=1)  # lobby: no event
+    assert await store.rating_events(1) == [(1, "h1", 500, 5)]
+    assert await store.rating_events(2) == []
+
+
 async def test_finished_matches_newest_first_with_players(store):
     ids = []
     for finished, delta in ((500, 10), (900, -3)):

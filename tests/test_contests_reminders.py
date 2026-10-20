@@ -203,3 +203,50 @@ async def test_recap_ignores_old_running_and_upcoming_contests(monkeypatch):
     cog, db, ch = build_recap(monkeypatch, [(1, 10, "a", 3.0, 0)], [old, running])
     await cog._send_recaps()
     assert cog.calls == [] and ch.embeds == []
+
+
+WEEK = (NOW // 86400 - (NOW // 86400 + 4) % 7) * 86400  # NOW's Sunday 00:00 UTC
+
+
+def build_weekly(monkeypatch, last_sent, events):
+    cog, db, ch = build(monkeypatch)
+    db.last_sent = last_sent
+
+    async def all_weeklies():
+        return [(1, 5, db.last_sent)]
+
+    async def mark_weekly(guild_id, week):
+        if db.last_sent >= week:
+            return False
+        db.last_sent = week
+        return True
+
+    async def rating_events(guild_id):
+        return events
+
+    db.all_weeklies, db.mark_weekly, db.rating_events = all_weeklies, mark_weekly, rating_events
+    ch.embeds = []
+
+    async def send(text=None, embed=None, **kwargs):
+        ch.embeds.append(embed)
+
+    ch.send = send
+    return cog, db, ch
+
+
+async def test_weekly_posts_once_per_week(monkeypatch):
+    cog, db, ch = build_weekly(monkeypatch, WEEK - 604800, [(10, "a", WEEK - 100, 5)])
+    await cog._send_weekly()
+    await cog._send_weekly()
+    assert len(ch.embeds) == 1 and db.last_sent == WEEK
+    assert ch.embeds[0].title == "Weekly leaderboard"
+    assert "<@10> (a) 805 (+5) new" in ch.embeds[0].description
+
+
+async def test_weekly_skips_a_week_already_sent_and_an_empty_board(monkeypatch):
+    cog, db, ch = build_weekly(monkeypatch, WEEK, [(10, "a", WEEK - 100, 5)])
+    await cog._send_weekly()
+    assert ch.embeds == []
+    cog, db, ch = build_weekly(monkeypatch, WEEK - 604800, [])
+    await cog._send_weekly()
+    assert ch.embeds == [] and db.last_sent == WEEK

@@ -2,6 +2,7 @@ import math
 import random
 from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from src.cf.models import Contest, Problem, Submission
 from src.errors import BotError
@@ -168,6 +169,57 @@ def floor_rating(rating: int) -> int:
 def utc_day(now: int) -> int:
     """Days since the epoch; the daily problem resets when this changes (midnight UTC)."""
     return now // DAY_SECONDS
+
+
+def week_start(now: int) -> int:
+    """Start of the week (Sunday 00:00 UTC) that contains now. Epoch day 0 was a Thursday."""
+    day = utc_day(now)
+    return (day - (day + 4) % 7) * DAY_SECONDS
+
+
+class WeeklyRow(NamedTuple):
+    rank: int
+    user_id: int
+    handle: str
+    rating: int
+    gain: int  # rating change in the week before the cutoff
+    moved: int | None  # places gained since a week earlier; None = not ranked then
+
+
+def weekly_board(events: Iterable[tuple[int, str, int, int]], cutoff: int) -> list[WeeklyRow]:
+    """All-time match ranking as of cutoff, with each player's gain over the week before it and
+    their rank change against the ranking a week earlier. events: (user_id, handle, at, delta)."""
+    events = list(events)
+    week_ago = cutoff - 7 * DAY_SECONDS
+
+    def ranking(until: int) -> dict[int, tuple[int, str, int]]:
+        total: dict[int, int] = {}
+        played: dict[int, int] = {}
+        names: dict[int, str] = {}
+        for uid, handle, at, delta in events:
+            if at < until:
+                total[uid] = total.get(uid, START_RATING) + delta
+                played[uid] = played.get(uid, 0) + 1
+                names[uid] = handle
+        order = sorted(total, key=lambda u: (-total[u], -played[u], names[u]))
+        return {u: (i, names[u], total[u]) for i, u in enumerate(order, 1)}
+
+    now, before = ranking(cutoff), ranking(week_ago)
+    gain: dict[int, int] = {}
+    for uid, _, at, delta in events:
+        if week_ago <= at < cutoff:
+            gain[uid] = gain.get(uid, 0) + delta
+    return [
+        WeeklyRow(
+            rank,
+            uid,
+            handle,
+            rating,
+            gain.get(uid, 0),
+            before[uid][0] - rank if uid in before else None,
+        )
+        for uid, (rank, handle, rating) in now.items()
+    ]
 
 
 def daily_streak(days: Sequence[int], today: int) -> int:
