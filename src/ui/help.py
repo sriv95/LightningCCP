@@ -57,7 +57,7 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
     ),
     "ratings": (
         "Ratings and stats",
-        "`/stats [sort] [kind]` ranks everyone by match rating, with pages; `sort: streak` ranks "
+        "`/leaderboard [sort] [kind]` ranks everyone by match rating, with pages; `sort: streak` ranks "
         "by daily streak; `kind` counts matches or contests only.\n"
         "`/profile [member] [handle]` shows one member's rating, rank, games, contest wins and streak.\n"
         "`/match history [member] [kind]` lists finished games with your place; with a member "

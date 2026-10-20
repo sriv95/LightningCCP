@@ -292,7 +292,7 @@ class MatchCog(commands.Cog, name="Match"):
             f"You left the {kind} lobby." if lobby else f"You gave up the {kind}.", ephemeral=True
         )
 
-    @app_commands.command(name="stats", description="Top match players in this server")
+    @app_commands.command(name="leaderboard", description="Top match players in this server")
     @app_commands.guild_only()
     @app_commands.describe(
         sort="Rank by match rating (default) or by daily streak",
