@@ -350,12 +350,11 @@ class MashupCog(commands.Cog, name="Mashup"):
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view), wait=True
         )
         await self.svc.set_message(view.mashup.id, interaction.channel_id, message.id)
-        await self._open_thread(interaction, view, message)
 
     async def _open_thread(
         self, interaction: discord.Interaction, view: MashupView, message: discord.Message
     ) -> None:
-        """The message gets a thread where every solve is logged."""
+        """The message gets a thread where every solve is logged (opened when the contest starts)."""
         m = view.mashup
         kind = "Bingo" if m.mode != "contest" else "Virtual contest" if m.contest_id else "Contest"
         try:
@@ -471,6 +470,9 @@ class MashupCog(commands.Cog, name="Mashup"):
         await interaction.edit_original_response(
             embed=mashup_embed(view, self._by_key()), view=mashup_components(view)
         )
+        if action == "start" and interaction.message is not None:
+            await self._open_thread(interaction, view, interaction.message)
+            view = await self.svc.view(mashup_id)
         await self._log(view)
         if action == "giveup":
             await self.log_gave_up(view, interaction.user.id)
