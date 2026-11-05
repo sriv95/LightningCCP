@@ -613,3 +613,18 @@ async def test_a_failing_migration_changes_nothing_and_can_be_retried(tmp_path, 
         assert (await (await db.execute("PRAGMA user_version")).fetchone())[0] == version
         columns = [r[1] for r in await (await db.execute("PRAGMA table_info(reminder)")).fetchall()]
     assert "extra" not in columns  # the first statement was rolled back too
+
+
+async def test_new_contest_channel_posts_each_contest_once_and_remembers_askers(store):
+    assert await store.get_newcontest(1) is None
+    await store.set_newcontest(1, 7, [10, 11])
+    await store.set_newcontest(1, 8, [11, 12])  # a new channel keeps what was posted
+    assert await store.get_newcontest(1) == 8 and await store.all_newcontests() == [(1, 8)]
+    assert await store.posted(1) == {10, 11, 12}
+    assert await store.mark_posted(1, 13) is True and await store.mark_posted(1, 13) is False
+    await store.add_contest_remind(1, 13, 5)
+    await store.add_contest_remind(1, 13, 5)
+    await store.add_contest_remind(1, 13, 4)
+    assert await store.contest_reminders(1) == {13: [5, 4]}
+    assert await store.clear_newcontest(1) is True and await store.clear_newcontest(1) is False
+    assert await store.posted(1) == set()

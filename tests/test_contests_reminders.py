@@ -16,9 +16,13 @@ class FakeDB:
     def __init__(self, reminders):
         self.reminders = reminders
         self.sent: set[tuple[int, int, int]] = set()
+        self.asked: dict[int, list[int]] = {}
 
     async def all_reminders(self):
         return self.reminders
+
+    async def contest_reminders(self, guild_id):
+        return self.asked
 
     async def all_recaps(self):
         return [(1, 5)]
@@ -77,6 +81,14 @@ async def test_exclude_regex_skips_matching_contest_names(monkeypatch):
     db.reminders = [Reminder(1, 5, None, (60, 10), "educational")]
     await cog._send_due_reminders()
     assert len(ch.messages) == 1
+
+
+async def test_members_who_asked_are_pinged_even_if_excluded(monkeypatch):
+    cog, db, ch = build(monkeypatch, start=NOW + 300)
+    db.reminders = [Reminder(1, 5, None, (60, 10), "round")]
+    db.asked = {7: [11, 12]}
+    await cog._send_due_reminders()
+    assert len(ch.messages) == 1 and "<@11> <@12>" in ch.messages[0]
 
 
 async def test_at_most_once(monkeypatch):

@@ -311,6 +311,25 @@ MIGRATIONS = [
         last_sent INTEGER NOT NULL
     );
     """,
+    # New-contest announcements: the channel, the contests already posted per server (at-most-once),
+    # and members who pressed Add to calendar (they get pinged in the contest's reminder).
+    """
+    CREATE TABLE newcontest (
+        guild_id INTEGER PRIMARY KEY,
+        channel_id INTEGER NOT NULL
+    );
+    CREATE TABLE newcontest_sent (
+        guild_id INTEGER NOT NULL,
+        contest_id INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, contest_id)
+    );
+    CREATE TABLE contest_remind (
+        guild_id INTEGER NOT NULL,
+        contest_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, contest_id, user_id)
+    );
+    """,
 ]
 
 
@@ -1417,6 +1436,62 @@ class Store:
             (guild_id,),
         )
         return [(r["user_id"], r["handle"], r["at"], r["delta"]) for r in rows]
+
+    async def set_newcontest(self, guild_id: int, channel_id: int, known: Iterable[int]) -> None:
+        """Set the channel; `known` contests count as posted, so only later ones are announced."""
+        async with self._tx() as db:
+            await db.execute(
+                "INSERT INTO newcontest (guild_id, channel_id) VALUES (?, ?) "
+                "ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id",
+                (guild_id, channel_id),
+            )
+            await db.executemany(
+                "INSERT OR IGNORE INTO newcontest_sent (guild_id, contest_id) VALUES (?, ?)",
+                [(guild_id, c) for c in known],
+            )
+
+    async def get_newcontest(self, guild_id: int) -> int | None:
+        row = await self._one("SELECT channel_id FROM newcontest WHERE guild_id = ?", (guild_id,))
+        return row["channel_id"] if row else None
+
+    async def all_newcontests(self) -> list[tuple[int, int]]:
+        rows = await self._all("SELECT guild_id, channel_id FROM newcontest")
+        return [(r["guild_id"], r["channel_id"]) for r in rows]
+
+    async def clear_newcontest(self, guild_id: int) -> bool:
+        await self._write("DELETE FROM newcontest_sent WHERE guild_id = ?", (guild_id,))
+        return await self._write("DELETE FROM newcontest WHERE guild_id = ?", (guild_id,)) > 0
+
+    async def mark_posted(self, guild_id: int, contest_id: int) -> bool:
+        """True only the first time, which makes an announcement at-most-once."""
+        n = await self._write(
+            "INSERT OR IGNORE INTO newcontest_sent (guild_id, contest_id) VALUES (?, ?)",
+            (guild_id, contest_id),
+        )
+        return n == 1
+
+    async def posted(self, guild_id: int) -> set[int]:
+        rows = await self._all(
+            "SELECT contest_id FROM newcontest_sent WHERE guild_id = ?", (guild_id,)
+        )
+        return {r["contest_id"] for r in rows}
+
+    async def add_contest_remind(self, guild_id: int, contest_id: int, user_id: int) -> None:
+        await self._write(
+            "INSERT OR IGNORE INTO contest_remind (guild_id, contest_id, user_id) VALUES (?, ?, ?)",
+            (guild_id, contest_id, user_id),
+        )
+
+    async def contest_reminders(self, guild_id: int) -> dict[int, list[int]]:
+        """contest id -> members who asked for a ping, in the order they asked."""
+        rows = await self._all(
+            "SELECT contest_id, user_id FROM contest_remind WHERE guild_id = ? ORDER BY rowid",
+            (guild_id,),
+        )
+        out: dict[int, list[int]] = {}
+        for r in rows:
+            out.setdefault(r["contest_id"], []).append(r["user_id"])
+        return out
 
     async def mark_sent(self, guild_id: int, contest_id: int, before_min: int) -> bool:
         n = await self._write(

@@ -74,7 +74,12 @@ def test_problems_commands_registered():
 def test_contests_groups():
     assert {c.name for c in ContestsCog.contests.commands} == {"upcoming", "running", "recent"}
     assert "ranklist" in {c.name for c in ContestsCog.__cog_app_commands__}
-    assert {c.name for c in ContestsCog.channel.commands} == {"reminder", "recap", "leaderboard"}
+    assert {c.name for c in ContestsCog.channel.commands} == {
+        "reminder",
+        "recap",
+        "leaderboard",
+        "new-contest",
+    }
 
 
 def test_match_group_commands():
@@ -251,7 +256,7 @@ def test_help_topics_fit_and_cover_every_command():
         "/handle link", "/handle list", "/gimme", "/daily", "/stalk", "/match solo", "/match duel",
         "/match custom", "/match history", "/ff", "/host contest", "/host virtual", "/host bingo", "/leaderboard",
         "/profile", "/plot rating", "/plot codeforces", "/contests upcoming", "/ranklist",
-        "/channel reminder", "/channel recap", "/channel leaderboard",
+        "/channel reminder", "/channel recap", "/channel leaderboard", "/channel new-contest",
     ):  # fmt: skip
         assert name in text, name
 

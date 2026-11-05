@@ -72,7 +72,9 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "Admins (Manage Server) can set channels: `/channel reminder` posts a reminder before "
         "each contest (optional role ping, minutes, and an `exclude` regex on the name), and "
         "`/channel recap` posts how linked members placed after it ends, and "
-        "`/channel leaderboard` posts the leaderboard every Sunday 00:00 UTC. Set each one you want.",
+        "`/channel leaderboard` posts the leaderboard every Sunday 00:00 UTC, and "
+        "`/channel new-contest` announces each new contest (checked every 30 minutes) with an Add to "
+        "calendar button that sends an .ics file and pings you in the reminder. Set each one you want.",
     ),
 }
 

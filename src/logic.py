@@ -2,6 +2,7 @@ import math
 import random
 from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import NamedTuple
 
 from src.cf.models import Contest, Problem, Submission
@@ -388,6 +389,54 @@ def reminders_due(
             if now >= c.start_time - b * 60 and (c.id, b) not in sent:
                 due.append((c, b))
     return due
+
+
+def new_contests(contests: Iterable[Contest], posted: set[int], now: int) -> list[Contest]:
+    """Contests that have not started and were not posted yet, soonest first."""
+    due = [
+        c
+        for c in contests
+        if c.phase == "BEFORE"
+        and c.start_time is not None
+        and c.start_time > now
+        and c.id not in posted
+    ]
+    return sorted(due, key=lambda c: c.start_time)
+
+
+def _ics_text(text: str) -> str:
+    escaped = text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+    return escaped.replace("\r", "").replace("\n", "\\n")
+
+
+def contest_ics(contest: Contest, now: int, alarm_mins: int = 10) -> str:
+    """An iCalendar file with one event for the contest and an alarm before it."""
+
+    def stamp(t: int) -> str:
+        return datetime.fromtimestamp(t, UTC).strftime("%Y%m%dT%H%M%SZ")
+
+    # shortcut: lines are not folded at 75 bytes, calendar apps accept long lines; fold if one refuses
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//LightningCCP//Contests//EN",
+        "BEGIN:VEVENT",
+        f"UID:cf-contest-{contest.id}@lightningccp",
+        f"DTSTAMP:{stamp(now)}",
+        f"DTSTART:{stamp(contest.start_time)}",
+        f"DTEND:{stamp(contest.start_time + contest.duration)}",
+        f"SUMMARY:{_ics_text(contest.name)}",
+        f"URL:{contest.url}",
+        f"DESCRIPTION:{_ics_text(contest.url)}",
+        "BEGIN:VALARM",
+        "ACTION:DISPLAY",
+        f"DESCRIPTION:{_ics_text(contest.name)} starts in {alarm_mins} minutes",
+        f"TRIGGER:-PT{alarm_mins}M",
+        "END:VALARM",
+        "END:VEVENT",
+        "END:VCALENDAR",
+    ]
+    return "\r\n".join(lines) + "\r\n"
 
 
 def recaps_due(contests: Iterable[Contest], sent: set[int], now: int) -> list[Contest]:

@@ -4,6 +4,7 @@ from src.cf.models import Contest, Problem, Submission
 from src.errors import BotError
 from src.logic import (
     chunked,
+    contest_ics,
     contest_suggestions,
     duel_gain,
     earliest_solve,
@@ -14,6 +15,7 @@ from src.logic import (
     mashup_standings,
     match_deltas,
     match_rating,
+    new_contests,
     ordinal,
     parse_minutes,
     parse_tags,
@@ -466,3 +468,20 @@ def test_weekly_board_ranks_gain_and_moves():
         (3, 3, START_RATING + 1, 1, None),
     ]
     assert weekly_board([], week) == []
+
+
+def test_new_contests_skips_posted_started_and_finished():
+    def c(i, phase, start):
+        return Contest(i, f"R{i}", "CF", phase, start, 7200)
+
+    contests = [c(1, "BEFORE", 900), c(2, "BEFORE", 700), c(3, "BEFORE", 500), c(4, "FINISHED", 900),
+                c(5, "BEFORE", 100), c(6, "BEFORE", None)]  # fmt: skip
+    assert [x.id for x in new_contests(contests, {3}, 200)] == [2, 1]
+
+
+def test_contest_ics_has_utc_times_alarm_and_escaped_text():
+    ics = contest_ics(Contest(9, "A, B; C", "CF", "BEFORE", 1_700_000_000, 7200), 1_699_990_000)
+    lines = ics.split("\r\n")
+    assert lines[0] == "BEGIN:VCALENDAR" and lines[-2] == "END:VCALENDAR" and lines[-1] == ""
+    assert "DTSTART:20231114T221320Z" in lines and "DTEND:20231115T001320Z" in lines
+    assert "SUMMARY:A\\, B\\; C" in lines and "TRIGGER:-PT10M" in lines
