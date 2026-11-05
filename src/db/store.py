@@ -1476,11 +1476,13 @@ class Store:
         )
         return {r["contest_id"] for r in rows}
 
-    async def add_contest_remind(self, guild_id: int, contest_id: int, user_id: int) -> None:
-        await self._write(
+    async def add_contest_remind(self, guild_id: int, contest_id: int, user_id: int) -> bool:
+        """True if the member was not on the list yet."""
+        n = await self._write(
             "INSERT OR IGNORE INTO contest_remind (guild_id, contest_id, user_id) VALUES (?, ?, ?)",
             (guild_id, contest_id, user_id),
         )
+        return n == 1
 
     async def contest_reminders(self, guild_id: int) -> dict[int, list[int]]:
         """contest id -> members who asked for a ping, in the order they asked."""

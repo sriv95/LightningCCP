@@ -71,30 +71,46 @@ RECAP_MAX_BACKOFF = 1800  # seconds between tries of a failing recap, at most
 MAX_PINGED_MEMBERS = 50  # a message holds 2000 characters, a mention takes about 22
 
 
-class CalendarButton(discord.ui.DynamicItem[discord.ui.Button], template=r"cal:(?P<contest>\d+)"):
-    """Persistent Add to calendar button of a new-contest post."""
+BUTTONS = {
+    "cal": ("Add to calendar", "\N{SPIRAL CALENDAR PAD}"),
+    "notify": ("Notify me", "\N{BELL}"),
+}
 
-    def __init__(self, contest_id: int):
+
+class ContestButton(
+    discord.ui.DynamicItem[discord.ui.Button], template=r"(?P<action>cal|notify):(?P<contest>\d+)"
+):
+    """Persistent Add to calendar and Notify me buttons of a new-contest post."""
+
+    def __init__(self, action: str, contest_id: int):
+        label, emoji = BUTTONS[action]
         super().__init__(
             discord.ui.Button(
-                label="Add to calendar",
-                emoji="\N{SPIRAL CALENDAR PAD}",
-                style=discord.ButtonStyle.primary,
-                custom_id=f"cal:{contest_id}",
+                label=label,
+                emoji=emoji,
+                style=discord.ButtonStyle.primary
+                if action == "cal"
+                else discord.ButtonStyle.secondary,
+                custom_id=f"{action}:{contest_id}",
             )
         )
+        self.action = action
         self.contest_id = contest_id
 
     @classmethod
     async def from_custom_id(
         cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str]
-    ) -> "CalendarButton":
-        return cls(int(match["contest"]))
+    ) -> "ContestButton":
+        return cls(match["action"], int(match["contest"]))
 
     async def callback(self, interaction: discord.Interaction) -> None:
         # discord.py never calls DynamicItem.on_error, so report here.
         try:
-            await interaction.client.get_cog("Contests").calendar(interaction, self.contest_id)
+            cog = interaction.client.get_cog("Contests")
+            if self.action == "cal":
+                await cog.calendar(interaction, self.contest_id)
+            else:
+                await cog.notify(interaction, self.contest_id)
         except Exception as exc:
             await report_error(interaction, exc)
 
@@ -121,32 +137,48 @@ class ContestsCog(commands.Cog, name="Contests"):
         return self.bot.services
 
     async def cog_load(self) -> None:
-        self.bot.add_dynamic_items(CalendarButton)
+        self.bot.add_dynamic_items(ContestButton)
         self.remind_loop.start()
         self.new_contest_loop.start()
 
     async def cog_unload(self) -> None:
-        self.bot.remove_dynamic_items(CalendarButton)
+        self.bot.remove_dynamic_items(ContestButton)
         self.remind_loop.cancel()
         self.new_contest_loop.cancel()
 
-    async def calendar(self, interaction: discord.Interaction, contest_id: int) -> None:
-        """Send the .ics file and, if the server has a reminder channel, ping the member there."""
-        s = self.s
-        contest = next((c for c in s.contests.contests if c.id == contest_id), None)
+    def _upcoming(self, contest_id: int):
+        contest = next((c for c in self.s.contests.contests if c.id == contest_id), None)
         if contest is None or contest.phase != "BEFORE" or contest.start_time is None:
             raise BotError("That contest is not upcoming any more.")
-        reminder = await s.db.get_reminder(interaction.guild_id)
-        text = "Open the file to add the contest to your calendar."
-        if reminder and reminder.channel_id:
-            await s.db.add_contest_remind(interaction.guild_id, contest_id, interaction.user.id)
-            text += f" You will be pinged in <#{reminder.channel_id}> when the reminder is posted."
+        return contest
+
+    async def calendar(self, interaction: discord.Interaction, contest_id: int) -> None:
+        """Send the .ics file."""
+        contest = self._upcoming(contest_id)
         ics = contest_ics(contest, int(time.time()))
         await interaction.response.send_message(
-            text,
+            "Open the file to add the contest to your calendar.",
             file=discord.File(io.BytesIO(ics.encode()), filename=f"contest-{contest_id}.ics"),
             ephemeral=True,
         )
+
+    async def notify(self, interaction: discord.Interaction, contest_id: int) -> None:
+        """Ping the member in the server's reminder channel when the contest reminder is posted."""
+        self._upcoming(contest_id)
+        reminder = await self.s.db.get_reminder(interaction.guild_id)
+        if not reminder or not reminder.channel_id:
+            raise BotError(
+                "This server has no reminder channel. An admin can set one with /channel reminder."
+            )
+        added = await self.s.db.add_contest_remind(
+            interaction.guild_id, contest_id, interaction.user.id
+        )
+        text = (
+            f"You will be pinged in <#{reminder.channel_id}> when the reminder is posted."
+            if added
+            else "You are already on the list."
+        )
+        await interaction.response.send_message(text, ephemeral=True)
 
     async def _list(self, interaction: discord.Interaction, kind: str) -> None:
         if not self.s.contests.contests:
@@ -385,7 +417,8 @@ class ContestsCog(commands.Cog, name="Contests"):
                 if not await s.db.mark_posted(guild_id, contest.id):
                     continue
                 view = discord.ui.View(timeout=None)
-                view.add_item(CalendarButton(contest.id))
+                view.add_item(ContestButton("cal", contest.id))
+                view.add_item(ContestButton("notify", contest.id))
                 try:
                     await channel.send(embed=new_contest_embed(contest), view=view)
                 except discord.HTTPException:

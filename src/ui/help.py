@@ -74,7 +74,7 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "`/channel recap` posts how linked members placed after it ends, and "
         "`/channel leaderboard` posts the leaderboard every Sunday 00:00 UTC, and "
         "`/channel new-contest` announces each new contest (checked every 30 minutes) with an Add to "
-        "calendar button that sends an .ics file and pings you in the reminder. Set each one you want.",
+        "calendar button (sends an .ics file) and a Notify me button (pings you in the reminder). Set each one you want.",
     ),
 }
 
