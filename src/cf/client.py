@@ -153,33 +153,12 @@ class CodeforcesClient:
                 break
         return out
 
-    async def standings(
-        self, contest_id: int, handles: Sequence[str], chunk: int = 100
-    ) -> list[Standing]:
-        """Official standing rows of the given handles; handles Codeforces does not know are skipped."""
-        rows: list[Standing] = []
-        for i in range(0, len(handles), chunk):
-            rows += await self._standings(contest_id, list(handles[i : i + chunk]))
-        return rows
-
-    async def _standings(self, contest_id: int, handles: list[str]) -> list[Standing]:
-        params = {
-            "contestId": contest_id,
-            "handles": ";".join(handles),
-            "from": 1,
-            "count": len(handles),
-            "showUnofficial": "false",
-        }
-        try:
-            data = await self._call("contest.standings", params)
-        except HandleNotFound:
-            # One renamed or deleted handle fails the whole call: split to find and drop it.
-            if len(handles) == 1:
-                return []
-            mid = len(handles) // 2
-            return await self._standings(contest_id, handles[:mid]) + await self._standings(
-                contest_id, handles[mid:]
-            )
+    async def standings(self, contest_id: int, handles: Sequence[str]) -> list[Standing]:
+        """Official standing rows with any of the given handles, in rank order. Codeforces only
+        serves non-admin users a bare `contest.standings?contestId=<id>`, so this fetches every
+        row and filters here; unknown handles simply match nothing."""
+        wanted = {h.lower() for h in handles}
+        data = await self._call("contest.standings", {"contestId": contest_id})
         return [
             Standing(
                 rank=r["rank"],
@@ -188,6 +167,7 @@ class CodeforcesClient:
                 penalty=r["penalty"],
             )
             for r in data["rows"]
+            if any(m["handle"].lower() in wanted for m in r["party"]["members"])
         ]
 
     async def rating_history(self, handle: str) -> list[RatingChange]:
