@@ -116,6 +116,26 @@ async def test_daily_after_issue_then_solo_win_is_not_paid_twice(env):
     assert await store.rating(GUILD, 1) == 820
 
 
+async def test_contest_solve_counts_for_streak(env):
+    _, store, *_ = env
+    mid = await store.create_mashup(
+        guild_id=GUILD,
+        channel_id=5,
+        host_id=1,
+        host_handle="h1",
+        min_rating=800,
+        max_rating=1500,
+        count=1,
+        duration_seconds=7200,
+        penalty_minutes=0,
+        now=10,
+    )
+    await store.record_mashup_solves(mid, 1, {"1700A": (86400 * 3 + 5, 0)})
+    assert await store.daily_days(GUILD, 1) == [3]
+    assert await store.daily_days_by_user(GUILD) == {1: [3]}
+    assert await store.daily_days(GUILD, 2) == []
+
+
 async def test_errors(env):
     svc, store, cf, clock, problems = env
     with pytest.raises(NotLinked):

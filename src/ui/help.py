@@ -16,7 +16,9 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "`/gimme [rating] [min_rating] [max_rating] [tags] [exclude_tags] [contest_id]` gives a "
         "random problem you have not solved. With no rating it aims at your match rating.\n"
         "`/daily [rating]` gives one problem a day (new at 00:00 UTC). Solve it on Codeforces, "
-        "then run `/daily` again to claim double rating and raise your daily streak. "
+        "then run `/daily` again to claim double rating. "
+        "Your daily streak counts every day you claim the daily, solve a match or solve in a contest "
+        "(only the daily and your first solo win of the day pay double). "
         "Missing one day keeps the streak; two days in a row reset it.\n"
         "`/stalk [handle] [member]` lists problems someone tried but never solved.",
     ),

@@ -11,7 +11,7 @@ import aiosqlite
 
 from src.cf.models import Contest, Problem
 from src.errors import AlreadyInMatch, HandleTaken, MatchClosed, MatchFull
-from src.logic import DAILY_MULTIPLIER, START_RATING
+from src.logic import DAILY_MULTIPLIER, DAY_SECONDS, START_RATING
 
 MIGRATIONS = [
     """
@@ -801,25 +801,31 @@ class Store:
         )
         return DailyRow(**dict(row)) if row else None
 
-    async def daily_days(self, guild_id: int, user_id: int) -> list[int]:
-        """UTC days on which the user claimed the daily, newest first."""
+    async def _streak_days(self, guild_id: int, user_id: int | None) -> list[tuple[int, int]]:
+        """(user_id, UTC day) pairs with a claimed daily, a solved match or a contest solve."""
+        who = "" if user_id is None else " AND user_id = ?"
+        args = (guild_id,) + (() if user_id is None else (user_id,))
         rows = await self._all(
-            "SELECT day FROM daily WHERE guild_id = ? AND user_id = ? AND solved_at IS NOT NULL "
+            f"SELECT user_id, solved_at / {DAY_SECONDS} AS day FROM match_players "
+            f"WHERE guild_id = ? AND solved_at IS NOT NULL{who} "
+            f"UNION SELECT s.user_id, s.solved_at / {DAY_SECONDS} FROM mashup_solves s "
+            f"JOIN mashups m ON m.id = s.mashup_id WHERE m.guild_id = ?{who.replace('user_id', 's.user_id')} "
+            f"UNION SELECT user_id, day FROM daily "
+            f"WHERE guild_id = ? AND solved_at IS NOT NULL{who} "
             "ORDER BY day DESC",
-            (guild_id, user_id),
+            args * 3,
         )
-        return [r["day"] for r in rows]
+        return [(r["user_id"], r["day"]) for r in rows]
+
+    async def daily_days(self, guild_id: int, user_id: int) -> list[int]:
+        """UTC days with a claimed daily, a solved match or a contest solve, newest first."""
+        return [d for _, d in await self._streak_days(guild_id, user_id)]
 
     async def daily_days_by_user(self, guild_id: int) -> dict[int, list[int]]:
-        """Every user's claimed daily days in this server, newest first."""
-        rows = await self._all(
-            "SELECT user_id, day FROM daily WHERE guild_id = ? AND solved_at IS NOT NULL "
-            "ORDER BY day DESC",
-            (guild_id,),
-        )
+        """Every user's streak days in this server, newest first."""
         out: dict[int, list[int]] = {}
-        for r in rows:
-            out.setdefault(r["user_id"], []).append(r["day"])
+        for uid, day in await self._streak_days(guild_id, None):
+            out.setdefault(uid, []).append(day)
         return out
 
     async def issue_daily(
