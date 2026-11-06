@@ -330,6 +330,8 @@ MIGRATIONS = [
         PRIMARY KEY (guild_id, contest_id, user_id)
     );
     """,
+    # soon = 1 once the "starts within 48 hours" post of the contest went out
+    "ALTER TABLE newcontest_sent ADD COLUMN soon INTEGER NOT NULL DEFAULT 0;",
 ]
 
 
@@ -1473,6 +1475,20 @@ class Store:
     async def posted(self, guild_id: int) -> set[int]:
         rows = await self._all(
             "SELECT contest_id FROM newcontest_sent WHERE guild_id = ?", (guild_id,)
+        )
+        return {r["contest_id"] for r in rows}
+
+    async def mark_soon(self, guild_id: int, contest_id: int) -> bool:
+        """True only the first time, which makes the 48 hour post at-most-once."""
+        n = await self._write(
+            "UPDATE newcontest_sent SET soon = 1 WHERE guild_id = ? AND contest_id = ? AND soon = 0",
+            (guild_id, contest_id),
+        )
+        return n == 1
+
+    async def soon_posted(self, guild_id: int) -> set[int]:
+        rows = await self._all(
+            "SELECT contest_id FROM newcontest_sent WHERE guild_id = ? AND soon = 1", (guild_id,)
         )
         return {r["contest_id"] for r in rows}
 

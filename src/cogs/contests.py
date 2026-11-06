@@ -10,12 +10,14 @@ from discord.ext import commands, tasks
 from src.db.store import Reminder
 from src.errors import BotError, CacheNotReady, report_error
 from src.logic import (
+    NEW_CONTEST_SOON_SECONDS,
     contest_ics,
     new_contests,
     parse_minutes,
     recaps_due,
     reminders_due,
     select_contests,
+    soon_contests,
     week_start,
     weekly_board,
 )
@@ -113,6 +115,14 @@ class ContestButton(
                 await cog.notify(interaction, self.contest_id)
         except Exception as exc:
             await report_error(interaction, exc)
+
+
+def _buttons(contest_id: int, notify: bool) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(ContestButton("cal", contest_id))
+    if notify:
+        view.add_item(ContestButton("notify", contest_id))
+    return view
 
 
 class ContestsCog(commands.Cog, name="Contests"):
@@ -405,8 +415,10 @@ class ContestsCog(commands.Cog, name="Contests"):
         await self.bot.wait_until_ready()
 
     async def _send_new_contests(self) -> None:
-        """Announce each upcoming contest once per server in its new-contest channel. The
-        contest cache refreshes at least every 30 minutes, so this check reads the cache and sees new ones."""
+        """Announce each upcoming contest in its new-contest channel twice, at most once each per
+        server: when it first shows up, and when it starts within 48 hours (skipped if the first
+        post already came that late). The contest cache refreshes at least every 30 minutes, so
+        this check reads the cache and sees new ones."""
         s = self.s
         now = int(time.time())
         for guild_id, channel_id in await s.db.all_newcontests():
@@ -416,13 +428,21 @@ class ContestsCog(commands.Cog, name="Contests"):
             for contest in new_contests(s.contests.contests, await s.db.posted(guild_id), now):
                 if not await s.db.mark_posted(guild_id, contest.id):
                     continue
-                view = discord.ui.View(timeout=None)
-                view.add_item(ContestButton("cal", contest.id))
-                view.add_item(ContestButton("notify", contest.id))
-                try:
-                    await channel.send(embed=new_contest_embed(contest), view=view)
-                except discord.HTTPException:
-                    log.warning("Could not post new contest to %s", channel_id, exc_info=True)
+                if contest.start_time - now <= NEW_CONTEST_SOON_SECONDS:
+                    await s.db.mark_soon(guild_id, contest.id)
+                await self._post_contest(channel, contest, "New contest")
+            soon = soon_contests(s.contests.contests, await s.db.soon_posted(guild_id), now)
+            for contest in soon:
+                if await s.db.mark_soon(guild_id, contest.id):
+                    await self._post_contest(channel, contest, "Starts within 48 hours")
+
+    async def _post_contest(self, channel, contest, title: str) -> None:
+        try:
+            await channel.send(
+                embed=new_contest_embed(contest, title), view=_buttons(contest.id, notify=True)
+            )
+        except discord.HTTPException:
+            log.warning("Could not post new contest to %s", channel.id, exc_info=True)
 
     @tasks.loop(seconds=60)
     async def remind_loop(self) -> None:
@@ -486,6 +506,7 @@ class ContestsCog(commands.Cog, name="Contests"):
                     await channel.send(
                         f"{ping}**[{esc(contest.name)}]({contest.url})** starts "
                         f"<t:{contest.start_time}:R>.",
+                        view=_buttons(contest_id, notify=False),
                         allowed_mentions=discord.AllowedMentions(roles=True, users=True),
                     )
                 except discord.HTTPException:

@@ -29,6 +29,7 @@ from src.logic import (
     select_contests,
     solo_delta,
     solved_keys,
+    soon_contests,
     tag_suggestions,
     unsolved_keys,
 )
@@ -485,3 +486,18 @@ def test_contest_ics_has_utc_times_alarm_and_escaped_text():
     assert lines[0] == "BEGIN:VCALENDAR" and lines[-2] == "END:VCALENDAR" and lines[-1] == ""
     assert "DTSTART:20231114T221320Z" in lines and "DTEND:20231115T001320Z" in lines
     assert "SUMMARY:A\\, B\\; C" in lines and "TRIGGER:-PT10M" in lines
+
+
+def test_soon_contests_only_within_window_and_not_done():
+    def c(i, start, phase="BEFORE"):
+        return Contest(i, f"R{i}", "CF", phase, start, 7200)
+
+    H = 3600
+    contests = [
+        c(1, 100 + 47 * H),
+        c(2, 100 + 49 * H),
+        c(3, 100 + 2 * H),
+        c(4, 100),
+        c(5, 100 + H, "FINISHED"),
+    ]
+    assert [x.id for x in soon_contests(contests, {3}, 100)] == [1]

@@ -262,3 +262,69 @@ async def test_weekly_skips_a_week_already_sent_and_an_empty_board(monkeypatch):
     cog, db, ch = build_weekly(monkeypatch, WEEK - 604800, [])
     await cog._send_weekly()
     assert ch.embeds == [] and db.last_sent == WEEK
+
+
+class PostDB:
+    def __init__(self):
+        self.first: set[int] = set()
+        self.soon: set[int] = set()
+
+    async def all_newcontests(self):
+        return [(1, 5)]
+
+    async def posted(self, guild_id):
+        return set(self.first)
+
+    async def mark_posted(self, guild_id, contest_id):
+        new = contest_id not in self.first
+        self.first.add(contest_id)
+        return new
+
+    async def soon_posted(self, guild_id):
+        return set(self.soon)
+
+    async def mark_soon(self, guild_id, contest_id):
+        new = contest_id in self.first and contest_id not in self.soon
+        self.soon.add(contest_id)
+        return new
+
+
+class PostChannel:
+    id = 5
+
+    def __init__(self):
+        self.titles: list[str] = []
+
+    async def send(self, embed, view):
+        self.titles.append(embed.title)
+
+
+def post_cog(monkeypatch, start):
+    monkeypatch.setattr("src.cogs.contests.time.time", lambda: NOW)
+    db, ch = PostDB(), PostChannel()
+    contests = [Contest(7, "Round", "CF", "BEFORE", start, 7200)]
+    bot = SimpleNamespace(
+        get_channel=lambda cid: ch,
+        services=SimpleNamespace(db=db, contests=SimpleNamespace(contests=contests)),
+    )
+    cog = ContestsCog.__new__(ContestsCog)
+    cog.bot = bot
+    return cog, db, ch
+
+
+async def test_new_contest_posts_when_seen_and_again_within_48_hours(monkeypatch):
+    cog, db, ch = post_cog(monkeypatch, NOW + 5 * 86400)
+    await cog._send_new_contests()
+    await cog._send_new_contests()
+    assert ch.titles == ["New contest"]
+    monkeypatch.setattr("src.cogs.contests.time.time", lambda: NOW + 3 * 86400 + 60)
+    await cog._send_new_contests()
+    await cog._send_new_contests()
+    assert ch.titles == ["New contest", "Starts within 48 hours"]
+
+
+async def test_contest_first_seen_within_48_hours_is_posted_once(monkeypatch):
+    cog, db, ch = post_cog(monkeypatch, NOW + 3600)
+    await cog._send_new_contests()
+    await cog._send_new_contests()
+    assert ch.titles == ["New contest"]

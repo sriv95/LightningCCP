@@ -628,3 +628,11 @@ async def test_new_contest_channel_posts_each_contest_once_and_remembers_askers(
     assert await store.contest_reminders(1) == {13: [5, 4]}
     assert await store.clear_newcontest(1) is True and await store.clear_newcontest(1) is False
     assert await store.posted(1) == set()
+
+
+async def test_soon_post_is_marked_once_per_contest(store):
+    await store.set_newcontest(1, 7, [10])
+    assert await store.soon_posted(1) == set()
+    assert await store.mark_soon(1, 10) is True and await store.mark_soon(1, 10) is False
+    assert await store.mark_soon(1, 99) is False  # never announced: no row
+    assert await store.soon_posted(1) == {10}

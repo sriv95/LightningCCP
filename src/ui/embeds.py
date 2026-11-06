@@ -129,10 +129,8 @@ def contest_pages(
     return pages
 
 
-def new_contest_embed(c: Contest) -> discord.Embed:
-    return discord.Embed(
-        title="New contest", description=_contest_line(c), colour=discord.Colour.orange()
-    )
+def new_contest_embed(c: Contest, title: str = "New contest") -> discord.Embed:
+    return discord.Embed(title=title, description=_contest_line(c), colour=discord.Colour.orange())
 
 
 _MODE_LABEL = {"solo": "Solo", "duel": "Duel"}

@@ -13,6 +13,7 @@ LINK_MAX_RATING = 1200
 RUNNING_PHASES = frozenset({"CODING", "PENDING_SYSTEM_TEST", "SYSTEM_TEST"})
 MAX_REMINDER_MINUTES = 10080
 MAX_REMINDER_COUNT = 5
+NEW_CONTEST_SOON_SECONDS = 48 * 3600  # the second new-contest post comes this long before
 RECAP_WINDOW_SECONDS = 86400  # only contests that ended this recently get a recap
 CHOICE_MAX_LEN = 100
 LOBBY_TTL_SECONDS = 600
@@ -400,6 +401,21 @@ def new_contests(contests: Iterable[Contest], posted: set[int], now: int) -> lis
         and c.start_time is not None
         and c.start_time > now
         and c.id not in posted
+    ]
+    return sorted(due, key=lambda c: c.start_time)
+
+
+def soon_contests(
+    contests: Iterable[Contest], done: set[int], now: int, within: int = NEW_CONTEST_SOON_SECONDS
+) -> list[Contest]:
+    """Contests that start within `within` seconds and had no such post yet, soonest first."""
+    due = [
+        c
+        for c in contests
+        if c.phase == "BEFORE"
+        and c.start_time is not None
+        and now < c.start_time <= now + within
+        and c.id not in done
     ]
     return sorted(due, key=lambda c: c.start_time)
 

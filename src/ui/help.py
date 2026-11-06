@@ -70,11 +70,11 @@ HELP_TOPICS: dict[str, tuple[str, str]] = {
         "`/contests upcoming`, `/contests running` and `/contests recent` list Codeforces "
         "contests.\n`/ranklist <contest_id>` shows how this server's linked members placed.\n"
         "Admins (Manage Server) can set channels: `/channel reminder` posts a reminder before "
-        "each contest (optional role ping, minutes, and an `exclude` regex on the name), and "
+        "each contest with an Add to calendar button (optional role ping, minutes, and an `exclude` regex on the name), and "
         "`/channel recap` posts how linked members placed after it ends, and "
         "`/channel leaderboard` posts the leaderboard every Sunday 00:00 UTC, and "
-        "`/channel new-contest` announces each new contest (checked every 30 minutes) with an Add to "
-        "calendar button (sends an .ics file) and a Notify me button (pings you in the reminder). Set each one you want.",
+        "`/channel new-contest` announces each new contest (checked every 30 minutes) and again 48 hours before it starts, "
+        "with an Add to calendar button (sends an .ics file) and a Notify me button (pings you in the reminder). Set each one you want.",
     ),
 }
 
