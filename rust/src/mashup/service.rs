@@ -15,7 +15,7 @@ use crate::cf::models::Problem;
 use crate::errors::BotError;
 use crate::logic::base::{
     BINGO_MAX_SIZE, BINGO_MIN_SIZE, MASHUP_MAX_INTERVAL, MASHUP_MAX_PLAYERS, MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAM_SIZE,
-    MASHUP_MAX_TEAMS, first_solve, normalize_tags, parse_tags, solved_keys,
+    MASHUP_MAX_TEAMS, MASHUP_READS_PER_SECOND, first_solve, normalize_tags, parse_tags, solved_keys,
 };
 use crate::logic::mashup::{pick_mashup, pick_replacement, team_solves};
 use crate::matches::{CfApi, Clock, ProblemSource, system_clock};
@@ -82,6 +82,8 @@ pub struct MashupService<C, P> {
     pub interval: AtomicI64,
     /// Python `_read_at`: (contest, user) -> last read, in memory.
     pub(crate) read_at: Mutex<HashMap<(i64, i64), i64>>,
+    /// Python `MASHUP_READS_PER_SECOND`; a field only so a test can lower it (Python monkeypatches it).
+    pub(crate) reads_per_second: f64,
 }
 
 fn bot(e: BotError) -> anyhow::Error {
@@ -129,7 +131,14 @@ impl<C: CfApi, P: ProblemSource> MashupService<C, P> {
             rng: Mutex::new(rng),
             interval: AtomicI64::new(MASHUP_MAX_INTERVAL),
             read_at: Mutex::new(HashMap::new()),
+            reads_per_second: MASHUP_READS_PER_SECOND,
         }
+    }
+
+    /// Replaces the read budget (reads per second); the default is `MASHUP_READS_PER_SECOND`.
+    pub fn with_reads_per_second(mut self, reads_per_second: f64) -> Self {
+        self.reads_per_second = reads_per_second;
+        self
     }
 
     /// Python `int(self._clock())`: truncates toward zero.
