@@ -317,6 +317,11 @@ impl Kind {
     }
 }
 
+/// The `kind` option as sent (a string choice); Python `Literal` has only the three values.
+fn kind_of(kind: Option<String>) -> Kind {
+    kind.and_then(|k| poise::ChoiceParameter::from_name(&k)).unwrap_or(Kind::All)
+}
+
 /// The `sort` option of `/leaderboard`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, poise::ChoiceParameter)]
 pub enum Sort {
@@ -738,36 +743,68 @@ pub async fn expire_round(ctx: &serenity::Context, services: &Services) {
     expire_tick(match_service(services), ctx.http.as_ref()).await;
 }
 
-// ---- wiring left for s18 -----------------------------------------------------------------------------
+// ---- the services ------------------------------------------------------------------------------------
 
-/// TODO(s18): `Services` has no match service (s11) yet; return `&services.matches`.
-fn match_service(_services: &Services) -> &MatchService<CodeforcesClient, ProblemCache> {
-    unimplemented!("s18: Services has no match service yet")
+fn match_service(services: &Services) -> &MatchService<CodeforcesClient, ProblemCache> {
+    &services.matches
 }
 
 impl MatchEnv for Services {
     fn problems(&self) -> Arc<Vec<Problem>> {
-        unimplemented!("TODO(s18): self.problems.problems() once Services holds the ProblemCache")
+        crate::matches::ProblemSource::problems(self.problems.as_ref())
     }
 
     fn tags(&self) -> Vec<String> {
-        unimplemented!("TODO(s18): self.problems.tags() once Services holds the ProblemCache")
+        self.problems.tags().iter().cloned().collect()
     }
 
     async fn user_info(&self, handle: &str) -> anyhow::Result<User> {
         self.cf.user_info(handle).await
     }
 
-    async fn contest_history(&self, _guild: i64, _user: i64) -> anyhow::Result<Vec<MashupRecord>> {
-        unimplemented!("TODO(s16, s18): the mashup service")
+    async fn contest_history(&self, guild: i64, user: i64) -> anyhow::Result<Vec<MashupRecord>> {
+        self.mashups.history(guild, user, 50).await
     }
 
-    async fn contest_wins(&self, _guild: i64, _user: i64) -> anyhow::Result<i64> {
-        unimplemented!("TODO(s16, s18): the mashup service")
+    async fn contest_wins(&self, guild: i64, user: i64) -> anyhow::Result<i64> {
+        self.mashups.wins(guild, user, 200).await
     }
 
+    /// The contest half of `/ff` needs the Discord client; `ff` goes through `FfEnv`, never this.
     async fn forfeit_contest(&self, _guild: i64, _user: i64) -> anyhow::Result<Option<bool>> {
-        unimplemented!("TODO(s16, s18): the mashup service and the mashup cog's refresh and log_gave_up")
+        anyhow::bail!("forfeit_contest needs the Discord context: use FfEnv")
+    }
+}
+
+/// `Services` plus the Discord client, for `/ff`: the contest half calls `mashup::forfeit_contest_real`.
+struct FfEnv<'a> {
+    ctx: &'a serenity::Context,
+    services: &'a Services,
+}
+
+impl MatchEnv for FfEnv<'_> {
+    fn problems(&self) -> Arc<Vec<Problem>> {
+        self.services.problems()
+    }
+
+    fn tags(&self) -> Vec<String> {
+        MatchEnv::tags(self.services)
+    }
+
+    async fn user_info(&self, handle: &str) -> anyhow::Result<User> {
+        self.services.user_info(handle).await
+    }
+
+    async fn contest_history(&self, guild: i64, user: i64) -> anyhow::Result<Vec<MashupRecord>> {
+        self.services.contest_history(guild, user).await
+    }
+
+    async fn contest_wins(&self, guild: i64, user: i64) -> anyhow::Result<i64> {
+        self.services.contest_wins(guild, user).await
+    }
+
+    async fn forfeit_contest(&self, guild: i64, user: i64) -> anyhow::Result<Option<bool>> {
+        crate::cogs::mashup::forfeit_contest_real(self.ctx, self.services, guild, user).await
     }
 }
 
@@ -865,29 +902,30 @@ pub async fn match_custom(
 pub async fn match_history(
     ctx: Context<'_>,
     #[description = "Defaults to you; also shows your matches against them"] member: Option<serenity::Member>,
-    #[description = "Show matches and contests (default), only matches, or only contests"] kind: Option<Kind>,
+    #[description = "Show matches and contests (default), only matches, or only contests"] kind: Option<String>, // string choices set in `bot::commands`, like Python `Literal`
 ) -> anyhow::Result<()> {
     let s: &Arc<Services> = ctx.data();
     let other = member.map(to_member);
-    history(&s.db, s.as_ref(), &SlashOut(ctx), guild(ctx)?, &invoker(ctx).await, other.as_ref(), kind.unwrap_or(Kind::All)).await
+    history(&s.db, s.as_ref(), &SlashOut(ctx), guild(ctx)?, &invoker(ctx).await, other.as_ref(), kind_of(kind)).await
 }
 
 /// Leave or give up your unfinished match or contest
 #[poise::command(slash_command, guild_only)]
 pub async fn ff(ctx: Context<'_>) -> anyhow::Result<()> {
     let s: &Arc<Services> = ctx.data();
-    forfeit(match_service(s), s.as_ref(), &SlashOut(ctx), guild(ctx)?).await
+    forfeit(match_service(s), &FfEnv { ctx: ctx.serenity_context(), services: s.as_ref() }, &SlashOut(ctx), guild(ctx)?).await
 }
 
 /// Top match players in this server
 #[poise::command(slash_command, guild_only, rename = "leaderboard")]
 pub async fn leaderboard_command(
     ctx: Context<'_>,
-    #[description = "Rank by match rating (default) or by daily streak"] sort: Option<Sort>,
-    #[description = "Count matches and contests (default), only matches, or only contests"] kind: Option<Kind>,
+    #[description = "Rank by match rating (default) or by daily streak"] sort: Option<String>,
+    #[description = "Count matches and contests (default), only matches, or only contests"] kind: Option<String>,
 ) -> anyhow::Result<()> {
     let s: &Arc<Services> = ctx.data();
-    leaderboard(&s.db, &SlashOut(ctx), guild(ctx)?, now(), sort.unwrap_or(Sort::Rating), kind.unwrap_or(Kind::All)).await
+    let sort = sort.and_then(|s| poise::ChoiceParameter::from_name(&s)).unwrap_or(Sort::Rating);
+    leaderboard(&s.db, &SlashOut(ctx), guild(ctx)?, now(), sort, kind_of(kind)).await
 }
 
 /// A member's match rating, games and streak

@@ -2,9 +2,8 @@
 //! render step runs on a blocking thread (Python `asyncio.to_thread`).
 use std::collections::HashSet;
 use std::future::Future;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
-use fancy_regex::{Captures, Regex};
 use poise::serenity_prelude as serenity;
 
 use crate::bot::Context;
@@ -63,22 +62,7 @@ fn plain(message: impl Into<String>) -> anyhow::Error {
     BotError::Plain(message.into()).into()
 }
 
-/// Python `ui.embeds.esc`: `discord.utils.escape_markdown` (links kept) then `[` and `]` escaped.
-/// TODO(s18): replace with the `ui::embeds` port once s9 exports it.
-pub fn esc(text: &str) -> String {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| {
-        Regex::new(
-            r#"(?m)(?:(?P<url><[^: >]+:/[^ >]+>|(?:https?|steam)://[^\s<]+[^<.,:;"'\]\s])|(?P<markdown>[_\\~|*`]|^>(?:>>)?\s|\[.+\]\(.+\)|^#{1,3}|^\s*-))"#,
-        )
-        .expect("static regex")
-    });
-    let escaped = re.replace_all(text, |c: &Captures<'_, str>| match c.name("url") {
-        Some(url) => url.as_str().to_string(),
-        None => format!("\\{}", &c["markdown"]),
-    });
-    escaped.replace('[', "\\[").replace(']', "\\]")
-}
+pub use crate::ui::embeds::a::esc;
 
 /// Python `_check_args`.
 pub fn check_args(member: bool, handle: bool) -> anyhow::Result<()> {

@@ -1,0 +1,1006 @@
+[
+ {
+  "contexts": null,
+  "default_member_permissions": null,
+  "description": "Link Codeforces handles",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "handle",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "Link your Codeforces handle (proved by a compile error)",
+    "name": "link",
+    "options": [
+     {
+      "description": "Your Codeforces handle",
+      "name": "handle",
+      "required": true,
+      "type": 3
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "Show a member's Codeforces profile",
+    "name": "show",
+    "options": [
+     {
+      "description": "Defaults to you",
+      "name": "member",
+      "required": false,
+      "type": 6
+     },
+     {
+      "description": "Find the member who linked this Codeforces handle",
+      "name": "handle",
+      "required": false,
+      "type": 3
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "Linked members ranked by Codeforces rating",
+    "name": "list",
+    "options": [],
+    "type": 1
+   },
+   {
+    "description": "Remove your linked handle",
+    "name": "unlink",
+    "options": [],
+    "type": 1
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": [
+   0
+  ],
+  "default_member_permissions": null,
+  "description": "Get a random Codeforces problem",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "gimme",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "Exact rating",
+    "max_value": 3500,
+    "min_value": 800,
+    "name": "rating",
+    "required": false,
+    "type": 4
+   },
+   {
+    "description": "Minimum rating",
+    "max_value": 3500,
+    "min_value": 800,
+    "name": "min_rating",
+    "required": false,
+    "type": 4
+   },
+   {
+    "description": "Maximum rating",
+    "max_value": 3500,
+    "min_value": 800,
+    "name": "max_rating",
+    "required": false,
+    "type": 4
+   },
+   {
+    "autocomplete": true,
+    "description": "Comma-separated tags; the problem must have all of them",
+    "name": "tags",
+    "required": false,
+    "type": 3
+   },
+   {
+    "autocomplete": true,
+    "description": "Comma-separated tags to avoid",
+    "name": "exclude_tags",
+    "required": false,
+    "type": 3
+   },
+   {
+    "autocomplete": true,
+    "description": "Only problems from this Codeforces contest (type a name or id)",
+    "name": "contest_id",
+    "required": false,
+    "type": 4
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": [
+   0
+  ],
+  "default_member_permissions": null,
+  "description": "Your daily problem: solve it for double rating (resets 00:00 UTC)",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "daily",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "Problem rating (default: your match rating, floored to 100). A different rating than today's\u2026",
+    "max_value": 3500,
+    "min_value": 800,
+    "name": "rating",
+    "required": false,
+    "type": 4
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": [
+   0
+  ],
+  "default_member_permissions": null,
+  "description": "List problems someone tried but never solved",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "stalk",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "A Codeforces handle",
+    "name": "handle",
+    "required": false,
+    "type": 3
+   },
+   {
+    "description": "A server member with a linked handle (default: you)",
+    "name": "member",
+    "required": false,
+    "type": 6
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": null,
+  "default_member_permissions": null,
+  "description": "List Codeforces contests",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "contests",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "List future contests",
+    "name": "upcoming",
+    "options": [],
+    "type": 1
+   },
+   {
+    "description": "List contests running now",
+    "name": "running",
+    "options": [],
+    "type": 1
+   },
+   {
+    "description": "List recently finished contests",
+    "name": "recent",
+    "options": [],
+    "type": 1
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": null,
+  "default_member_permissions": 32,
+  "description": "Channels for contest reminders, recaps and the weekly leaderboard",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "channel",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "Where to remind about upcoming contests; no options shows it",
+    "name": "reminder",
+    "options": [
+     {
+      "channel_types": [
+       0,
+       5
+      ],
+      "description": "Channel to post reminders in",
+      "name": "set",
+      "required": false,
+      "type": 7
+     },
+     {
+      "description": "Role to ping",
+      "name": "role",
+      "required": false,
+      "type": 8
+     },
+     {
+      "description": "Minutes before the start, comma-separated (default 10,60)",
+      "name": "before",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "Regex on the contest name: matching contests get no reminder; clear removes it",
+      "name": "exclude",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "Stop reminders (forgets the channel only)",
+      "name": "clear",
+      "required": false,
+      "type": 5
+     },
+     {
+      "description": "Stop pinging the role",
+      "name": "clear_role",
+      "required": false,
+      "type": 5
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "Where to post how linked members placed after a contest; no options shows it",
+    "name": "recap",
+    "options": [
+     {
+      "channel_types": [
+       0,
+       5
+      ],
+      "description": "Channel to post recaps in",
+      "name": "set",
+      "required": false,
+      "type": 7
+     },
+     {
+      "description": "Stop recaps",
+      "name": "clear",
+      "required": false,
+      "type": 5
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "Where to post the leaderboard every Sunday 00:00 UTC; no options shows it",
+    "name": "leaderboard",
+    "options": [
+     {
+      "channel_types": [
+       0,
+       5
+      ],
+      "description": "Channel to post the weekly leaderboard in",
+      "name": "set",
+      "required": false,
+      "type": 7
+     },
+     {
+      "description": "Stop it",
+      "name": "clear",
+      "required": false,
+      "type": 5
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "Where to announce new contests with an Add to calendar button; no options shows it",
+    "name": "new-contest",
+    "options": [
+     {
+      "channel_types": [
+       0,
+       5
+      ],
+      "description": "Channel to announce new contests in",
+      "name": "set",
+      "required": false,
+      "type": 7
+     },
+     {
+      "description": "Stop announcements",
+      "name": "clear",
+      "required": false,
+      "type": 5
+     }
+    ],
+    "type": 1
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": [
+   0
+  ],
+  "default_member_permissions": null,
+  "description": "Standings of linked members in a contest",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "ranklist",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "Codeforces contest id",
+    "name": "contest_id",
+    "required": true,
+    "type": 4
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": null,
+  "default_member_permissions": null,
+  "description": "Play a Codeforces match",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "match",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "Practice alone for points",
+    "name": "solo",
+    "options": [
+     {
+      "description": "Problem rating (default: your match rating)",
+      "max_value": 3500,
+      "min_value": 800,
+      "name": "rating",
+      "required": false,
+      "type": 4
+     },
+     {
+      "autocomplete": true,
+      "description": "Comma-separated tags; the problem must have all of them",
+      "name": "tags",
+      "required": false,
+      "type": 3
+     },
+     {
+      "autocomplete": true,
+      "description": "Comma-separated tags to avoid",
+      "name": "exclude_tags",
+      "required": false,
+      "type": 3
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "Duel one other player for points",
+    "name": "duel",
+    "options": [
+     {
+      "description": "Challenge this member (default: anyone can join)",
+      "name": "opponent",
+      "required": false,
+      "type": 6
+     },
+     {
+      "description": "Problem rating (default: average match rating of the players)",
+      "max_value": 3500,
+      "min_value": 800,
+      "name": "rating",
+      "required": false,
+      "type": 4
+     },
+     {
+      "autocomplete": true,
+      "description": "Comma-separated tags; the problem must have all of them",
+      "name": "tags",
+      "required": false,
+      "type": 3
+     },
+     {
+      "autocomplete": true,
+      "description": "Comma-separated tags to avoid",
+      "name": "exclude_tags",
+      "required": false,
+      "type": 3
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "A match for several players",
+    "name": "custom",
+    "options": [
+     {
+      "description": "Maximum number of players",
+      "max_value": 10,
+      "min_value": 2,
+      "name": "players",
+      "required": true,
+      "type": 4
+     },
+     {
+      "description": "Problem rating (default: average match rating of the players)",
+      "max_value": 3500,
+      "min_value": 800,
+      "name": "rating",
+      "required": false,
+      "type": 4
+     },
+     {
+      "autocomplete": true,
+      "description": "Comma-separated tags; the problem must have all of them",
+      "name": "tags",
+      "required": false,
+      "type": 3
+     },
+     {
+      "autocomplete": true,
+      "description": "Comma-separated tags to avoid",
+      "name": "exclude_tags",
+      "required": false,
+      "type": 3
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "Show finished matches",
+    "name": "history",
+    "options": [
+     {
+      "description": "Defaults to you; also shows your matches against them",
+      "name": "member",
+      "required": false,
+      "type": 6
+     },
+     {
+      "choices": [
+       {
+        "name": "all",
+        "value": "all"
+       },
+       {
+        "name": "matches",
+        "value": "matches"
+       },
+       {
+        "name": "contests",
+        "value": "contests"
+       }
+      ],
+      "description": "Show matches and contests (default), only matches, or only contests",
+      "name": "kind",
+      "required": false,
+      "type": 3
+     }
+    ],
+    "type": 1
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": [
+   0
+  ],
+  "default_member_permissions": null,
+  "description": "Leave or give up your unfinished match or contest",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "ff",
+  "nsfw": false,
+  "options": [],
+  "type": 1
+ },
+ {
+  "contexts": [
+   0
+  ],
+  "default_member_permissions": null,
+  "description": "Top match players in this server",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "leaderboard",
+  "nsfw": false,
+  "options": [
+   {
+    "choices": [
+     {
+      "name": "rating",
+      "value": "rating"
+     },
+     {
+      "name": "streak",
+      "value": "streak"
+     }
+    ],
+    "description": "Rank by match rating (default) or by daily streak",
+    "name": "sort",
+    "required": false,
+    "type": 3
+   },
+   {
+    "choices": [
+     {
+      "name": "all",
+      "value": "all"
+     },
+     {
+      "name": "matches",
+      "value": "matches"
+     },
+     {
+      "name": "contests",
+      "value": "contests"
+     }
+    ],
+    "description": "Count matches and contests (default), only matches, or only contests",
+    "name": "kind",
+    "required": false,
+    "type": 3
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": [
+   0
+  ],
+  "default_member_permissions": null,
+  "description": "A member's match rating, games and streak",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "profile",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "Defaults to you",
+    "name": "member",
+    "required": false,
+    "type": 6
+   },
+   {
+    "description": "Find the member who linked this Codeforces handle",
+    "name": "handle",
+    "required": false,
+    "type": 3
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": null,
+  "default_member_permissions": null,
+  "description": "Rating graphs",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "plot",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "Graph a member's match rating in this server",
+    "name": "rating",
+    "options": [
+     {
+      "description": "Defaults to you",
+      "name": "member",
+      "required": false,
+      "type": 6
+     },
+     {
+      "description": "Find the member who linked this Codeforces handle",
+      "name": "handle",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "Compare with another member",
+      "name": "member2",
+      "required": false,
+      "type": 6
+     },
+     {
+      "description": "Compare with another member",
+      "name": "member3",
+      "required": false,
+      "type": 6
+     },
+     {
+      "description": "Compare with another member",
+      "name": "member4",
+      "required": false,
+      "type": 6
+     },
+     {
+      "description": "Compare with another member",
+      "name": "member5",
+      "required": false,
+      "type": 6
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "Graph Codeforces rating histories",
+    "name": "codeforces",
+    "options": [
+     {
+      "description": "Defaults to you",
+      "name": "member",
+      "required": false,
+      "type": 6
+     },
+     {
+      "description": "Any Codeforces handle",
+      "name": "handle",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "Compare with another handle",
+      "name": "handle2",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "Compare with another handle",
+      "name": "handle3",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "Compare with another handle",
+      "name": "handle4",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "Compare with another handle",
+      "name": "handle5",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "Compare with another member's linked handle",
+      "name": "member2",
+      "required": false,
+      "type": 6
+     },
+     {
+      "description": "Compare with another member's linked handle",
+      "name": "member3",
+      "required": false,
+      "type": 6
+     },
+     {
+      "description": "Compare with another member's linked handle",
+      "name": "member4",
+      "required": false,
+      "type": 6
+     },
+     {
+      "description": "Compare with another member's linked handle",
+      "name": "member5",
+      "required": false,
+      "type": 6
+     }
+    ],
+    "type": 1
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": null,
+  "default_member_permissions": null,
+  "description": "Host a timed multi-problem contest",
+  "dm_permission": false,
+  "integration_types": null,
+  "name": "host",
+  "nsfw": false,
+  "options": [
+   {
+    "description": "Open a timed contest lobby with a live scoreboard",
+    "name": "contest",
+    "options": [
+     {
+      "description": "Easiest problem rating (default 800)",
+      "max_value": 3500,
+      "min_value": 800,
+      "name": "min_rating",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Hardest problem rating (default 1500)",
+      "max_value": 3500,
+      "min_value": 800,
+      "name": "max_rating",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Number of problems (default 5)",
+      "max_value": 10,
+      "min_value": 1,
+      "name": "count",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Hours the contest lasts (default 2)",
+      "max_value": 24,
+      "min_value": 0,
+      "name": "hour",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Extra minutes (default 0)",
+      "max_value": 59,
+      "min_value": 0,
+      "name": "minute",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Minutes added per wrong attempt before a solve (default 0)",
+      "max_value": 120,
+      "min_value": 0,
+      "name": "penalty",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Number of teams (default 10)",
+      "max_value": 10,
+      "min_value": 2,
+      "name": "teams",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Players in each team, 1-5 (default 1: every player is a team of their own)",
+      "max_value": 5,
+      "min_value": 1,
+      "name": "players",
+      "required": false,
+      "type": 4
+     },
+     {
+      "autocomplete": true,
+      "description": "Comma-separated tags; the problem must have all of them",
+      "name": "tags",
+      "required": false,
+      "type": 3
+     },
+     {
+      "autocomplete": true,
+      "description": "Comma-separated tags to avoid",
+      "name": "exclude_tags",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "True (default) changes match ratings; False leaves them alone (unrated)",
+      "name": "rated",
+      "required": false,
+      "type": 5
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "Open a lobby that replays a finished Codeforces contest",
+    "name": "virtual",
+    "options": [
+     {
+      "autocomplete": true,
+      "description": "Codeforces contest id to replay (it must have finished)",
+      "name": "contest_id",
+      "required": true,
+      "type": 4
+     },
+     {
+      "description": "Minutes added per wrong attempt before a solve (default 0)",
+      "max_value": 120,
+      "min_value": 0,
+      "name": "penalty",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Number of teams (default 10)",
+      "max_value": 10,
+      "min_value": 2,
+      "name": "teams",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Players in each team, 1-5 (default 1: every player is a team of their own)",
+      "max_value": 5,
+      "min_value": 1,
+      "name": "players",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "True (default) changes match ratings; False leaves them alone (unrated)",
+      "name": "rated",
+      "required": false,
+      "type": 5
+     }
+    ],
+    "type": 1
+   },
+   {
+    "description": "Open a bingo lobby: teams race for the squares",
+    "name": "bingo",
+    "options": [
+     {
+      "description": "Squares on each side of the board, 3-7 (default 5)",
+      "max_value": 7,
+      "min_value": 3,
+      "name": "size",
+      "required": false,
+      "type": 4
+     },
+     {
+      "choices": [
+       {
+        "name": "classic",
+        "value": "classic"
+       },
+       {
+        "name": "replace",
+        "value": "replace"
+       }
+      ],
+      "description": "classic: a claimed square stays; replace: a claimed square gets a +100 problem to steal",
+      "name": "mode",
+      "required": false,
+      "type": 3
+     },
+     {
+      "choices": [
+       {
+        "name": "line",
+        "value": "line"
+       },
+       {
+        "name": "continuous",
+        "value": "continuous"
+       }
+      ],
+      "description": "line (default): the first full line wins; continuous: play to the end, rank by lines",
+      "name": "win",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "Easiest problem rating (default 800)",
+      "max_value": 3500,
+      "min_value": 800,
+      "name": "min_rating",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Hardest problem rating (default 1500)",
+      "max_value": 3500,
+      "min_value": 800,
+      "name": "max_rating",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Hours the contest lasts (default 2)",
+      "max_value": 24,
+      "min_value": 0,
+      "name": "hour",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Extra minutes (default 0)",
+      "max_value": 59,
+      "min_value": 0,
+      "name": "minute",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Number of teams (default 10)",
+      "max_value": 10,
+      "min_value": 2,
+      "name": "teams",
+      "required": false,
+      "type": 4
+     },
+     {
+      "description": "Players in each team, 1-5 (default 1: every player is a team of their own)",
+      "max_value": 5,
+      "min_value": 1,
+      "name": "players",
+      "required": false,
+      "type": 4
+     },
+     {
+      "autocomplete": true,
+      "description": "Comma-separated tags; the problem must have all of them",
+      "name": "tags",
+      "required": false,
+      "type": 3
+     },
+     {
+      "autocomplete": true,
+      "description": "Comma-separated tags to avoid",
+      "name": "exclude_tags",
+      "required": false,
+      "type": 3
+     },
+     {
+      "description": "True (default) changes match ratings; False leaves them alone (unrated)",
+      "name": "rated",
+      "required": false,
+      "type": 5
+     }
+    ],
+    "type": 1
+   }
+  ],
+  "type": 1
+ },
+ {
+  "contexts": null,
+  "default_member_permissions": null,
+  "description": "How to use this bot",
+  "dm_permission": true,
+  "integration_types": null,
+  "name": "help",
+  "nsfw": false,
+  "options": [
+   {
+    "choices": [
+     {
+      "name": "start",
+      "value": "start"
+     },
+     {
+      "name": "problems",
+      "value": "problems"
+     },
+     {
+      "name": "matches",
+      "value": "matches"
+     },
+     {
+      "name": "contests",
+      "value": "contests"
+     },
+     {
+      "name": "ratings",
+      "value": "ratings"
+     },
+     {
+      "name": "contest-list",
+      "value": "contest-list"
+     }
+    ],
+    "description": "What to read about; leave empty for an overview",
+    "name": "topic",
+    "required": false,
+    "type": 3
+   }
+  ],
+  "type": 1
+ }
+]

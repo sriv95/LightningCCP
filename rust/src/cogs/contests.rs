@@ -1127,7 +1127,7 @@ pub trait ContestData: Sync {
 
 impl ContestData for Services {
     fn contests(&self) -> Arc<Vec<Contest>> {
-        todo!("TODO(s18): self.contests.contests() once Services holds the ContestCache")
+        self.contests.contests()
     }
     async fn reminder(&self, guild: i64) -> anyhow::Result<Option<Reminder>> {
         self.db.get_reminder(guild).await
@@ -1581,6 +1581,7 @@ fn channel_arg(ctx: Context<'_>, channel: Option<serenity::GuildChannel>) -> Opt
 #[poise::command(
     slash_command,
     guild_only,
+    default_member_permissions = "MANAGE_GUILD",
     subcommands("channel_reminder", "channel_recap", "channel_leaderboard", "channel_new_contest")
 )]
 pub async fn channel(_ctx: Context<'_>) -> anyhow::Result<()> {

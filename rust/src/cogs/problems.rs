@@ -168,19 +168,16 @@ pub async fn stalk<C: CfApi, P: ProblemSource>(
 
 // --- the Discord side -----------------------------------------------------------------------------------------
 
-/// TODO(s18): return `&services.problems` once `Services` has the problem cache (s8).
-fn problems_of(_services: &Services) -> &ProblemCache {
-    unimplemented!("s18: Services has no problem cache yet")
+fn problems_of(services: &Services) -> &ProblemCache {
+    &services.problems
 }
 
-/// TODO(s18): return `&services.contests` once `Services` has the contest cache (s8).
-fn contests_of(_services: &Services) -> &crate::cache::contests::ContestCache {
-    unimplemented!("s18: Services has no contest cache yet")
+fn contests_of(services: &Services) -> &crate::cache::contests::ContestCache {
+    &services.contests
 }
 
-/// TODO(s18): return `&services.daily` once `Services` has the daily service (s12).
-fn daily_of(_services: &Services) -> &Daily {
-    unimplemented!("s18: Services has no daily service yet")
+fn daily_of(services: &Services) -> &Daily {
+    &services.daily
 }
 
 fn rng() -> rand::rngs::StdRng {
@@ -266,7 +263,7 @@ pub async fn gimme_command(
 #[poise::command(slash_command, guild_only, rename = "daily")]
 pub async fn daily_command(
     ctx: Context<'_>,
-    #[description = "Problem rating (default: your match rating, floored to 100). A different rating than today's unsolved daily replaces it"]
+    #[description = "Problem rating (default: your match rating, floored to 100). A different rating than today's…"] // Python's description cut to what discord.py sends (Discord rejects over 100 characters)
     #[min = 800]
     #[max = 3500]
     rating: Option<i64>,

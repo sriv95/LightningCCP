@@ -141,7 +141,7 @@ fn problems_commands_registered_with_python_options() {
     let stalk: Vec<String> = problems::stalk_command().parameters.iter().map(|p| p.description.clone().unwrap().to_string()).collect();
     assert_eq!(stalk, ["A Codeforces handle", "A server member with a linked handle (default: you)"]);
     let daily = problems::daily_command();
-    assert_eq!(daily.parameters[0].description.as_deref(), Some("Problem rating (default: your match rating, floored to 100). A different rating than today's unsolved daily replaces it"));
+    assert_eq!(daily.parameters[0].description.as_deref(), Some("Problem rating (default: your match rating, floored to 100). A different rating than today's…")); // discord.py `_shorten`s it to 100 characters; Discord rejects more
     for c in [&gimme, &daily] {
         let rating = &c.parameters[0];
         assert_eq!((rating.type_setter.is_some(), rating.autocomplete_callback.is_none()), (true, true));

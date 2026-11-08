@@ -1,8 +1,7 @@
 //! Port of src/cogs/mashup.py: `/host contest|virtual|bingo`, the persistent `mashup:<action>:<id>` buttons, the
 //! team modal, the solve-log thread, and the mashup loop. Like cogs/matches.rs, each flow is a function over the
 //! `MashupService` and narrow output traits (fakes in tests); the poise commands and the serenity impls at the
-//! bottom are thin. s18b registers the commands, routes components and modals, starts the loop, and replaces the
-//! `TODO(s18b)` stubs.
+//! bottom are thin. `bot.rs` registers the commands, routes components and modals, and starts the loop.
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -797,20 +796,19 @@ pub async fn forfeit_contest_real(ctx: &serenity::Context, services: &Services, 
     forfeit_contest(mashup_service(services), ctx.http.as_ref(), guild, user).await
 }
 
-// ---- wiring left for s18b ------------------------------------------------------------------------------
+// ---- the services ------------------------------------------------------------------------------------
 
-/// TODO(s18b): `Services` has no mashup service (field `mashups`, s16) yet; return `&services.mashups`.
-fn mashup_service(_services: &Services) -> &MashupService<CodeforcesClient, ProblemCache> {
-    unimplemented!("TODO(s18b): Services has no mashup service yet")
+fn mashup_service(services: &Services) -> &MashupService<CodeforcesClient, ProblemCache> {
+    &services.mashups
 }
 
 impl MashupEnv for Services {
     fn tags(&self) -> Vec<String> {
-        unimplemented!("TODO(s18b): self.problems.tags() once Services holds the ProblemCache")
+        self.problems.tags().iter().cloned().collect()
     }
 
     fn contests(&self) -> Arc<Vec<Contest>> {
-        unimplemented!("TODO(s18b): self.contests.contests() once Services holds the ContestCache")
+        self.contests.contests()
     }
 }
 

@@ -204,9 +204,8 @@ fn now() -> i64 {
     crate::daily::system_clock() as i64 // Python int(time.time())
 }
 
-/// TODO(s18): `Services.problems` (the `ProblemCache`, s8) does not exist yet; return `&services.problems`.
-fn problems_of(_services: &Services) -> &crate::cache::problems::ProblemCache {
-    unimplemented!("s18: Services has no problem cache yet")
+fn problems_of(services: &Services) -> &crate::cache::problems::ProblemCache {
+    &services.problems
 }
 
 fn rng() -> rand::rngs::StdRng {

@@ -26,9 +26,9 @@ pub async fn reply<O: Output>(out: &O, topic: Option<&str>) -> anyhow::Result<()
 #[poise::command(slash_command)]
 pub async fn help(
     ctx: Context<'_>,
-    #[description = "What to read about; leave empty for an overview"] topic: Option<Topic>,
+    #[description = "What to read about; leave empty for an overview"] topic: Option<String>, // a string choice set in `bot::commands`, like Python `Literal`
 ) -> anyhow::Result<()> {
-    reply(&DiscordOutput::from_ctx(ctx)?, topic.map(|t| poise::ChoiceParameter::name(&t))).await
+    reply(&DiscordOutput::from_ctx(ctx)?, topic.as_deref()).await
 }
 
 #[cfg(test)]
@@ -51,7 +51,8 @@ mod tests {
         assert_eq!(c.description.as_deref(), Some("How to use this bot"));
         let p = &c.parameters[0];
         assert_eq!((p.name.to_string(), p.description.as_deref(), p.required), ("topic".to_string(), Some("What to read about; leave empty for an overview"), false));
-        let names: Vec<_> = p.choices.iter().map(|ch| ch.name.to_string()).collect();
+        // the string choices themselves are added in `bot::commands` (checked by tests/wiring.rs)
+        let names: Vec<_> = <Topic as poise::ChoiceParameter>::list().iter().map(|ch| ch.name.to_string()).collect();
         assert_eq!(names, ["start", "problems", "matches", "contests", "ratings", "contest-list"]);
     }
 }
