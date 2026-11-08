@@ -129,8 +129,17 @@ fn check_regex_trims_limits_and_validates() {
 fn custom_id_parses_like_the_dynamic_item_template() {
     assert_eq!(parse_custom_id("cal:1700"), Some((Action::Cal, 1700)));
     assert_eq!(parse_custom_id("notify:7"), Some((Action::Notify, 7)));
-    for bad in ["cal:", "cal", "cal:12a", "cal:-1", "cal: 1", "cal:1\n", "Cal:1", "notify:1:2", "match:cal:1", "page:next", ":1", "cal:\u{661}"] {
+    for bad in ["cal:", "cal", "cal:12a", "cal:-1", "cal: 1", "cal:1\n", "Cal:1", "notify:1:2", "match:cal:1", "page:next", ":1"] {
         assert_eq!(parse_custom_id(bad), None, "{bad:?}");
+    }
+    // Python `\d` and `int()` take any Unicode decimal digit (checked with .venv/bin/python -I)
+    assert_eq!(parse_custom_id("cal:\u{661}"), Some((Action::Cal, 1)));
+    assert_eq!(parse_custom_id("cal:\u{ff11}\u{ff12}"), Some((Action::Cal, 12)));
+    assert_eq!(parse_custom_id("notify:1\u{662}"), Some((Action::Notify, 12)));
+    assert_eq!(parse_custom_id("cal:\u{660}\u{660}"), Some((Action::Cal, 0)));
+    assert_eq!(parse_custom_id("cal:\u{9e9}\u{1d7d8}"), Some((Action::Cal, 30)));
+    for bad in ["cal:\u{b2}", "cal:\u{2167}", "cal:\u{967}x"] {
+        assert_eq!(parse_custom_id(bad), None, "{bad:?}"); // superscript, roman numeral: not Nd
     }
     // too big for i64: saturates, no contest has that id
     assert_eq!(parse_custom_id("cal:99999999999999999999999"), Some((Action::Cal, i64::MAX)));
