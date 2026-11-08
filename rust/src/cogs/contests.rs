@@ -55,14 +55,20 @@ pub fn check_regex(raw: &str) -> anyhow::Result<String> {
     }
     // Python's errors first (fancy-regex accepts some patterns `re` rejects), then fancy-regex's own.
     // Only the "Invalid regex: " prefix is byte-exact (user decision): the detail may differ.
-    match py_re::check(pattern) {
+    let clean = py_to_fancy::strip_noise(pattern);
+    match py_re::check(&clean) {
         Ok(()) => {}
         Err(py_re::Error::Re(detail)) => return Err(plain(format!("Invalid regex: {detail}"))),
         // Python raises OverflowError here, which `except re.error` misses: the user sees "Something went wrong".
         Err(py_re::Error::Overflow) => anyhow::bail!("the repetition number is too large"),
     }
-    RegexBuilder::new(pattern).build().map_err(|e| plain(format!("Invalid regex: {e}")))?;
+    delegate(&clean).build().map_err(|e| plain(format!("Invalid regex: {e}")))?;
     Ok(pattern.to_string())
+}
+
+fn delegate(python_pattern: &str) -> RegexBuilder {
+    // default delegate size limit (regex's 10 MiB): a raised one lets one user's pattern spike the bot's memory
+    RegexBuilder::new(&py_to_fancy::translate(python_pattern))
 }
 
 /// Python `_not_excluded`: drop contests whose name matches the regex (`re.IGNORECASE`, `search`), except the ids
@@ -71,9 +77,16 @@ pub fn not_excluded(contests: &[Contest], pattern: &str, keep: &HashSet<i64>) ->
     if pattern.is_empty() {
         return Ok(contests.to_vec());
     }
-    let rx = RegexBuilder::new(pattern).case_insensitive(true).build()?;
+    Ok(drop_matching(contests, &exclude_regex(pattern)?, keep))
+}
+
+fn exclude_regex(pattern: &str) -> anyhow::Result<fancy_regex::Regex> {
+    Ok(delegate(&py_to_fancy::strip_noise(pattern)).case_insensitive(true).build()?)
+}
+
+fn drop_matching(contests: &[Contest], rx: &fancy_regex::Regex, keep: &HashSet<i64>) -> Vec<Contest> {
     // shortcut: a match that exceeds fancy-regex's backtrack limit counts as no match (Python would just run long)
-    Ok(contests.iter().filter(|c| keep.contains(&c.id) || !rx.is_match(&c.name).unwrap_or(false)).cloned().collect())
+    contests.iter().filter(|c| keep.contains(&c.id) || !rx.is_match(&c.name).unwrap_or(false)).cloned().collect()
 }
 
 /// What Python's `re.compile` rejects that fancy-regex accepts (a port must not take what Python refused): a
@@ -534,6 +547,488 @@ mod py_re {
                 Some(')') => self.err("global flags not at the start of the expression"),
                 Some(_) => self.err("unknown flag"),
                 None => self.err("missing -, : or )"),
+            }
+        }
+    }
+}
+
+/// Python 3.12 `re` syntax to fancy-regex syntax, for patterns `py_re` accepted. fancy-regex reads the same text
+/// differently (octal escapes, `\ `, `[` in a set, `{,n}`, `\Z`, `\<`, set operators `&&` and `--` in a class), has no
+/// `(?a)` flag, rejects repeats of zero-width items, and its `(?x)` mode also drops whitespace inside a class. The
+/// output never uses `(?x)`; verbose mode is applied by `strip_noise`.
+mod py_to_fancy {
+    #[derive(Clone, Copy)]
+    struct Flags {
+        ascii: bool,
+        icase: bool,
+    }
+
+    struct Frame {
+        open: usize,
+        flags: Flags,
+        look: bool,
+        /// Every item so far is zero-width.
+        zw: bool,
+        /// Start in `out` of the last item, and whether it is zero-width (a repeat of it is rewritten).
+        last: Option<(usize, bool)>,
+    }
+
+    /// `(?flags)` or `(?flags:` at `i` (just after the `?`): the on flags, off flags, terminator and the index after it.
+    fn flag_group(s: &[char], mut i: usize) -> Option<(String, String, char, usize)> {
+        let (mut on, mut off) = (String::new(), String::new());
+        while let Some(&c) = s.get(i).filter(|c| "aiLmsux".contains(**c)) {
+            on.push(c);
+            i += 1;
+        }
+        if s.get(i) == Some(&'-') {
+            i += 1;
+            while let Some(&c) = s.get(i).filter(|c| "imsx".contains(**c)) {
+                off.push(c);
+                i += 1;
+            }
+        }
+        let term = *s.get(i).filter(|c| **c == ')' || **c == ':')?;
+        (!on.is_empty() || !off.is_empty()).then_some((on, off, term, i + 1))
+    }
+
+    /// Drops `(?#...)` comments (Python lets a quantifier follow one) and, in verbose mode (`(?x)`, `(?x:...)`),
+    /// whitespace and `#` comments outside a class. Shortcut: `a +` becomes `a+`, and `a+ +` then reads as the
+    /// possessive `a++` where Python says "multiple repeat"; upgrade if that ever matters.
+    pub fn strip_noise(src: &str) -> String {
+        let s: Vec<char> = src.chars().collect();
+        let (mut out, mut i, mut verbose, mut saved) = (String::new(), 0, false, vec![]);
+        while i < s.len() {
+            let c = s[i];
+            i += 1;
+            match c {
+                '\\' => {
+                    out.push(c);
+                    out.extend(s.get(i));
+                    i += usize::from(i < s.len());
+                }
+                '[' => {
+                    out.push(c);
+                    if s.get(i) == Some(&'^') {
+                        out.push('^');
+                        i += 1;
+                    }
+                    let mut first = true;
+                    while i < s.len() {
+                        let d = s[i];
+                        i += 1;
+                        out.push(d);
+                        if d == '\\' {
+                            out.extend(s.get(i));
+                            i += usize::from(i < s.len());
+                        } else if d == ']' && !first {
+                            break;
+                        }
+                        first = false;
+                    }
+                }
+                '(' if s.get(i) == Some(&'?') && s.get(i + 1) == Some(&'#') => match s[i..].iter().position(|&c| c == ')') {
+                    Some(n) => i += n + 1,
+                    None => out.push(c), // unterminated: keep it so `py_re` reports it
+                },
+                '(' => match s.get(i).filter(|c| **c == '?').and_then(|_| flag_group(&s, i + 1)) {
+                    Some((on, off, term, next)) => {
+                        out.extend(&s[i - 1..next]);
+                        i = next;
+                        if term == ')' {
+                            verbose |= on.contains('x');
+                        } else {
+                            saved.push(verbose);
+                            verbose = (verbose || on.contains('x')) && !off.contains('x');
+                        }
+                    }
+                    None => {
+                        saved.push(verbose);
+                        out.push(c);
+                    }
+                },
+                ')' => {
+                    out.push(c);
+                    verbose = saved.pop().unwrap_or(verbose);
+                }
+                '#' if verbose => {
+                    while i < s.len() && s[i] != '\n' {
+                        i += 1;
+                    }
+                }
+                c if verbose && " \t\n\r\x0b\x0c".contains(c) => {}
+                _ => out.push(c),
+            }
+        }
+        out
+    }
+
+    /// Item text for a class (`\d \D \s \S \w \W`): Python's `\s` also has U+001C..U+001F; `(?a)` limits to ASCII.
+    fn set_body(e: char, ascii: bool) -> &'static str {
+        match (e, ascii) {
+            ('d', false) => r"\d",
+            ('D', false) => r"\D",
+            ('w', false) => r"\w",
+            ('W', false) => r"\W",
+            ('s', false) => r"\s\x{1c}-\x{1f}",
+            ('S', false) => r"[^\s\x{1c}-\x{1f}]",
+            ('d', true) => "0-9",
+            ('D', true) => "[^0-9]",
+            ('w', true) => "a-zA-Z0-9_",
+            ('W', true) => "[^a-zA-Z0-9_]",
+            ('s', true) => r"\x{20}\x{9}-\x{d}",
+            _ => r"[^\x{20}\x{9}-\x{d}]",
+        }
+    }
+
+    fn code(c: u32) -> String {
+        format!(r"\x{{{c:x}}}")
+    }
+
+    /// A literal code point. `(?a)` with ignore-case folds ASCII letters only: fancy-regex's `(?i)` would also fold
+    /// `K` (Kelvin sign) and `s` (long s) to ASCII.
+    fn lit(c: u32, f: Flags) -> String {
+        match char::from_u32(c) {
+            Some(ch) if f.ascii && f.icase && ch.is_ascii_alphabetic() => format!("(?-i:[{}{}])", ch.to_ascii_lowercase(), ch.to_ascii_uppercase()),
+            Some(ch) if f.ascii && ch as u32 > 127 => format!("(?-i:{ch})"),
+            Some(ch) if ch.is_ascii_alphanumeric() || c > 127 => ch.to_string(),
+            _ => code(c),
+        }
+    }
+
+    enum Item {
+        Code(u32),
+        Set(String),
+    }
+
+    struct T {
+        s: Vec<char>,
+        i: usize,
+        out: String,
+        frames: Vec<Frame>,
+    }
+
+    pub fn translate(src: &str) -> String {
+        let flags = Flags { ascii: false, icase: true };
+        let mut t = T { s: src.chars().collect(), i: 0, out: String::new(), frames: vec![Frame { open: 0, flags, look: false, zw: true, last: None }] };
+        while let Some(c) = t.next() {
+            t.step(c);
+        }
+        t.out
+    }
+
+    impl T {
+        fn peek(&self) -> Option<char> {
+            self.s.get(self.i).copied()
+        }
+
+        fn next(&mut self) -> Option<char> {
+            let c = self.peek();
+            self.i += usize::from(c.is_some());
+            c
+        }
+
+        fn top(&mut self) -> &mut Frame {
+            self.frames.last_mut().expect("the root frame stays")
+        }
+
+        fn flags(&self) -> Flags {
+            self.frames.last().map_or(Flags { ascii: false, icase: true }, |f| f.flags)
+        }
+
+        /// Append an item and remember it as the target of a following repeat.
+        fn put(&mut self, text: &str, zw: bool) {
+            let start = self.out.len();
+            self.out.push_str(text);
+            let top = self.top();
+            top.zw &= zw;
+            top.last = Some((start, zw));
+        }
+
+        fn open(&mut self, text: &str, look: bool, flags: Flags) {
+            let open = self.out.len();
+            self.out.push_str(text);
+            self.frames.push(Frame { open, flags, look, zw: true, last: None });
+        }
+
+        fn digits(&mut self, radix: u32, max: usize) -> u32 {
+            let mut v = 0u32;
+            for _ in 0..max {
+                let Some(d) = self.peek().and_then(|c| c.to_digit(radix)) else { break };
+                v = v.saturating_mul(radix).saturating_add(d);
+                self.i += 1;
+            }
+            v
+        }
+
+        /// Python: `\0` plus up to two octal digits; in a class `\1`..`\7` too.
+        fn octal(&mut self, first: char) -> u32 {
+            let mut v = first.to_digit(8).unwrap_or(0);
+            for _ in 0..2 {
+                let Some(d) = self.peek().and_then(|c| c.to_digit(8)) else { break };
+                v = v * 8 + d;
+                self.i += 1;
+            }
+            v
+        }
+
+        fn step(&mut self, c: char) {
+            let f = self.flags();
+            match c {
+                '(' => self.group(),
+                ')' => {
+                    self.out.push(')');
+                    if self.frames.len() > 1 {
+                        let g = self.frames.pop().expect("checked");
+                        let zw = g.look || g.zw;
+                        let top = self.top();
+                        top.zw &= zw;
+                        top.last = Some((g.open, zw));
+                    }
+                }
+                '|' => {
+                    self.out.push('|');
+                    self.top().last = None;
+                }
+                '[' => {
+                    let text = self.class(f);
+                    self.put(&text, false);
+                }
+                '\\' => self.escape(f),
+                '^' | '$' => self.put(&c.to_string(), true),
+                '.' => self.put(".", false),
+                '*' => self.quantify(c, 0, None),
+                '+' => self.quantify(c, 1, None),
+                '?' => self.quantify(c, 0, Some(1)),
+                '{' => match self.bounds() {
+                    Some((min, max)) => self.quantify('{', min, max),
+                    None => self.put(&code(c as u32), false),
+                },
+                _ => self.put(&lit(c as u32, f), false),
+            }
+        }
+
+        /// After a `{` that opens a repeat `{m}`, `{m,}`, `{,n}`, `{m,n}` (consumed through `}`), else None, nothing consumed.
+        fn bounds(&mut self) -> Option<(u64, Option<u64>)> {
+            let start = self.i;
+            let num = |me: &mut T| {
+                let mut d = String::new();
+                while let Some(c) = me.peek().filter(char::is_ascii_digit) {
+                    d.push(c);
+                    me.i += 1;
+                }
+                d
+            };
+            let lo = num(self);
+            let comma = self.peek() == Some(',');
+            self.i += usize::from(comma);
+            let hi = if comma { num(self) } else { lo.clone() };
+            if self.peek() != Some('}') || (lo.is_empty() && hi.is_empty() && !comma) {
+                self.i = start;
+                return None;
+            }
+            self.i += 1;
+            Some((lo.parse().unwrap_or(0), hi.parse().ok()))
+        }
+
+        /// A repeat of the last item. A repeat of a zero-width item (fancy-regex rejects it) is `(?:X|)` when it may match
+        /// zero times, else `X`: such an item matches empty or not at all, whatever the count.
+        fn quantify(&mut self, c: char, min: u64, max: Option<u64>) {
+            let suffix = self.peek().filter(|c| *c == '?' || *c == '+');
+            self.i += usize::from(suffix.is_some());
+            if let Some((start, true)) = self.top().last {
+                if min == 0 {
+                    // `(?:X|)`: fancy-regex rejects `X?` for a lookaround too
+                    self.out.insert_str(start, "(?:");
+                    self.out.push_str("|)");
+                }
+                return;
+            }
+            match (c, max) {
+                ('{', Some(m)) if m == min => self.out.push_str(&format!("{{{min}}}")),
+                ('{', Some(m)) => self.out.push_str(&format!("{{{min},{m}}}")),
+                ('{', None) => self.out.push_str(&format!("{{{min},}}")),
+                _ => self.out.push(c),
+            }
+            self.out.extend(suffix);
+        }
+
+        fn escape(&mut self, f: Flags) {
+            let Some(c) = self.next() else { return };
+            match c {
+                'A' => self.put(r"\A", true),
+                'Z' => self.put(r"\z", true),
+                // fancy-regex cannot switch off Unicode inline, so the ASCII boundary is spelled with lookarounds
+                'b' | 'B' if f.ascii => {
+                    let w = "(?-i:[a-zA-Z0-9_])";
+                    let (same, diff) = (format!("(?<={w})(?={w})|(?<!{w})(?!{w})"), format!("(?<={w})(?!{w})|(?<!{w})(?={w})"));
+                    self.put(&format!("(?:{})", if c == 'b' { diff } else { same }), true)
+                }
+                'b' | 'B' => self.put(&format!("\\{c}"), true),
+                'd' | 'D' | 's' | 'S' | 'w' | 'W' => {
+                    let body = format!("[{}]", set_body(c, f.ascii));
+                    self.put(&if f.ascii { format!("(?-i:{body})") } else { body }, false);
+                }
+                'a' => self.put(&code(7), false),
+                'f' => self.put(&code(12), false),
+                'n' => self.put(&code(10), false),
+                'r' => self.put(&code(13), false),
+                't' => self.put(&code(9), false),
+                'v' => self.put(&code(11), false),
+                'x' | 'u' | 'U' => {
+                    let v = self.digits(16, [('x', 2), ('u', 4), ('U', 8)].iter().find(|p| p.0 == c).map_or(2, |p| p.1));
+                    self.put(&lit(v, f), false);
+                }
+                'N' => {
+                    // shortcut: no Unicode name table, `\N{name}` stays as written (fancy-regex reads it as `\N`, any
+                    // non-newline, then text); upgrade when a name table is available.
+                    let start = self.i;
+                    while self.next().is_some_and(|c| c != '}') {}
+                    let text: String = self.s[start..self.i].iter().collect();
+                    self.put(&format!("\\N{text}"), false);
+                }
+                '0' => {
+                    let v = self.octal(c);
+                    self.put(&lit(v, f), false);
+                }
+                '1'..='9' => {
+                    let is_oct = |c: Option<char>| c.is_some_and(|c| ('0'..='7').contains(&c));
+                    if is_oct(Some(c)) && is_oct(self.s.get(self.i).copied()) && is_oct(self.s.get(self.i + 1).copied()) {
+                        let v = self.octal(c);
+                        self.put(&lit(v, f), false);
+                    } else {
+                        let two = self.peek().filter(char::is_ascii_digit);
+                        self.i += usize::from(two.is_some());
+                        self.put(&format!("\\{c}{}", two.map(String::from).unwrap_or_default()), false);
+                    }
+                }
+                _ => self.put(&lit(c as u32, f), false),
+            }
+        }
+
+        fn class_item(&mut self, c: char) -> Item {
+            if c != '\\' {
+                return Item::Code(c as u32);
+            }
+            let Some(e) = self.next() else { return Item::Code('\\' as u32) };
+            let ascii = self.flags().ascii;
+            match e {
+                'd' | 'D' | 's' | 'S' | 'w' | 'W' => Item::Set(set_body(e, ascii).to_string()),
+                'a' => Item::Code(7),
+                'b' => Item::Code(8),
+                'f' => Item::Code(12),
+                'n' => Item::Code(10),
+                'r' => Item::Code(13),
+                't' => Item::Code(9),
+                'v' => Item::Code(11),
+                'x' => Item::Code(self.digits(16, 2)),
+                'u' => Item::Code(self.digits(16, 4)),
+                'U' => Item::Code(self.digits(16, 8)),
+                '0'..='7' => Item::Code(self.octal(e)),
+                'N' => {
+                    let start = self.i;
+                    while self.next().is_some_and(|c| c != '}') {}
+                    Item::Set(format!("\\N{}", self.s[start..self.i].iter().collect::<String>()))
+                }
+                _ => Item::Code(e as u32),
+            }
+        }
+
+        /// After `[`. Every literal becomes `\x{..}` so `[`, `&&`, `--`, `~~` stay literal. Under `(?a)` the class is
+        /// ignore-case free and its ASCII letters are expanded to both cases by hand.
+        fn class(&mut self, f: Flags) -> String {
+            let neg = self.peek() == Some('^');
+            self.i += usize::from(neg);
+            let mut ranges: Vec<(u32, u32)> = vec![];
+            let mut sets = String::new();
+            let mut first = true;
+            while let Some(c) = self.next() {
+                if c == ']' && !first {
+                    break;
+                }
+                first = false;
+                let lhs = self.class_item(c);
+                if self.peek() == Some('-') && self.s.get(self.i + 1).is_some_and(|n| *n != ']') {
+                    self.i += 1;
+                    let t = self.next().expect("checked");
+                    if let (Item::Code(a), Item::Code(b)) = (&lhs, self.class_item(t)) {
+                        ranges.push((*a, b));
+                        continue;
+                    }
+                }
+                match lhs {
+                    Item::Code(a) => ranges.push((a, a)),
+                    Item::Set(text) => sets.push_str(&text),
+                }
+            }
+            if f.ascii && f.icase {
+                for (lo, hi) in ranges.clone() {
+                    for (a, b, delta) in [(97, 122, -32i64), (65, 90, 32)] {
+                        let (x, y) = (lo.max(a), hi.min(b));
+                        if x <= y {
+                            ranges.push(((x as i64 + delta) as u32, (y as i64 + delta) as u32));
+                        }
+                    }
+                }
+            }
+            let body: String = ranges.iter().map(|&(a, b)| if a == b { code(a) } else { format!("{}-{}", code(a), code(b)) }).collect();
+            let class = format!("[{}{body}{sets}]", if neg { "^" } else { "" });
+            if f.ascii { format!("(?-i:{class})") } else { class }
+        }
+
+        /// After `(`.
+        fn group(&mut self) {
+            let f = self.flags();
+            if self.peek() != Some('?') {
+                return self.open("(", false, f);
+            }
+            self.i += 1;
+            match (self.peek(), self.s.get(self.i + 1).copied()) {
+                (Some(':'), _) | (Some('>'), _) => {
+                    let c = self.next().expect("peeked");
+                    self.open(&format!("(?{c}"), false, f)
+                }
+                (Some('=' | '!'), _) => {
+                    let c = self.next().expect("peeked");
+                    self.open(&format!("(?{c}"), true, f)
+                }
+                (Some('<'), Some('=' | '!')) => {
+                    let (a, b) = (self.next().expect("peeked"), self.next().expect("peeked"));
+                    self.open(&format!("(?{a}{b}"), true, f)
+                }
+                (Some('P'), Some('<')) => {
+                    let start = self.i;
+                    while self.next().is_some_and(|c| c != '>') {}
+                    let text: String = self.s[start..self.i].iter().collect();
+                    self.open(&format!("(?{text}"), false, f)
+                }
+                (Some('P'), _) => {
+                    let start = self.i;
+                    while self.next().is_some_and(|c| c != ')') {}
+                    let text: String = self.s[start..self.i].iter().collect();
+                    self.put(&format!("(?{text}"), false)
+                }
+                (Some('('), _) => {
+                    let start = self.i;
+                    while self.next().is_some_and(|c| c != ')') {}
+                    let text: String = self.s[start..self.i].iter().collect();
+                    self.open(&format!("(?{text}"), false, f)
+                }
+                _ => {
+                    let Some((on, off, term, next)) = flag_group(&self.s, self.i) else { return };
+                    self.i = next;
+                    let g = Flags { ascii: f.ascii || on.contains('a'), icase: (f.icase || on.contains('i')) && !off.contains('i') };
+                    let on: String = on.chars().filter(|c| !"aux".contains(*c)).collect();
+                    let off: String = off.chars().filter(|c| *c != 'x').collect();
+                    let text = format!("(?{on}{}{}{term}", if off.is_empty() { "" } else { "-" }, off);
+                    if term == ':' {
+                        self.open(&text, false, g);
+                    } else {
+                        if !(on.is_empty() && off.is_empty()) {
+                            self.out.push_str(&text);
+                        }
+                        self.top().flags = g;
+                    }
+                }
             }
         }
     }
@@ -1218,6 +1713,8 @@ pub struct LoopState {
     pub warned_channels: HashSet<(i64, i64)>,
     /// (guild, contest) to (next try, delay) of a recap that failed
     pub recap_retry: HashMap<(i64, i64), (i64, i64)>,
+    /// compiled reminder-exclude patterns, so the 60 s tick does not recompile them (pruned to the stored ones)
+    excludes: HashMap<String, fancy_regex::Regex>,
 }
 
 /// A send that failed is logged and swallowed (Python `except discord.HTTPException`).
@@ -1268,7 +1765,9 @@ pub async fn send_due_reminders<D: ContestData, C: Channels>(
     state: &mut LoopState,
     now: i64,
 ) -> anyhow::Result<()> {
-    for reminder in db.all_reminders().await? {
+    let reminders = db.all_reminders().await?;
+    state.excludes.retain(|k, _| reminders.iter().any(|r| &r.exclude == k));
+    for reminder in reminders {
         // a reminder row may have no channel: Python looks up channel None and never finds it
         let channel = reminder.channel_id.filter(|&c| chans.exists(c));
         let Some(channel) = channel else {
@@ -1284,7 +1783,14 @@ pub async fn send_due_reminders<D: ContestData, C: Channels>(
         let keep: HashSet<i64> = asked.keys().copied().collect();
         let mut offsets: Vec<(i64, Vec<i64>)> = vec![];
         let mut contests: HashMap<i64, Contest> = HashMap::new();
-        let candidates = not_excluded(&data.contests(), &reminder.exclude, &keep)?;
+        let candidates = if reminder.exclude.is_empty() {
+            data.contests().to_vec()
+        } else {
+            if !state.excludes.contains_key(&reminder.exclude) {
+                state.excludes.insert(reminder.exclude.clone(), exclude_regex(&reminder.exclude)?);
+            }
+            drop_matching(&data.contests(), &state.excludes[&reminder.exclude], &keep)
+        };
         for (contest, before) in reminders_due(&candidates, &reminder.before_mins, &sent, now) {
             match offsets.iter_mut().find(|(id, _)| *id == contest.id) {
                 Some((_, v)) => v.push(before),

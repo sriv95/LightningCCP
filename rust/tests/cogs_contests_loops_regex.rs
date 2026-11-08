@@ -2,7 +2,9 @@
 //! "Invalid regex: " prefix stays exact. The verdict table comes from running Python
 //! (`.venv/bin/python -I`, `re.compile(pattern)`); fancy-regex is the engine, so the other direction (Python
 //! accepts, fancy-regex cannot) is pinned in `PYTHON_ONLY_ACCEPTED` as a known gap.
-use lightningccp::cogs::contests::check_regex;
+use lightningccp::cf::models::Contest;
+use lightningccp::cogs::contests::{check_regex, not_excluded};
+use std::collections::HashSet;
 use lightningccp::errors::BotError;
 
 pub const PYTHON_VERDICTS: &[(&str, bool)] = &[
@@ -363,13 +365,12 @@ pub const PYTHON_VERDICTS: &[(&str, bool)] = &[
     (r##"(?<=a++)b"##, false),
 ];
 
-/// Python accepts these, fancy-regex does not (octal and surrogate escapes, `(?a)` flags, nested sets, repeats
-/// of zero-width items, repeat counts the engine caps). Pinned so a change shows up.
-const PYTHON_ONLY_ACCEPTED: &[&str] = &[
-    r"\0", r"\01", r"\ ", r"(?a)a", r"[[a]", r"[\1]", r"[\0]", r"[\N{LATIN SMALL LETTER A}]", r"(?=a)*", r"(?<=a)*",
-    r"(?:)*", r"a{2147483647}", r"(a{1000}){1000}", r"\ud800", r"\udfff", r"[\ud800-\udfff]", r"\377", r"\08", r"\00",
-    r"\012", r"\100", r"\1000", r"(?ia)", r"(?ai)a", r"(?a:a)",
-];
+/// Python accepts these, fancy-regex does not, and the translation cannot help: `\N{name}` inside a set (needs the
+/// Unicode name table), lone surrogates (a Rust `char` cannot be one), and `a{2147483647}` (the engine unrolls the
+/// count: 2^31 copies; `(a{1000}){1000}` is over the default size limit, kept low at a trust boundary: memory). Also `\ `: the bot strips the pattern first,
+/// which leaves a lone backslash that Python rejects too (`a\ b` is in `PYTHON_MATCHES`). Pinned so a change shows up.
+const PYTHON_ONLY_ACCEPTED: &[&str] =
+    &[r"\ ", r"[\N{LATIN SMALL LETTER A}]", r"a{2147483647}", r"(a{1000}){1000}", r"\ud800", r"\udfff", r"[\ud800-\udfff]"];
 
 /// Python rejects it, but the check needs the Unicode name table to know (`\N{...}` is not looked up).
 const RUST_ONLY_ACCEPTED: &[&str] = &[r"\N{nonexistent name}"];
@@ -423,4 +424,156 @@ fn valid_python_patterns_stay_accepted() {
     ] {
         assert_eq!(check_regex(p).unwrap(), p);
     }
+}
+
+/// Generated with `.venv/bin/python -I`: re.search(pattern, text, re.IGNORECASE) is not None.
+const PYTHON_MATCHES: &[(&str, &str, bool)] = &[
+    (r##"\0"##, "a\u{0}b", true),
+    (r##"\0"##, r##"ab"##, false),
+    (r##"\01"##, "\u{1}", true),
+    (r##"\01"##, r##"01"##, false),
+    (r##"\377"##, "\u{ff}", true),
+    (r##"\377"##, r##"377"##, false),
+    (r##"\08"##, "\u{0}8", true),
+    (r##"\00"##, "\u{0}", true),
+    (r##"\012"##, "\u{a}", true),
+    (r##"\100"##, r##"@"##, true),
+    (r##"\1000"##, r##"@0"##, true),
+    (r##"\1000"##, r##"@"##, false),
+    (r##"a\ b"##, r##"a b"##, true),
+    (r##"a\ b"##, r##"a\ b"##, false),
+    (r##"\<"##, r##"<"##, true),
+    (r##"\<"##, r##"x"##, false),
+    (r##"\>"##, r##">"##, true),
+    (r##"[\1]"##, "\u{1}", true),
+    (r##"[\1]"##, r##"1"##, false),
+    (r##"[\0]"##, "\u{0}", true),
+    (r##"[\0]"##, r##"0"##, false),
+    (r##"[\101]"##, r##"A"##, true),
+    (r##"(a)\1"##, r##"aa"##, true),
+    (r##"(a)\1"##, r##"ab"##, false),
+    (r##"(?a)\w"##, "\u{e9}", false),
+    (r##"(?a)\w"##, r##"e"##, true),
+    (r##"\w"##, "\u{e9}", true),
+    (r##"(?a)\d"##, "\u{663}", false),
+    (r##"\d"##, "\u{663}", true),
+    (r##"(?a)\d"##, r##"5"##, true),
+    (r##"(?a)\s"##, "\u{a0}", false),
+    (r##"\s"##, "\u{a0}", true),
+    (r##"(?a)\s"##, r##" "##, true),
+    (r##"\s"##, "\u{1c}", true),
+    (r##"\S"##, "\u{1c}", false),
+    (r##"(?a)\W"##, "\u{e9}", true),
+    (r##"(?a)\D"##, "\u{663}", true),
+    (r##"(?a)\S"##, "\u{a0}", true),
+    (r##"(?a)\bx"##, "\u{e9}x", true),
+    (r##"\bx"##, "\u{e9}x", false),
+    (r##"(?a)\Bx"##, "\u{e9}x", false),
+    (r##"(?ia)k"##, "\u{212a}", false),
+    (r##"(?i)k"##, "\u{212a}", true),
+    (r##"(?ai)k"##, r##"K"##, true),
+    (r##"(?a:k)"##, "\u{212a}", false),
+    (r##"(?ia:k)"##, "\u{212a}", false),
+    (r##"(?i:k)"##, "\u{212a}", true),
+    (r##"(?a)\u00e9"##, "\u{c9}", false),
+    (r##"(?a)k"##, "\u{212a}", false),
+    (r##"(?ia)\u00e9"##, "\u{c9}", false),
+    (r##"(?i)\u00e9"##, "\u{c9}", true),
+    (r##"(?ia)[k]"##, "\u{212a}", false),
+    (r##"(?ia)[a-z]"##, "\u{212a}", false),
+    (r##"(?ia)[a-z]"##, r##"Q"##, true),
+    (r##"(?i)[a-z]"##, "\u{212a}", true),
+    (r##"(?ia)[^k]"##, r##"K"##, false),
+    (r##"(?ia)[^k]"##, "\u{212a}", true),
+    (r##"(?ia)[\W]"##, "\u{212a}", true),
+    (r##"(?ia)\W"##, "\u{212a}", true),
+    (r##"(?i)\W"##, "\u{212a}", false),
+    (r##"(?a:\w)\w"##, "\u{e9}\u{e9}", false),
+    (r##"(?a:\w)\w"##, "e\u{e9}", true),
+    (r##"(?a:\w)\w"##, "\u{e9}e", false),
+    (r##"x(?a:\d)"##, "x\u{663}", false),
+    (r##"(?a)[\d]"##, "\u{663}", false),
+    (r##"(?a)[^\d]"##, "\u{663}", true),
+    (r##"[[a]"##, r##"["##, true),
+    (r##"[[a]"##, r##"a"##, true),
+    (r##"[[a]"##, r##"b"##, false),
+    (r##"[a&&b]"##, r##"&"##, true),
+    (r##"[a&&b]"##, r##"a"##, true),
+    (r##"[a-c]"##, r##"b"##, true),
+    (r##"[]a]"##, r##"]"##, true),
+    (r##"[^]a]"##, r##"]"##, false),
+    (r##"[^]a]"##, r##"b"##, true),
+    (r##"[a-]"##, r##"-"##, true),
+    (r##"[\]]"##, r##"]"##, true),
+    (r##"[\b]"##, "\u{8}", true),
+    (r##"[x~~y]"##, r##"~"##, true),
+    (r##"[\w-]"##, r##"-"##, true),
+    (r##"(?=a)*b"##, r##"b"##, true),
+    (r##"(?=a)*b"##, r##"ab"##, true),
+    (r##"(?<=a)*b"##, r##"b"##, true),
+    (r##"(?:)*b"##, r##"b"##, true),
+    (r##"a(?=b)+"##, r##"ab"##, true),
+    (r##"a(?=b)+"##, r##"ac"##, false),
+    (r##"a(?=b){2}"##, r##"ab"##, true),
+    (r##"a(?=b)?c"##, r##"ac"##, true),
+    (r##"(?:)+a"##, r##"a"##, true),
+    (r##"a(?!b)*c"##, r##"ac"##, true),
+    (r##"(?=a)*?b"##, r##"b"##, true),
+    (r##"((?=a))*b"##, r##"b"##, true),
+    (r##"(?:^)*a"##, r##"a"##, true),
+    (r##"a(?:)*?b"##, r##"ab"##, true),
+    (r##"(?:)+x(?:){0}y"##, r##"xy"##, true),
+    (r##"(?<=a)+b"##, r##"ab"##, true),
+    (r##"(?<=a)+b"##, r##"b"##, false),
+    (r##"(?!a)+b"##, r##"b"##, true),
+    (r##"(?=a)+b"##, r##"b"##, false),
+    (r##"a{,3}b"##, r##"aab"##, true),
+    (r##"a{,3}b"##, r##"{,3}b"##, true),
+    (r##"^a{,2}$"##, r##"aaa"##, false),
+    (r##"a{2}"##, r##"a"##, false),
+    (r##"a{2}"##, r##"aa"##, true),
+    (r##"a{x}"##, r##"a{x}"##, true),
+    (r##"a{"##, r##"a{"##, true),
+    (r##"^a{,}$"##, r##"aaaa"##, true),
+    (r##"a{1,2}+"##, r##"aaa"##, true),
+    (r##"{"##, r##"{"##, true),
+    (r##"x{1"##, r##"x{1"##, true),
+    (r##"\Zx"##, r##"x"##, false),
+    (r##"x\Z"##, r##"x"##, true),
+    (r##"x\Z"##, "x\u{a}", false),
+    (r##"x\A"##, r##"x"##, false),
+    (r##"a(?#c)*b"##, r##"b"##, true),
+    (r##"a(?#c)*b"##, r##"aab"##, true),
+    (r##"a(?#c)+b"##, r##"b"##, false),
+    (r##"(?x) a b "##, r##"ab"##, true),
+    (r##"(?x) a b "##, r##"a b"##, false),
+    (r##"(?x)a # c("##, r##"a"##, true),
+    (r##"(?x)a\ b"##, r##"a b"##, true),
+    (r##"(?x)[ a]"##, r##" "##, true),
+    (r##"(?x)a #(\nb"##, r##"ab"##, true),
+    (r##"(?x: a b )c"##, r##"abc"##, true),
+    (r##"(?x: a b )c"##, r##"ab c"##, false),
+    (r##"(?x:a b) c"##, r##"a b c"##, false),
+    (r##"(?x:a b) c"##, r##"ab c"##, true),
+    (r##"(?x)a +"##, r##"aaa"##, true),
+    (r##"(?x)a +b"##, r##"b"##, false),
+    (r##"(?x)(?-x: a)b"##, r##" ab"##, true),
+    (r##"(?x)\#"##, r##"#"##, true),
+    (r##"(?x)[#]"##, r##"#"##, true),
+    (r##"(?x)a (?: b )"##, r##"ab"##, true),
+    (r##"(?x)"##, r##"z"##, true),
+    (r##"(?x)(?#c)a"##, r##"a"##, true),
+];
+
+/// `search` with IGNORECASE: the contest is dropped from `not_excluded` exactly when the pattern matches its name.
+fn matches(pattern: &str, text: &str) -> bool {
+    let contest = Contest { id: 1, name: text.to_string(), kind: "CF".into(), phase: "BEFORE".into(), start_time: None, duration: 0 };
+    check_regex(pattern).unwrap_or_else(|e| panic!("{pattern:?}: {e}"));
+    not_excluded(&[contest], pattern, &HashSet::new()).unwrap().is_empty()
+}
+
+#[test]
+fn translated_patterns_match_as_python_does() {
+    let bad: Vec<_> = PYTHON_MATCHES.iter().filter(|(p, t, expected)| matches(p, t) != *expected).collect();
+    assert!(bad.is_empty(), "differs from Python: {bad:?}");
 }
