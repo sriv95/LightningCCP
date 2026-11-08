@@ -1,0 +1,47 @@
+[
+ {
+  "id": 9,
+  "name": "A, B; C",
+  "start": 1700000000,
+  "duration": 7200,
+  "now": 1699990000,
+  "alarm": 10,
+  "ics": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LightningCCP//Contests//EN\r\nBEGIN:VEVENT\r\nUID:cf-contest-9@lightningccp\r\nDTSTAMP:20231114T192640Z\r\nDTSTART:20231114T221320Z\r\nDTEND:20231115T001320Z\r\nSUMMARY:A\\, B\\; C\r\nURL:https://codeforces.com/contest/9\r\nDESCRIPTION:https://codeforces.com/contest/9\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:A\\, B\\; C starts in 10 minutes\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+ },
+ {
+  "id": 1999,
+  "name": "Codeforces Round #900 (Div. 1) \\ with back\\slash\r\nand newline; semi, comma xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "start": 1731000000,
+  "duration": 9000,
+  "now": 1730000000,
+  "alarm": 60,
+  "ics": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LightningCCP//Contests//EN\r\nBEGIN:VEVENT\r\nUID:cf-contest-1999@lightningccp\r\nDTSTAMP:20241027T033320Z\r\nDTSTART:20241107T172000Z\r\nDTEND:20241107T195000Z\r\nSUMMARY:Codeforces Round #900 (Div. 1) \\\\ with back\\\\slash\\nand newline\\; semi\\, comma xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\r\nURL:https://codeforces.com/contest/1999\r\nDESCRIPTION:https://codeforces.com/contest/1999\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Codeforces Round #900 (Div. 1) \\\\ with back\\\\slash\\nand newline\\; semi\\, comma xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx starts in 60 minutes\r\nTRIGGER:-PT60M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+ },
+ {
+  "id": 2000,
+  "name": "Контест ไทย 😀 round",
+  "start": 4102444800,
+  "duration": 0,
+  "now": 0,
+  "alarm": 5,
+  "ics": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LightningCCP//Contests//EN\r\nBEGIN:VEVENT\r\nUID:cf-contest-2000@lightningccp\r\nDTSTAMP:19700101T000000Z\r\nDTSTART:21000101T000000Z\r\nDTEND:21000101T000000Z\r\nSUMMARY:Контест ไทย 😀 round\r\nURL:https://codeforces.com/contest/2000\r\nDESCRIPTION:https://codeforces.com/contest/2000\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Контест ไทย 😀 round starts in 5 minutes\r\nTRIGGER:-PT5M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+ },
+ {
+  "id": 3,
+  "name": "Leap day",
+  "start": 1709251199,
+  "duration": 86400,
+  "now": 1709251200,
+  "alarm": 10080,
+  "ics": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LightningCCP//Contests//EN\r\nBEGIN:VEVENT\r\nUID:cf-contest-3@lightningccp\r\nDTSTAMP:20240301T000000Z\r\nDTSTART:20240229T235959Z\r\nDTEND:20240301T235959Z\r\nSUMMARY:Leap day\r\nURL:https://codeforces.com/contest/3\r\nDESCRIPTION:https://codeforces.com/contest/3\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Leap day starts in 10080 minutes\r\nTRIGGER:-PT10080M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+ },
+ {
+  "id": 4,
+  "name": "Before epoch",
+  "start": 1,
+  "duration": 1,
+  "now": 0,
+  "alarm": 1,
+  "ics": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//LightningCCP//Contests//EN\r\nBEGIN:VEVENT\r\nUID:cf-contest-4@lightningccp\r\nDTSTAMP:19700101T000000Z\r\nDTSTART:19700101T000001Z\r\nDTEND:19700101T000002Z\r\nSUMMARY:Before epoch\r\nURL:https://codeforces.com/contest/4\r\nDESCRIPTION:https://codeforces.com/contest/4\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Before epoch starts in 1 minutes\r\nTRIGGER:-PT1M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+ }
+]
