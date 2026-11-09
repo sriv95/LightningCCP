@@ -94,8 +94,8 @@ fn float(v: &Value) -> f64 {
 /// Fake Codeforces: every GET answers the case's payload.
 struct Fixed(Value);
 impl Http for Fixed {
-    fn get<'a>(&'a self, _: &'a str, _: &'a Params) -> BoxFuture<'a, Result<Value, ()>> {
-        Box::pin(async move { Ok(self.0.clone()) })
+    fn get<'a>(&'a self, _: &'a str, _: &'a Params) -> BoxFuture<'a, Result<Vec<u8>, ()>> {
+        Box::pin(async move { Ok(serde_json::to_vec(&self.0).map_err(|_| ())?) })
     }
 }
 

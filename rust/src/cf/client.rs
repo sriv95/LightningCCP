@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -6,6 +7,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use serde_json::value::RawValue;
 use tokio::sync::Mutex;
 use tokio::time::{Instant, sleep};
 
@@ -19,10 +21,10 @@ const UNREACHABLE: &str = "Codeforces is unreachable or down for maintenance.";
 pub type Params = Vec<(&'static str, String)>;
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// GET `url` with `params`; the parsed JSON body whatever the HTTP status. Any failure (network,
-/// timeout, body not JSON) is an `Err`, which the client reports as "unreachable".
+/// GET `url` with `params`; the raw body whatever the HTTP status. A network failure or timeout is an
+/// `Err`; a body that is not JSON is the client's to find, and it reports "unreachable" too.
 pub trait Http: Send + Sync {
-    fn get<'a>(&'a self, url: &'a str, params: &'a Params) -> BoxFuture<'a, Result<Value, ()>>;
+    fn get<'a>(&'a self, url: &'a str, params: &'a Params) -> BoxFuture<'a, Result<Vec<u8>, ()>>;
 }
 
 pub struct ReqwestHttp(reqwest::Client);
@@ -34,11 +36,11 @@ impl ReqwestHttp {
 }
 
 impl Http for ReqwestHttp {
-    fn get<'a>(&'a self, url: &'a str, params: &'a Params) -> BoxFuture<'a, Result<Value, ()>> {
+    fn get<'a>(&'a self, url: &'a str, params: &'a Params) -> BoxFuture<'a, Result<Vec<u8>, ()>> {
         Box::pin(async move {
             let resp = self.0.get(url).query(params).timeout(Duration::from_secs(15)).send().await.map_err(|_| ())?;
             let body = resp.bytes().await.map_err(|_| ())?; // content type ignored, like aiohttp content_type=None
-            serde_json::from_slice(&body).map_err(|_| ())
+            Ok(body.into())
         })
     }
 }
@@ -66,9 +68,28 @@ impl CodeforcesClient {
     }
 
     async fn call<T: DeserializeOwned>(&self, method: &str, params: Params) -> anyhow::Result<T> {
+        self.call_with(method, params, |result| Ok(serde_json::from_str(result)?)).await
+    }
+
+    /// Sends the request and hands `parse` the raw `result` text of an OK reply, borrowed from the body: no
+    /// `Value` tree for the big endpoints. Only the envelope is read here; `result` stays unparsed.
+    async fn call_with<T>(&self, method: &str, params: Params, parse: impl Fn(&str) -> anyhow::Result<T>) -> anyhow::Result<T> {
+        /// Python reads `status` and `comment` with `.get`; `comment` must be a str if read, absent is "".
+        #[derive(Deserialize)]
+        struct Envelope<'a> {
+            #[serde(default)]
+            status: Value,
+            #[serde(default, deserialize_with = "some")]
+            comment: Option<Value>, // `Some(Null)` (present, null) differs from `None` (absent)
+            #[serde(default, borrow)]
+            result: Option<&'a RawValue>, // null and absent are both "null"
+        }
+        fn some<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+            Value::deserialize(d).map(Some)
+        }
         let url = format!("{BASE_URL}{method}");
         for attempt in 0..self.retries {
-            let payload = {
+            let body = {
                 let mut last = self.last_call.lock().await;
                 if let Some(t) = *last {
                     let wait = self.interval.saturating_sub(t.elapsed());
@@ -80,12 +101,19 @@ impl CodeforcesClient {
                 self.http.get(&url, &params).await.map_err(|()| unreachable_err())?
             };
             // Python `payload.get`/`comment.lower()` raise AttributeError on a non-dict payload or a
-            // non-str comment: not a BotError, so the cogs reply "Something went wrong".
-            let Value::Object(mut object) = payload else { anyhow::bail!("Codeforces payload is not a JSON object") };
-            if object.get("status").and_then(Value::as_str) == Some("OK") {
-                return Ok(serde_json::from_value(object.remove("result").unwrap_or(Value::Null))?);
+            // non-str comment: not a BotError, so the cogs reply "Something went wrong". Not JSON at
+            // all is "unreachable". A struct would also read a JSON array as a sequence: check for `{`.
+            let envelope = if body.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{') {
+                serde_json::from_slice::<Envelope>(&body).map_err(|_| unreachable_err())?
+            } else if serde_json::from_slice::<serde::de::IgnoredAny>(&body).is_ok() {
+                anyhow::bail!("Codeforces payload is not a JSON object")
+            } else {
+                return Err(unreachable_err());
+            };
+            if envelope.status.as_str() == Some("OK") {
+                return parse(envelope.result.map_or("null", |r| r.get()));
             }
-            let comment = match object.get("comment") {
+            let comment = match &envelope.comment {
                 None => "",
                 Some(Value::String(c)) => c.as_str(),
                 Some(_) => anyhow::bail!("Codeforces comment is not a string"),
@@ -151,10 +179,12 @@ impl CodeforcesClient {
     }
 
     /// `call` for a result that must be a JSON object: serde would also build a struct from an array, Python raises.
-    async fn call_object<T: DeserializeOwned>(&self, method: &str, params: Params) -> anyhow::Result<T> {
-        let result: Value = self.call(method, params).await?;
-        anyhow::ensure!(result.is_object(), "Codeforces result is not a JSON object");
-        Ok(serde_json::from_value(result)?)
+    async fn call_object<T>(&self, method: &str, params: Params, parse: impl Fn(&str) -> anyhow::Result<T>) -> anyhow::Result<T> {
+        self.call_with(method, params, |result| {
+            anyhow::ensure!(result.trim_start().starts_with('{'), "Codeforces result is not a JSON object");
+            parse(result)
+        })
+        .await
     }
 
     pub async fn problemset(&self) -> anyhow::Result<Vec<Problem>> {
@@ -162,7 +192,8 @@ impl CodeforcesClient {
         struct Data {
             problems: Vec<Problem>,
         }
-        Ok(self.call_object::<Data>("problemset.problems", vec![]).await?.problems)
+        let data: Data = self.call_object("problemset.problems", vec![], |r| Ok(serde_json::from_str(r)?)).await?;
+        Ok(data.problems)
     }
 
     pub async fn contests(&self) -> anyhow::Result<Vec<Contest>> {
@@ -215,43 +246,54 @@ impl CodeforcesClient {
     /// filters here; unknown handles simply match nothing.
     pub async fn standings(&self, contest_id: i64, handles: &[String]) -> anyhow::Result<Vec<Standing>> {
         #[derive(Deserialize)]
-        struct Member {
-            handle: String,
+        struct Member<'a> {
+            #[serde(borrow)]
+            handle: Cow<'a, str>,
         }
         #[derive(Deserialize)]
-        struct Party {
-            members: Vec<Member>,
+        struct Party<'a> {
+            #[serde(borrow)]
+            members: Vec<Member<'a>>,
         }
         #[derive(Deserialize)]
-        struct Row {
-            party: Party,
-            // Read only on matched rows, like Python: an unmatched row may lack them or hold anything.
-            #[serde(default)]
-            rank: Value,
-            #[serde(default)]
-            points: Value,
-            #[serde(default)]
-            penalty: Value,
+        struct Row<'a> {
+            #[serde(borrow)]
+            party: Party<'a>,
+            // Read only on matched rows, like Python: an unmatched row may lack them or hold anything,
+            // so they stay raw text until a row matches.
+            #[serde(default, borrow)]
+            rank: Option<&'a RawValue>,
+            #[serde(default, borrow)]
+            points: Option<&'a RawValue>,
+            #[serde(default, borrow)]
+            penalty: Option<&'a RawValue>,
         }
         #[derive(Deserialize)]
-        struct Data {
-            rows: Vec<Row>,
+        struct Data<'a> {
+            #[serde(borrow)]
+            rows: Vec<Row<'a>>,
+        }
+        fn field(raw: Option<&RawValue>) -> anyhow::Result<Value> {
+            raw.map_or(Ok(Value::Null), |r| Ok(serde_json::from_str(r.get())?))
         }
         let wanted: Vec<String> = handles.iter().map(|h| h.to_lowercase()).collect();
-        let data: Data = self.call_object("contest.standings", vec![("contestId", contest_id.to_string())]).await?;
-        data.rows
-            .into_iter()
-            .filter(|r| r.party.members.iter().any(|m| wanted.contains(&m.handle.to_lowercase())))
-            .map(|r| {
-                let bad = || anyhow::anyhow!("malformed standings row");
-                Ok(Standing {
-                    rank: r.rank.as_i64().ok_or_else(bad)?,
-                    handles: r.party.members.into_iter().map(|m| m.handle).collect(),
-                    points: r.points.as_f64().ok_or_else(bad)?,
-                    penalty: r.penalty.as_i64().ok_or_else(bad)?,
+        let parse = |result: &str| {
+            let data: Data = serde_json::from_str(result)?;
+            data.rows
+                .into_iter()
+                .filter(|r| r.party.members.iter().any(|m| wanted.contains(&m.handle.to_lowercase())))
+                .map(|r| {
+                    let bad = || anyhow::anyhow!("malformed standings row");
+                    Ok(Standing {
+                        rank: field(r.rank)?.as_i64().ok_or_else(bad)?,
+                        handles: r.party.members.into_iter().map(|m| m.handle.into_owned()).collect(),
+                        points: field(r.points)?.as_f64().ok_or_else(bad)?,
+                        penalty: field(r.penalty)?.as_i64().ok_or_else(bad)?,
+                    })
                 })
-            })
-            .collect()
+                .collect()
+        };
+        self.call_object("contest.standings", vec![("contestId", contest_id.to_string())], parse).await
     }
 
     pub async fn rating_history(&self, handle: &str) -> anyhow::Result<Vec<RatingChange>> {
@@ -270,27 +312,31 @@ mod tests {
 
     /// Fake HTTP layer: queued responses in order (`Err` = network failure or non-JSON body).
     struct FakeHttp {
-        responses: StdMutex<VecDeque<Result<Value, ()>>>,
+        responses: StdMutex<VecDeque<Result<Vec<u8>, ()>>>,
         calls: Calls,
     }
 
     impl Http for FakeHttp {
-        fn get<'a>(&'a self, url: &'a str, params: &'a Params) -> BoxFuture<'a, Result<Value, ()>> {
+        fn get<'a>(&'a self, url: &'a str, params: &'a Params) -> BoxFuture<'a, Result<Vec<u8>, ()>> {
             self.calls.lock().unwrap().push((url.to_string(), params.clone()));
             let r = self.responses.lock().unwrap().pop_front().expect("no queued response");
             Box::pin(async move { r })
         }
     }
 
-    fn ok(result: Value) -> Result<Value, ()> {
-        Ok(json!({"status": "OK", "result": result}))
+    fn raw(v: Value) -> Result<Vec<u8>, ()> {
+        Ok(serde_json::to_vec(&v).unwrap())
     }
 
-    fn failed(comment: &str) -> Result<Value, ()> {
-        Ok(json!({"status": "FAILED", "comment": comment}))
+    fn ok(result: Value) -> Result<Vec<u8>, ()> {
+        raw(json!({"status": "OK", "result": result}))
     }
 
-    fn make_client(responses: Vec<Result<Value, ()>>) -> (CodeforcesClient, Calls) {
+    fn failed(comment: &str) -> Result<Vec<u8>, ()> {
+        raw(json!({"status": "FAILED", "comment": comment}))
+    }
+
+    fn make_client(responses: Vec<Result<Vec<u8>, ()>>) -> (CodeforcesClient, Calls) {
         let calls = Calls::default();
         let http = FakeHttp { responses: StdMutex::new(responses.into()), calls: calls.clone() };
         let client = CodeforcesClient::with_timing(Arc::new(http), Duration::ZERO, 3, Duration::ZERO);
@@ -326,15 +372,15 @@ mod tests {
     /// generic "Something went wrong" reply. Same for a non-str `comment` (`.lower()`).
     #[tokio::test]
     async fn malformed_payload_is_not_a_bot_error() {
-        for bad in [json!([1]), json!("x"), json!(7), json!(null), json!({"status": "FAILED", "comment": null}), json!({"status": "FAILED", "comment": 5})] {
-            let (c, _) = make_client(vec![Ok(bad.clone())]);
+        for bad in [json!([1]), json!("x"), json!(7), json!(null), json!({"status": "FAILED", "comment": null}), json!({"status": "FAILED", "comment": 5}), json!(["OK", null, []])] {
+            let (c, _) = make_client(vec![raw(bad.clone())]);
             let e = c.user_info("a").await.unwrap_err();
             assert!(e.downcast_ref::<BotError>().is_none(), "{bad}: {e}");
         }
         // missing comment is still "unknown"; an OK payload with no result (KeyError) is not a BotError
-        let (c, _) = make_client(vec![Ok(json!({"status": "FAILED"}))]);
+        let (c, _) = make_client(vec![raw(json!({"status": "FAILED"}))]);
         assert_eq!(c.user_info("a").await.unwrap_err().to_string(), "Codeforces error: unknown");
-        let (c, _) = make_client(vec![Ok(json!({"status": "OK"}))]);
+        let (c, _) = make_client(vec![raw(json!({"status": "OK"}))]);
         assert!(c.user_info("a").await.unwrap_err().downcast_ref::<BotError>().is_none());
     }
 
@@ -417,17 +463,19 @@ mod tests {
         let e = c.contests().await.unwrap_err();
         assert!(is_cf_error(&e));
         assert_eq!(e.to_string(), "Codeforces error: Something odd");
-        let (c, _) = make_client(vec![Ok(json!({"status": "FAILED"}))]);
+        let (c, _) = make_client(vec![raw(json!({"status": "FAILED"}))]);
         assert_eq!(c.contests().await.unwrap_err().to_string(), "Codeforces error: unknown");
     }
 
     #[tokio::test]
     async fn non_json_body_maps_to_codeforces_error() {
-        // maintenance pages are HTML: the HTTP layer reports Err
-        let (c, _) = make_client(vec![Err(())]);
-        let e = c.problemset().await.unwrap_err();
-        assert!(is_cf_error(&e));
-        assert_eq!(e.to_string(), "Codeforces is unreachable or down for maintenance.");
+        // maintenance pages are HTML; a network failure is the HTTP layer's Err; truncated JSON too
+        for body in [Err(()), Ok(b"<html>down</html>".to_vec()), Ok(br#"{"status": "OK", "result": [1,"#.to_vec()), Ok(b"".to_vec())] {
+            let (c, _) = make_client(vec![body]);
+            let e = c.problemset().await.unwrap_err();
+            assert!(is_cf_error(&e));
+            assert_eq!(e.to_string(), "Codeforces is unreachable or down for maintenance.");
+        }
     }
 
     #[tokio::test]

@@ -104,10 +104,10 @@ impl FakeHttp {
 }
 
 impl Http for FakeHttp {
-    fn get<'a>(&'a self, url: &'a str, params: &'a Params) -> BoxFuture<'a, Result<Value, ()>> {
+    fn get<'a>(&'a self, url: &'a str, params: &'a Params) -> BoxFuture<'a, Result<Vec<u8>, ()>> {
         Box::pin(async move {
             let method = url.strip_prefix(BASE_URL).and_then(|m| FILES.iter().find(|(k, _)| *k == m)).ok_or(())?.0;
-            serde_json::from_slice(&self.body(method, params)).map_err(|_| ()) // parsed per call, like a response body
+            Ok(self.body(method, params).to_vec()) // a fresh copy per call, like a response body
         })
     }
 }

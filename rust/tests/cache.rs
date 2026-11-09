@@ -41,7 +41,7 @@ struct FakeHttp {
 }
 
 impl Http for FakeHttp {
-    fn get<'a>(&'a self, url: &'a str, _params: &'a Params) -> BoxFuture<'a, Result<Value, ()>> {
+    fn get<'a>(&'a self, url: &'a str, _params: &'a Params) -> BoxFuture<'a, Result<Vec<u8>, ()>> {
         self.calls.lock().unwrap().push(Instant::now());
         let r = if *self.down.lock().unwrap() {
             Err(())
@@ -57,7 +57,7 @@ impl Http for FakeHttp {
             }).collect();
             Ok(json!({"status": "OK", "result": contests}))
         };
-        Box::pin(async move { r })
+        Box::pin(async move { r.map(|v| serde_json::to_vec(&v).unwrap()) })
     }
 }
 
