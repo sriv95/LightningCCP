@@ -1,3 +1,4 @@
+pub mod bench;
 pub mod bot;
 pub mod cache;
 pub mod cf;
