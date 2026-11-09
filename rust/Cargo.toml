@@ -26,6 +26,12 @@ png = "0.17"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
+# no rayon/plotters: no HTML reports, a leaner build; the console summary is all the table needs
+criterion = { version = "0.8.2", default-features = false }
+
+[[bench]]
+name = "hot"
+harness = false
 
 [profile.release]
 opt-level = 3
