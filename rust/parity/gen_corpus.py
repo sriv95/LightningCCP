@@ -457,7 +457,108 @@ def gen_logic(c, rng):
         c.add("weekly_board", events, cutoff)
 
 
-DOMAINS = {"text": gen_text, "ints": gen_ints, "contests": gen_contests, "regex": gen_regex, "cf": gen_cf, "logic": gen_logic}
+# ---------------------------------------------------------------- embeds
+RANKS_CF = [None, "newbie", "pupil", "grandmaster", "legendary grandmaster", "", "İ*rank*"]
+RATINGS = [None, 0, 800, 1500, 3500, 4000, -5, 2**31]
+COUNTS = [0, 1, 2, 9, 10, 11, 14, 15, 16, 19, 20, 21, 25, 30, 31, 45]  # around the page sizes 10 and 15
+
+
+def e_str(rng):
+    return rng.choice([rng.choice(HANDLES), rng.choice(NAMES), rand_str(rng, 5), "a_b", "*x*", "[l](u)", "`c`", "<@1>", "https://x.y/a_b"])
+
+
+def e_problem(rng):
+    return {"contest_id": rng.choice([1, 1700, 2**31, 0, -1]), "index": rng.choice(["A", "B2", "", "ß", "😀", "A_b"]), "name": e_str(rng),
+            "rating": rng.choice(RATINGS), "tags": rng.sample(TAGS, rng.randint(0, 4)) + rng.choice([[], [""], ["a|b"], ["*"]])}
+
+
+def e_contest(rng):
+    return {"id": rng.choice([1, 2000, 2**31]), "name": e_str(rng), "type": rng.choice(["CF", "ICPC"]), "phase": "BEFORE",
+            "start_time": rng.choice([None, 0, 1, NOW, NOW + 86400 * 400, 2**40]), "duration": rng.choice([0, 59, 60, 3599, 3600, 7200, 7260, 86400, 10**7])}
+
+
+def e_entries(rng, n):
+    pts = [rng.choice([0, 1, 1.5, 2.5, 1000, 1e3, 1500.25, 3e5, 0.1]) for _ in range(n)]
+    pts.sort(reverse=True)
+    out, rank = [], 1
+    for k, p in enumerate(pts):  # ties share a rank
+        if k and p != pts[k - 1]:
+            rank = k + 1
+        out.append([rank, rng.choice([1, 2, 10**18, 2**63 - 1]), e_str(rng), p, rng.choice([0, 0, 1, 50, 10**6])])
+    return out
+
+
+def gen_embeds(c, rng):
+    for _ in range(150):
+        c.add("embed.problem", e_problem(rng), rng.choice([None, "", "footer", "Ünï *f*", e_str(rng)]))
+    for _ in range(300):
+        issued = rng.choice([None, NOW, 0])
+        solved = rng.choice([None, None, NOW + 5])
+        row = {"day": rng.choice([0, 19000, 20000, -1]), "problem_key": rng.choice([None, "1A", "", "1700B"]), "rating": rng.choice(RATINGS),
+               "issued_at": issued, "solved_at": solved}
+        c.add("embed.daily", row, rng.choice([None, e_problem(rng)]), rng.choice([None, 0, 12, -14, 100]), rng.choice([0, 1, 2, 365]))
+    for _ in range(150):
+        u = {"handle": rng.choice(HANDLES), "rating": rng.choice(RATINGS), "max_rating": rng.choice(RATINGS), "rank": rng.choice(RANKS_CF)}
+        c.add("embed.profile", u, e_str(rng))
+    for _ in range(200):
+        c.add("embed.member_profile", e_str(rng), rng.choice([0, 1500, -20, 4000]), rng.choice([None, 0, 1, 7]), rng.choice([0, 1, 30]), rng.choice([0, 1, 12]),
+              rng.choice([0, 3]), [rng.choice([-30, 0, 15, 0, 7]) for _ in range(rng.randint(0, 6))], rng.choice([None, 0, 1800]), rng.choice([0, 1, 9]),
+              rng.choice(["unrated", "1500 (specialist)", e_str(rng)]), rng.choice([0, 1, 4]))
+    for _ in range(300):
+        n = rng.choice(COUNTS)
+        cs = [e_contest(rng) for _ in range(n)]
+        c.add("embed.contest_pages", cs, rng.choice(["Upcoming contests", "", e_str(rng)]), rng.choice([10, 10, 1, 3, 15, 0]))
+    for _ in range(150):
+        c.add("embed.new_contest", e_contest(rng), rng.choice(["New contest", "", "Soon *x*"]))
+    for _ in range(200):
+        rows = [[k + 1, rng.choice([1, 2**63 - 1]), e_str(rng), rng.choice([0, 1500, 2**40]), rng.choice([0, 10, -10, 100]), rng.choice([None, 0, 3, -3])]
+                for k in range(rng.choice(COUNTS))]
+        c.add("embed.weekly", rows)
+    for _ in range(300):
+        rows = [[rng.choice([1, 2, 3, 99, 10**18]) + k, e_str(rng), rng.choice([0, 1500, -10]), rng.choice([0, 1, 5, 100])] for k in range(rng.choice(COUNTS))]
+        streaks = [[r[0], rng.choice([0, 1, 5, 30])] for r in rows if rng.random() < 0.5]
+        c.add("embed.stats_pages", rows, rng.choice([1, 2, 99, 10**18, 0]), streaks, rng.random() < 0.4, rng.choice(["all", "matches", "contests", "x", ""]))
+    for _ in range(300):
+        c.add("embed.ranklist", e_entries(rng, rng.choice(COUNTS)), rng.choice(["Ranklist", "", e_str(rng)]), rng.choice([10, 10, 1, 4, 0]))
+    for _ in range(300):
+        es = [[rng.choice([1, 2**63 - 1]), e_str(rng), rng.choice(RATINGS), rng.choice(RANKS_CF)] for _ in range(rng.choice(COUNTS))]
+        c.add("embed.handle_list", es, rng.choice([10, 10, 1, 7, 0]))
+    for _ in range(200):
+        c.add("embed.recap", e_contest(rng), e_entries(rng, rng.choice(COUNTS)))
+    for _ in range(300):
+        items = [[rng.choice(["1A", "1700B", "", "x_y"]), rng.choice([None, e_problem(rng)])] for _ in range(rng.choice(COUNTS))]
+        c.add("embed.stalk", rng.choice(HANDLES), items, rng.choice([15, 15, 1, 4, 0]))
+
+
+# ---------------------------------------------------------------- store scenarios (base tables: handles, pending, reminders, recaps, weekly, new-contest and contest marks)
+# shortcut: matches, mashups, daily and the one_active indexes are not covered yet (they need a runner arm for each Store method).
+S_HANDLES = ["tourist", "Tourist", "TOURIST", "Petr", "ẞ", "İ", "e\u0301", "é", "日本語", "😀", "a b", "x" * 40, "", "A_b-c"]
+
+
+def store_op(rng):
+    g, u, k = rng.choice([1, 2, 2**40]), rng.choice([1, 2, 3, 2**62]), rng.choice([1, 2, 3, 1700, 2**31])
+    return rng.choice([
+        ["link_handle", g, u, rng.choice(S_HANDLES), rng.choice([None, 0, 1500, 3500])],
+        ["get_handle", g, u], ["linked_handles", g], ["user_for_handle", g, rng.choice(S_HANDLES)], ["unlink", g, u],
+        ["save_pending", g, u, rng.choice(S_HANDLES), rng.choice(["1A", "", "1700B"]), rng.choice([0, 1700000000, -1])],
+        ["get_pending", g, u], ["delete_pending", g, u],
+        ["set_reminder", g, rng.choice([None, 5, 2**40]), rng.choice([None, 7]), rng.choice([[], [60], [60, 10], [10, 60, 5], [0], [-5], [2**40]]), rng.choice(["", "div\\. 2", "(", "İ", "a|b"])],
+        ["get_reminder", g], ["all_reminders"], ["clear_reminder", g],
+        ["set_recap", g, u], ["get_recap", g], ["all_recaps"], ["clear_recap", g],
+        ["set_weekly", g, u, rng.choice([0, 100, 200])], ["get_weekly", g], ["all_weeklies"], ["clear_weekly", g], ["mark_weekly", g, rng.choice([0, 50, 100, 150, 200, 300])],
+        ["set_newcontest", g, u, rng.sample([1, 2, 3, 1700], rng.randint(0, 3))], ["get_newcontest", g], ["all_newcontests"], ["clear_newcontest", g],
+        ["mark_posted", g, k], ["posted", g], ["mark_soon", g, k], ["soon_posted", g],
+        ["add_contest_remind", g, k, u], ["contest_reminders", g], ["mark_sent", g, k, rng.choice([5, 10, 60])], ["sent_for_guild", g],
+        ["mark_recapped", g, k], ["recapped", g],
+    ])
+
+
+def gen_store(c, rng):
+    for _ in range(800):
+        c.add("store.run", [store_op(rng) for _ in range(rng.randint(1, 30))])
+
+
+DOMAINS = {"store": gen_store, "embeds": gen_embeds, "text": gen_text, "ints": gen_ints, "contests": gen_contests, "regex": gen_regex, "cf": gen_cf, "logic": gen_logic}
 
 
 def main():

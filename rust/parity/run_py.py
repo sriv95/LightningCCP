@@ -4,6 +4,7 @@ Same protocol: JSONL {"id","fn","args"} in; {"id","out"} or {"id","err":{"kind":
 Add a function: one entry in FNS here and one arm in the Rust runner."""
 
 import asyncio
+import dataclasses
 import json
 import sys
 
@@ -13,7 +14,12 @@ from src import logic as lg  # noqa: E402
 from src.cf.client import CodeforcesClient  # noqa: E402
 from src.cf.models import Contest, Submission  # noqa: E402
 from src.cogs.contests import _check_regex, _not_excluded  # noqa: E402
+from src.cf.models import Problem, User  # noqa: E402
+from src.daily import DailyView  # noqa: E402
+from src.db.store import DailyRow  # noqa: E402
 from src.errors import BotError  # noqa: E402
+from src.logic import WeeklyRow  # noqa: E402
+from src.ui import embeds as em  # noqa: E402
 from src.ui.embeds import esc  # noqa: E402
 
 I64 = (-(2**63), 2**63 - 1)
@@ -96,6 +102,51 @@ def flt(v):
     return float(v)
 
 
+def emb(e):
+    """The full embed as the wire dict (to_dict drops an empty title, description and url, like the Rust EmbedData)."""
+    d = e.to_dict()
+    return {"title": d.get("title"), "description": d.get("description"), "url": d.get("url"), "colour": d.get("color"),
+            "fields": [{"name": f["name"], "value": f["value"], "inline": f.get("inline", False)} for f in d.get("fields", [])],
+            "footer": d.get("footer", {}).get("text"), "author": d.get("author", {}).get("name"), "timestamp": d.get("timestamp"),
+            "thumbnail": d.get("thumbnail", {}).get("url")}
+
+
+def embs(v):
+    return [emb(e) for e in v]
+
+
+def prob(d):
+    return None if d is None else Problem(d["contest_id"], d["index"], d["name"], d["rating"], tuple(d["tags"]))
+
+
+def daily_view(a):
+    r = a[0]
+    row = DailyRow(1, 1, r["day"], r["problem_key"], r["rating"], r["issued_at"], r["solved_at"], None)
+    return DailyView(row, prob(a[1]), a[2], a[3])
+
+
+class _Member:
+    def __init__(self, name):
+        self.display_name = name
+
+
+EMBED_FNS = {
+    "embed.problem": lambda a: emb(em.problem_embed(prob(a[0]), footer=a[1])),
+    "embed.daily": lambda a: emb(em.daily_embed(daily_view(a))),
+    "embed.profile": lambda a: emb(em.profile_embed(User(a[0]["handle"], a[0]["rating"], a[0]["max_rating"], a[0]["rank"]), _Member(a[1]))),
+    "embed.member_profile": lambda a: emb(em.member_profile_embed(
+        _Member(a[0]), rating=a[1], rank=a[2], ranked=a[3], matches=a[4], contests=a[5], changes=a[6], peak=a[7], streak=a[8],
+        codeforces=a[9], contest_wins=a[10])),
+    "embed.contest_pages": lambda a: embs(em.contest_pages(contests(a[0]), a[1], a[2])),
+    "embed.new_contest": lambda a: emb(em.new_contest_embed(contest(a[0]), a[1])),
+    "embed.weekly": lambda a: emb(em.weekly_embed([WeeklyRow(*r) for r in a[0]])),
+    "embed.stats_pages": lambda a: embs(em.stats_pages([tuple(r) for r in a[0]], a[1], {u: n for u, n in a[2]}, a[3], a[4])),
+    "embed.ranklist": lambda a: embs(em.ranklist_pages([(e[0], e[1], e[2], flt(e[3]), e[4]) for e in a[0]], a[1], a[2])),
+    "embed.handle_list": lambda a: embs(em.handle_list_pages([tuple(e) for e in a[0]], a[1])),
+    "embed.recap": lambda a: emb(em.recap_embed(contest(a[0]), [(e[0], e[1], e[2], flt(e[3]), e[4]) for e in a[1]])),
+    "embed.stalk": lambda a: embs(em.stalk_pages(a[0], [(k, prob(p)) for k, p in a[1]], a[2])),
+}
+
 FNS = {
     "esc": lambda a: esc(a[0]),
     "fmt_g": lambda a: f"{flt(a[0]):g}",
@@ -147,6 +198,62 @@ FNS = {
     "cf.standings": lambda a: [standing(r) for r in cf(a[2], "standings", a[0], a[1])],
     "cf.rating_history": lambda a: [{"time": r.time, "rating": r.rating} for r in cf(a[1], "rating_history", a[0])],
 }
+
+
+def _store_norm(v):
+    if isinstance(v, (set, frozenset)):
+        return sorted([list(x) if isinstance(x, tuple) else x for x in v])
+    if isinstance(v, dict):
+        return [[k, list(x)] for k, x in v.items()]
+    if isinstance(v, (list, tuple)):
+        return [_store_norm(x) if not isinstance(x, tuple) else list(x) for x in v]
+    if hasattr(v, "__dataclass_fields__"):
+        return {k: list(x) if isinstance(x, tuple) else x for k, x in dataclasses.asdict(v).items()}
+    return v
+
+
+def _dump(path):
+    import sqlite3
+
+    db = sqlite3.connect(path)
+    names = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+    out = {t: [[("blob:" + x.hex()) if isinstance(x, bytes) else x for x in r] for r in db.execute(f'SELECT * FROM "{t}" ORDER BY rowid')] for t in names}
+    db.close()
+    return out
+
+
+def store_run(ops):
+    """Same scenario protocol as store_run in parity.rs: results per op, then the dump of every table."""
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+
+    from src.db.store import Store
+
+    async def go(path):
+        st = Store(path)
+        await st.connect()
+        results = []
+        for op in ops:
+            try:
+                results.append({"ok": _store_norm(await getattr(st, op[0])(*op[1:]))})
+            except BotError as e:
+                results.append({"err": "bot", "text": e.user_message})
+            except sqlite3.IntegrityError:
+                results.append({"err": "constraint"})
+            except Exception:
+                results.append({"err": "other"})
+        await st.close()
+        return results
+
+    with tempfile.TemporaryDirectory() as d:
+        path = Path(d) / "p.db"
+        results = asyncio.run(go(path))
+        return {"results": results, "dump": _dump(path)}
+
+
+FNS["store.run"] = lambda a: store_run(a[0])
+FNS.update(EMBED_FNS)
 
 
 def run(case):

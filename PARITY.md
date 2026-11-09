@@ -98,6 +98,11 @@ Beyond the data-level rules above (plots by data, random picks by validity), onl
 - Shutdown and in-flight work: best effort.
 - 2026-11-10 (main session decision): the mashup loop and message edits log any error and keep running, where Python's
   `tasks.loop` would stop for good on a non-HTTP error; kept because a loop that dies permanently is a bug.
+- 2026-11-10 (lead decision, a): malformed Codeforces payloads (wrong-typed fields, integers past i64, an object or empty
+  string where a list belongs, an array where an object belongs) are rejected by Rust with the generic error, where
+  Python may accept them; Codeforces does not send these, and external input is validated strictly.
+- 2026-11-10 (lead decision, b): regex-engine differences for exotic patterns: `\N{name}` lookup (needs a Unicode name
+  table), case-insensitive İ/ı, `\B` on an empty string, and nested repeats over the compile-size limit (memory safety).
 Anything else found in step 4 is a difference to report to the user.
 
 ### Unacceptable differences

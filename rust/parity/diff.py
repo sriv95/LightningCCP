@@ -1,7 +1,9 @@
 """Compare two runner outputs: diff.py <py.jsonl> <rust.jsonl> <corpus dir or files...>.
 Prints "N of M identical", then differences grouped by fn with one example each. Compares the parsed JSON
 canonically (int 1 and float 1.0 differ). No normalization is applied; regex detail text after
-"Invalid regex: " is shown separately as contract-allowed (PARITY.md, Acceptable differences, Regex item)."""
+"Invalid regex: " is shown separately as contract-allowed (PARITY.md, Acceptable differences, Regex item).
+Other contract-allowed categories (CATEGORIES below) are listed apart from the real differences, each citing its
+PARITY.md line; everything else is DIFFERENT and makes the exit code 1."""
 
 import json
 import sys
@@ -25,6 +27,50 @@ def allowed_regex(a, b):
     return ta.get("kind") == tb.get("kind") == "bot" and ta["text"].startswith(PREFIX) and tb["text"].startswith(PREFIX)
 
 
+def is_err(r, kind=None):
+    return "err" in r and (kind is None or r["err"]["kind"] == kind)
+
+
+def malformed_cf(case, a, b):
+    # Python read a wrong-typed or malformed Codeforces payload, Rust rejected it with the generic error. This includes a
+    # missing field in a standings row no wanted handle matches (Python filters first and never reads it, Rust parses every row).
+    return case["fn"].startswith("cf.") and "out" in a and is_err(b, "other")
+
+
+def regex_text(case):
+    return json.dumps(case["args"], ensure_ascii=False)
+
+
+def regex_engine(case, a, b):
+    if case["fn"] not in ("check_regex", "not_excluded"):
+        return False
+    pat = case["args"][0] if case["fn"] == "check_regex" else case["args"][1]
+    names = [] if case["fn"] == "check_regex" else [c["name"] for c in case["args"][0]]
+    if "\\N{" in pat:  # name table
+        return True
+    if any(ch in regex_text(case) for ch in "İı"):  # case-insensitive folding of dotted/dotless i
+        return True
+    if "\\B" in pat and "" in names:  # \B on an empty string
+        return True
+    return case["fn"] == "check_regex" and "out" in a and is_err(b, "bot") and "error building NFA" in b["err"]["text"]  # compile-size limit
+
+
+CATEGORIES = [
+    ("regex detail text after the prefix", "Acceptable differences, Regex item", None),
+    ("malformed Codeforces payload rejected by Rust", "Acceptable differences, 2026-11-10 (a)", malformed_cf),
+    ("regex-engine: \\N{name}, i/dotless-i folding, \\B on empty, compile-size limit", "Acceptable differences, 2026-11-10 (b)", regex_engine),
+]
+
+
+def classify(case, a, b):
+    if allowed_regex(a, b):
+        return CATEGORIES[0][0]
+    for name, _, pred in CATEGORIES[1:]:
+        if pred(case, a, b):
+            return name
+    return None
+
+
 def main():
     py, rs = load(sys.argv[1]), load(sys.argv[2])
     fns = {}
@@ -35,17 +81,28 @@ def main():
                     c = json.loads(line)
                     fns[c["id"]] = c
     same, allowed, bad = 0, defaultdict(list), defaultdict(list)
+    by_domain = defaultdict(lambda: [0, 0])  # domain -> [identical, total]
     for cid, case in fns.items():
         a, b = py.get(cid), rs.get(cid)
+        dom = cid.rsplit("-", 1)[0]
+        by_domain[dom][1] += 1
         if a is not None and b is not None and canon(a) == canon(b):
             same += 1
-        elif a is not None and b is not None and allowed_regex(a, b):
-            allowed[case["fn"]].append((case, a, b))
+            by_domain[dom][0] += 1
+        elif a is not None and b is not None and (cat := classify(case, a, b)):
+            allowed[cat].append((case, a, b))
         else:
             bad[case["fn"]].append((case, a, b))
     total = len(fns)
     print(f"{same} of {total} identical")
-    for title, groups in (("contract-allowed (regex detail text)", allowed), ("DIFFERENT", bad)):
+    for dom, (n, t) in sorted(by_domain.items()):
+        print(f"  {dom}: {n} of {t} identical")
+    refs = {name: ref for name, ref, _ in CATEGORIES}
+    for cat, items in allowed.items():
+        print(f"\ncontract-allowed, {cat}: {len(items)} (PARITY.md {refs[cat]})")
+        case, a, b = items[0]
+        print(f"  e.g. {case['id']} args={json.dumps(case['args'], ensure_ascii=False)[:200]}")
+    for title, groups in (("DIFFERENT", bad),):
         n = sum(map(len, groups.values()))
         if not n:
             continue

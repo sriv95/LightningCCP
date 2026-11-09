@@ -150,12 +150,19 @@ impl CodeforcesClient {
         })
     }
 
+    /// `call` for a result that must be a JSON object: serde would also build a struct from an array, Python raises.
+    async fn call_object<T: DeserializeOwned>(&self, method: &str, params: Params) -> anyhow::Result<T> {
+        let result: Value = self.call(method, params).await?;
+        anyhow::ensure!(result.is_object(), "Codeforces result is not a JSON object");
+        Ok(serde_json::from_value(result)?)
+    }
+
     pub async fn problemset(&self) -> anyhow::Result<Vec<Problem>> {
         #[derive(Deserialize)]
         struct Data {
             problems: Vec<Problem>,
         }
-        Ok(self.call::<Data>("problemset.problems", vec![]).await?.problems)
+        Ok(self.call_object::<Data>("problemset.problems", vec![]).await?.problems)
     }
 
     pub async fn contests(&self) -> anyhow::Result<Vec<Contest>> {
@@ -227,7 +234,7 @@ impl CodeforcesClient {
             rows: Vec<Row>,
         }
         let wanted: Vec<String> = handles.iter().map(|h| h.to_lowercase()).collect();
-        let data: Data = self.call("contest.standings", vec![("contestId", contest_id.to_string())]).await?;
+        let data: Data = self.call_object("contest.standings", vec![("contestId", contest_id.to_string())]).await?;
         Ok(data
             .rows
             .into_iter()
@@ -323,6 +330,15 @@ mod tests {
         assert_eq!(c.user_info("a").await.unwrap_err().to_string(), "Codeforces error: unknown");
         let (c, _) = make_client(vec![Ok(json!({"status": "OK"}))]);
         assert!(c.user_info("a").await.unwrap_err().downcast_ref::<BotError>().is_none());
+    }
+
+    /// serde builds a struct from an array (`[[]]` read as `{problems: []}`); Python indexes a list by name and raises.
+    #[tokio::test]
+    async fn array_where_an_object_belongs_is_rejected() {
+        let (c, _) = make_client(vec![ok(json!([[]]))]);
+        assert!(c.problemset().await.unwrap_err().downcast_ref::<BotError>().is_none());
+        let (c, _) = make_client(vec![ok(json!([[]]))]);
+        assert!(c.standings(1, &["a".to_string()]).await.unwrap_err().downcast_ref::<BotError>().is_none());
     }
 
     /// Python checks `len(result) != 1` before reading any field.
