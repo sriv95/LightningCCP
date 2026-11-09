@@ -78,9 +78,9 @@ impl FakeHttp {
         }
         let param = |name: &str| params.iter().find(|(k, _)| *k == name).map(|(_, v)| v.as_str());
         let raw = &self.files[method];
-        let body = if method == "user.info" || method == "user.status" {
+        let mut body = if method == "user.info" || method == "user.status" {
             let mut payload: Value = serde_json::from_slice(raw).expect("fixture is JSON");
-            let rows = payload["result"].as_array().expect("result is a list").clone();
+            let Value::Array(rows) = payload["result"].take() else { panic!("result is a list") };
             payload["result"] = if method == "user.info" {
                 let wanted: Vec<String> = param("handles").unwrap_or("").split(';').map(str::to_lowercase).collect();
                 rows.into_iter().filter(|u| wanted.contains(&u["handle"].as_str().unwrap_or("").to_lowercase())).collect()
@@ -96,6 +96,7 @@ impl FakeHttp {
         } else {
             raw.clone()
         };
+        body.shrink_to_fit(); // the serializer's doubling slack would stay resident in the body cache
         let body = Arc::new(body);
         self.bodies.lock().unwrap().insert(key, body.clone());
         body

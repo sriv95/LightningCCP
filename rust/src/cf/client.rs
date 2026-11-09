@@ -81,9 +81,9 @@ impl CodeforcesClient {
             };
             // Python `payload.get`/`comment.lower()` raise AttributeError on a non-dict payload or a
             // non-str comment: not a BotError, so the cogs reply "Something went wrong".
-            let Some(object) = payload.as_object() else { anyhow::bail!("Codeforces payload is not a JSON object") };
+            let Value::Object(mut object) = payload else { anyhow::bail!("Codeforces payload is not a JSON object") };
             if object.get("status").and_then(Value::as_str) == Some("OK") {
-                return Ok(serde_json::from_value(object.get("result").cloned().unwrap_or(Value::Null))?);
+                return Ok(serde_json::from_value(object.remove("result").unwrap_or(Value::Null))?);
             }
             let comment = match object.get("comment") {
                 None => "",
