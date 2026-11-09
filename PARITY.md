@@ -96,6 +96,8 @@ Beyond the data-level rules above (plots by data, random picks by validity), onl
   Rust crate). Scoped to the detail text only.
 - Logs: same INFO level and same logged events; line format may differ.
 - Shutdown and in-flight work: best effort.
+- 2026-11-10 (main session decision): the mashup loop and message edits log any error and keep running, where Python's
+  `tasks.loop` would stop for good on a non-HTTP error; kept because a loop that dies permanently is a bug.
 Anything else found in step 4 is a difference to report to the user.
 
 ### Unacceptable differences
