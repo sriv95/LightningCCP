@@ -8,6 +8,7 @@ PARITY.md line; everything else is DIFFERENT and makes the exit code 1."""
 import json
 import sys
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 PREFIX = "Invalid regex: "
@@ -19,12 +20,18 @@ def load(path):
 
 
 def canon(row):
-    return json.dumps({k: v for k, v in row.items() if k != "id"}, sort_keys=True, ensure_ascii=True)
+    return json.dumps(
+        {k: v for k, v in row.items() if k != "id"}, sort_keys=True, ensure_ascii=True
+    )
 
 
 def allowed_regex(a, b):
     ta, tb = a.get("err", {}), b.get("err", {})
-    return ta.get("kind") == tb.get("kind") == "bot" and ta["text"].startswith(PREFIX) and tb["text"].startswith(PREFIX)
+    return (
+        ta.get("kind") == tb.get("kind") == "bot"
+        and ta["text"].startswith(PREFIX)
+        and tb["text"].startswith(PREFIX)
+    )
 
 
 def is_err(r, kind=None):
@@ -52,13 +59,62 @@ def regex_engine(case, a, b):
         return True
     if "\\B" in pat and "" in names:  # \B on an empty string
         return True
-    return case["fn"] == "check_regex" and "out" in a and is_err(b, "bot") and "error building NFA" in b["err"]["text"]  # compile-size limit
+    return (
+        case["fn"] == "check_regex"
+        and "out" in a
+        and is_err(b, "bot")
+        and "error building NFA" in b["err"]["text"]
+    )  # compile-size limit
+
+
+def same_instant(case, a, b):
+    # Only the timestamp text form differs (`+00:00` vs `.000Z`); the rest of the embed and the instant are equal.
+    if case["fn"] != "embed.timestamp" or "out" not in a or "out" not in b:
+        return False
+    oa, ob = dict(a["out"]), dict(b["out"])
+    ta, tb = oa.pop("timestamp", None), ob.pop("timestamp", None)
+    if oa != ob or not (isinstance(ta, str) and isinstance(tb, str)):
+        return False
+    try:
+        return datetime.fromisoformat(ta) == datetime.fromisoformat(tb)
+    except ValueError:
+        return False
+
+
+def team_none_player(case, a, b):
+    # Python rendered a mashup view that has a player with team None, Rust rejects it with the generic error.
+    v = case["args"][0] if case["args"] else None
+    players = v.get("players", []) if isinstance(v, dict) else []
+    return (
+        case["fn"].startswith("mashup.")
+        and any(p.get("team") is None for p in players)
+        and "out" in a
+        and is_err(b, "other")
+    )
 
 
 CATEGORIES = [
     ("regex detail text after the prefix", "Acceptable differences, Regex item", None),
-    ("malformed Codeforces payload rejected by Rust", "Acceptable differences, 2026-11-10 (a)", malformed_cf),
-    ("regex-engine: \\N{name}, i/dotless-i folding, \\B on empty, compile-size limit", "Acceptable differences, 2026-11-10 (b)", regex_engine),
+    (
+        "malformed Codeforces payload rejected by Rust",
+        "Acceptable differences, 2026-11-10 (a)",
+        malformed_cf,
+    ),
+    (
+        "regex-engine: \\N{name}, i/dotless-i folding, \\B on empty, compile-size limit",
+        "Acceptable differences, 2026-11-10 (b)",
+        regex_engine,
+    ),
+    (
+        "embed timestamp text form (+00:00 vs .000Z, same instant)",
+        "Acceptable differences, 2026-11-10 (c)",
+        same_instant,
+    ),
+    (
+        "mashup player with team None: error in Rust",
+        "Acceptable differences, 2026-11-10 (d)",
+        team_none_player,
+    ),
 ]
 
 
@@ -109,7 +165,9 @@ def main():
         print(f"\n{title}: {n}")
         for fn, items in sorted(groups.items()):
             case, a, b = items[0]
-            print(f"- {fn}: {len(items)} diff, e.g. {case['id']} args={json.dumps(case['args'], ensure_ascii=False)[:300]}")
+            print(
+                f"- {fn}: {len(items)} diff, e.g. {case['id']} args={json.dumps(case['args'], ensure_ascii=False)[:300]}"
+            )
             print(f"    python: {json.dumps(a, ensure_ascii=False)[:300]}")
             print(f"    rust:   {json.dumps(b, ensure_ascii=False)[:300]}")
     sys.exit(1 if bad else 0)

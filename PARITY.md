@@ -103,6 +103,11 @@ Beyond the data-level rules above (plots by data, random picks by validity), onl
   Python may accept them; Codeforces does not send these, and external input is validated strictly.
 - 2026-11-10 (lead decision, b): regex-engine differences for exotic patterns: `\N{name}` lookup (needs a Unicode name
   table), case-insensitive İ/ı, `\B` on an empty string, and nested repeats over the compile-size limit (memory safety).
+- 2026-11-10 (lead decision, c): embed timestamp text form: the same instant serializes as `+00:00` in Python and `.000Z`
+  in serenity. Discord renders both the same, and no production embed sets a timestamp.
+- 2026-11-10 (lead decision, d): a mashup player with team None (reachable only by a hand-edited DB: src/mashup.py:287 and
+  :336-342 always set a team, and migration 16 at src/db/store.py:243-252 numbered old NULL teams) gives an error in Rust,
+  where Python renders None as a team.
 Anything else found in step 4 is a difference to report to the user.
 
 ### Unacceptable differences

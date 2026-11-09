@@ -17,7 +17,9 @@ use lightningccp::logic::base as lb;
 use lightningccp::cf::models::{Problem, User};
 use lightningccp::store::base::{Store, is_constraint_violation};
 use lightningccp::logic::base::WeeklyRow;
-use lightningccp::store::matches::DailyRow;
+use lightningccp::ui::embeds::b::{self as eb, LogEntry, MashupView};
+use lightningccp::store::mashup::{MashupCell, MashupPlayer, MashupRow, NewMashup};
+use lightningccp::store::matches::{DailyRow, DailySolve, MatchPlayer, MatchRow, NewMatch};
 use lightningccp::ui::embeds::a::{self as ea, EmbedData, esc, fmt_g};
 use serde_json::{Value, json};
 
@@ -111,9 +113,83 @@ fn reminder_json(r: &lightningccp::store::base::Reminder) -> Value {
     json!({"guild_id": r.guild_id, "channel_id": r.channel_id, "role_id": r.role_id, "before_mins": r.before_mins, "exclude": r.exclude})
 }
 
+// Row types as JSON with the field names of the Python dataclasses (run_py.py `_store_norm` uses dataclasses.asdict).
+fn match_json(m: &MatchRow) -> Value {
+    json!({"id": m.id, "guild_id": m.guild_id, "channel_id": m.channel_id, "message_id": m.message_id, "host_id": m.host_id, "mode": m.mode,
+           "max_players": m.max_players, "invited_id": m.invited_id, "rating_arg": m.rating_arg, "rating": m.rating, "problem_key": m.problem_key,
+           "status": m.status, "created_at": m.created_at, "started_at": m.started_at, "expires_at": m.expires_at, "finished_at": m.finished_at,
+           "tags": m.tags, "exclude_tags": m.exclude_tags})
+}
+fn match_player_json(p: &MatchPlayer) -> Value {
+    json!({"match_id": p.match_id, "guild_id": p.guild_id, "user_id": p.user_id, "handle": p.handle, "joined_at": p.joined_at, "solved_at": p.solved_at,
+           "gave_up": p.gave_up, "delta": p.delta, "active": p.active})
+}
+fn daily_json(d: &DailyRow) -> Value {
+    json!({"guild_id": d.guild_id, "user_id": d.user_id, "day": d.day, "problem_key": d.problem_key, "rating": d.rating, "issued_at": d.issued_at,
+           "solved_at": d.solved_at, "match_id": d.match_id})
+}
+fn mashup_json(m: &MashupRow) -> Value {
+    json!({"id": m.id, "guild_id": m.guild_id, "channel_id": m.channel_id, "message_id": m.message_id, "host_id": m.host_id, "min_rating": m.min_rating,
+           "max_rating": m.max_rating, "count": m.count, "duration_seconds": m.duration_seconds, "penalty_minutes": m.penalty_minutes, "status": m.status,
+           "created_at": m.created_at, "started_at": m.started_at, "ends_at": m.ends_at, "teams": m.teams, "max_players": m.max_players, "rated": m.rated,
+           "team_size": m.team_size, "tags": m.tags, "exclude_tags": m.exclude_tags, "contest_id": m.contest_id, "mode": m.mode, "size": m.size,
+           "win": m.win, "thread_id": m.thread_id, "log_board_id": m.log_board_id})
+}
+fn cell_json(c: &MashupCell) -> Value {
+    json!({"idx": c.idx, "key": c.key, "rating": c.rating, "cell": c.cell, "since": c.since})
+}
+fn mashup_player_json(p: &MashupPlayer) -> Value {
+    json!({"user_id": p.user_id, "handle": p.handle, "joined_at": p.joined_at, "team": p.team, "delta": p.delta, "active": p.active})
+}
+fn strs(v: &Value) -> Vec<String> {
+    arr(v).iter().map(|t| s(t).into()).collect()
+}
+fn keyed_pairs(v: &Value) -> Vec<(String, i64)> {
+    arr(v).iter().map(|p| (s(&p[0]).into(), i(&p[1]))).collect()
+}
+
+fn match_row(v: &Value) -> MatchRow {
+    MatchRow { id: i(&v["id"]), guild_id: i(&v["guild_id"]), channel_id: i(&v["channel_id"]), message_id: oi(&v["message_id"]), host_id: i(&v["host_id"]), mode: s(&v["mode"]).into(),
+        max_players: i(&v["max_players"]), invited_id: oi(&v["invited_id"]), rating_arg: oi(&v["rating_arg"]), rating: oi(&v["rating"]), problem_key: os(&v["problem_key"]).map(Into::into),
+        status: s(&v["status"]).into(), created_at: i(&v["created_at"]), started_at: oi(&v["started_at"]), expires_at: oi(&v["expires_at"]), finished_at: oi(&v["finished_at"]),
+        tags: s(&v["tags"]).into(), exclude_tags: s(&v["exclude_tags"]).into() }
+}
+fn match_player(v: &Value) -> MatchPlayer {
+    MatchPlayer { match_id: i(&v["match_id"]), guild_id: i(&v["guild_id"]), user_id: i(&v["user_id"]), handle: s(&v["handle"]).into(), joined_at: i(&v["joined_at"]), solved_at: oi(&v["solved_at"]),
+        gave_up: v["gave_up"].as_bool().expect("harness: bool"), delta: oi(&v["delta"]), active: v["active"].as_bool().expect("harness: bool") }
+}
+fn match_record(v: &Value) -> (MatchRow, Vec<MatchPlayer>) {
+    (match_row(&v[0]), arr(&v[1]).iter().map(match_player).collect())
+}
+fn mashup_row(v: &Value) -> MashupRow {
+    MashupRow { id: i(&v["id"]), guild_id: i(&v["guild_id"]), channel_id: i(&v["channel_id"]), message_id: oi(&v["message_id"]), host_id: i(&v["host_id"]), min_rating: i(&v["min_rating"]),
+        max_rating: i(&v["max_rating"]), count: i(&v["count"]), duration_seconds: i(&v["duration_seconds"]), penalty_minutes: i(&v["penalty_minutes"]), status: s(&v["status"]).into(),
+        created_at: i(&v["created_at"]), started_at: oi(&v["started_at"]), ends_at: oi(&v["ends_at"]), teams: i(&v["teams"]), max_players: i(&v["max_players"]), rated: i(&v["rated"]),
+        team_size: i(&v["team_size"]), tags: s(&v["tags"]).into(), exclude_tags: s(&v["exclude_tags"]).into(), contest_id: oi(&v["contest_id"]), mode: s(&v["mode"]).into(), size: i(&v["size"]),
+        win: s(&v["win"]).into(), thread_id: oi(&v["thread_id"]), log_board_id: oi(&v["log_board_id"]) }
+}
+fn problem_map(v: &Value) -> HashMap<String, Problem> {
+    arr(v).iter().map(problem).map(|p| (p.key(), p)).collect()
+}
+/// `MashupView` from `{mashup, problems, players, solves, note, cells}`; solves are `[[user, [[key, [time, wrong]], ...]], ...]`.
+fn mashup_view(v: &Value) -> MashupView {
+    MashupView {
+        mashup: mashup_row(&v["mashup"]),
+        problems: keyed_pairs(&v["problems"]),
+        players: arr(&v["players"]).iter().map(|p| MashupPlayer { user_id: i(&p["user_id"]), handle: s(&p["handle"]).into(), joined_at: i(&p["joined_at"]), team: oi(&p["team"]), delta: oi(&p["delta"]), active: p["active"].as_bool().expect("harness: bool") }).collect(),
+        solves: arr(&v["solves"]).iter().map(|e| (i(&e[0]), arr(&e[1]).iter().map(|k| (s(&k[0]).into(), (i(&k[1][0]), i(&k[1][1])))).collect())).collect(),
+        note: os(&v["note"]).map(Into::into),
+        cells: arr(&v["cells"]).iter().map(|c| MashupCell { idx: i(&c["idx"]), key: s(&c["key"]).into(), rating: i(&c["rating"]), cell: oi(&c["cell"]), since: i(&c["since"]) }).collect(),
+    }
+}
+fn mashup_record(v: &Value) -> ea::MashupRecord {
+    ea::MashupRecord { mashup: mashup_row(&v["mashup"]), rank: i(&v["rank"]), entrants: i(&v["entrants"]), solved: i(&v["solved"]), team: oi(&v["team"]), delta: oi(&v["delta"]) }
+}
+
 /// One store method by name; Python twin: STORE_OPS in run_py.py. Results are plain JSON (sets sorted).
 async fn store_op(st: &Store, op: &str, a: &[Value]) -> Result<Value> {
-    let a = |n: usize| &a[n];
+    let all = a;
+    let a = |n: usize| &all[n];
     Ok(match op {
         "link_handle" => json!(st.link_handle(i(a(0)), i(a(1)), s(a(2)), oi(a(3))).await?),
         "get_handle" => json!(st.get_handle(i(a(0)), i(a(1))).await?.map(|h| json!({"handle": h.handle, "rating": h.rating}))),
@@ -154,6 +230,76 @@ async fn store_op(st: &Store, op: &str, a: &[Value]) -> Result<Value> {
         }
         "mark_recapped" => json!(st.mark_recapped(i(a(0)), i(a(1))).await?),
         "recapped" => sorted_ids(st.recapped(i(a(0))).await?),
+        // Matches. Methods with keyword-only parameters in Python (create_match, create_mashup, record_daily_solve) take one object.
+        "create_match" => {
+            let m = &a(0);
+            json!(st.create_match(NewMatch { guild_id: i(&m["guild_id"]), channel_id: i(&m["channel_id"]), host_id: i(&m["host_id"]), host_handle: s(&m["host_handle"]).into(),
+                mode: s(&m["mode"]).into(), max_players: i(&m["max_players"]), invited_id: oi(&m["invited_id"]), rating_arg: oi(&m["rating_arg"]), now: i(&m["now"]),
+                tags: s(&m["tags"]).into(), exclude_tags: s(&m["exclude_tags"]).into() }).await?)
+        }
+        "get_match" => json!(st.get_match(i(a(0))).await?.as_ref().map(match_json)),
+        "get_players" => json!(st.get_players(i(a(0))).await?.iter().map(match_player_json).collect::<Vec<_>>()),
+        "active_match_for" => json!(st.active_match_for(i(a(0)), i(a(1))).await?),
+        "set_message" => json!(st.set_message(i(a(0)), i(a(1)), i(a(2))).await?),
+        "add_player" => json!(st.add_player(i(a(0)), i(a(1)), i(a(2)), s(a(3)), i(a(4))).await?),
+        "remove_player" => json!(st.remove_player(i(a(0)), i(a(1))).await?),
+        "cancel_match" => json!(st.cancel_match(i(a(0)), i(a(1))).await?),
+        "start_match" => json!(st.start_match(i(a(0)), i(a(1)), s(a(2)), i(a(3)), i(a(4)), &ints(a(5))).await?),
+        "mark_gave_up" => json!(st.mark_gave_up(i(a(0)), i(a(1))).await?),
+        "record_solves" => json!(st.record_solves(i(a(0)), &pairs(a(1))).await?),
+        "finish_match" => json!(st.finish_match(i(a(0)), i(a(1)), &pairs(a(2)), oi(a(3))).await?),
+        "matches_due" => json!(st.matches_due(i(a(0)), i(a(1))).await?.iter().map(match_json).collect::<Vec<_>>()),
+        "finished_matches" => json!(st.finished_matches(i(a(0)), i(a(1)), i(a(2))).await?.iter().map(|(m, ps)| json!([match_json(m), ps.iter().map(match_player_json).collect::<Vec<_>>()])).collect::<Vec<_>>()),
+        "rating" => json!(st.rating(i(a(0)), i(a(1))).await?),
+        "stats" => json!(st.stats(i(a(0)), s(a(1))).await?),
+        "rating_changes" => json!(st.rating_changes(i(a(0)), i(a(1))).await?),
+        // Daily.
+        "get_daily" => json!(st.get_daily(i(a(0)), i(a(1)), i(a(2))).await?.as_ref().map(daily_json)),
+        "daily_days" => json!(st.daily_days(i(a(0)), i(a(1))).await?),
+        "daily_days_by_user" => json!(st.daily_days_by_user(i(a(0))).await?),
+        "issue_daily" => json!(st.issue_daily(i(a(0)), i(a(1)), i(a(2)), s(a(3)), i(a(4)), i(a(5))).await?),
+        "record_daily_solve" => {
+            let m = &a(0);
+            json!(st.record_daily_solve(DailySolve { guild_id: i(&m["guild_id"]), channel_id: i(&m["channel_id"]), user_id: i(&m["user_id"]), handle: s(&m["handle"]).into(),
+                day: i(&m["day"]), solved_at: i(&m["solved_at"]), delta: i(&m["delta"]), now: i(&m["now"]) }).await?)
+        }
+        // Mashups.
+        "create_mashup" => {
+            let m = &a(0);
+            json!(st.create_mashup(NewMashup { guild_id: i(&m["guild_id"]), channel_id: i(&m["channel_id"]), host_id: i(&m["host_id"]), host_handle: s(&m["host_handle"]).into(),
+                min_rating: i(&m["min_rating"]), max_rating: i(&m["max_rating"]), count: i(&m["count"]), duration_seconds: i(&m["duration_seconds"]),
+                penalty_minutes: i(&m["penalty_minutes"]), now: i(&m["now"]), teams: i(&m["teams"]), host_team: oi(&m["host_team"]), max_players: i(&m["max_players"]),
+                rated: m["rated"].as_bool().expect("harness: bool"), team_size: i(&m["team_size"]), tags: s(&m["tags"]).into(), exclude_tags: s(&m["exclude_tags"]).into(),
+                contest_id: oi(&m["contest_id"]), mode: s(&m["mode"]).into(), size: i(&m["size"]), win: s(&m["win"]).into() }).await?)
+        }
+        "get_mashup" => json!(st.get_mashup(i(a(0))).await?.as_ref().map(mashup_json)),
+        "active_mashup_for" => json!(st.active_mashup_for(i(a(0)), i(a(1))).await?),
+        "mashups_in" => {
+            let sts: Vec<String> = all.iter().map(|v| s(v).into()).collect();
+            json!(st.mashups_in(&sts.iter().map(String::as_str).collect::<Vec<_>>()).await?.iter().map(mashup_json).collect::<Vec<_>>())
+        }
+        "set_mashup_message" => json!(st.set_mashup_message(i(a(0)), i(a(1)), i(a(2))).await?),
+        "finished_mashups" => json!(st.finished_mashups(i(a(0)), i(a(1)), i(a(2))).await?.iter().map(mashup_json).collect::<Vec<_>>()),
+        "mashup_problems" => json!(st.mashup_problems(i(a(0))).await?),
+        "mashup_cells" => json!(st.mashup_cells(i(a(0))).await?.iter().map(cell_json).collect::<Vec<_>>()),
+        "replace_cell" => json!(st.replace_cell(i(a(0)), i(a(1)), i(a(2)), s(a(3)), i(a(4)), i(a(5))).await?),
+        "mashup_players" => json!(st.mashup_players(i(a(0))).await?.iter().map(mashup_player_json).collect::<Vec<_>>()),
+        "add_mashup_player" => json!(st.add_mashup_player(i(a(0)), i(a(1)), i(a(2)), s(a(3)), i(a(4)), i(a(5)), oi(a(6)), i(a(7))).await?),
+        "move_mashup_player" => json!(st.move_mashup_player(i(a(0)), i(a(1)), i(a(2)), i(a(3))).await?),
+        "remove_mashup_player" => json!(st.remove_mashup_player(i(a(0)), i(a(1))).await?),
+        "cancel_mashup" => json!(st.cancel_mashup(i(a(0))).await?),
+        "start_mashup" => json!(st.start_mashup(i(a(0)), &keyed_pairs(a(1)), i(a(2)), i(a(3)), &ints(a(4)), &strs(a(5))).await?),
+        "set_mashup_thread" => json!(st.set_mashup_thread(i(a(0)), i(a(1))).await?),
+        "set_log_board" => json!(st.set_log_board(i(a(0)), i(a(1))).await?),
+        "mark_logged" => json!(st.mark_logged(i(a(0)), s(a(1))).await?),
+        "mashup_excluded" => sorted(st.mashup_excluded(i(a(0))).await?),
+        "record_mashup_solves" => {
+            let solves: Vec<(String, (i64, i64))> = arr(a(2)).iter().map(|p| (s(&p[0]).into(), (i(&p[1][0]), i(&p[1][1])))).collect();
+            json!(st.record_mashup_solves(i(a(0)), i(a(1)), &solves).await?)
+        }
+        "mashup_solves" => json!(st.mashup_solves(i(a(0))).await?),
+        "mark_mashup_gave_up" => json!(st.mark_mashup_gave_up(i(a(0)), i(a(1))).await?),
+        "finish_mashup" => json!(st.finish_mashup(i(a(0)), &if a(1).is_null() { vec![] } else { pairs(a(1)) }, oi(a(2))).await?),
         other => bail!("harness: unknown store op {other}"),
     })
 }
@@ -164,7 +310,9 @@ fn dump(path: &std::path::Path) -> Result<Value> {
     let tables: Vec<String> = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
     let mut out = serde_json::Map::new();
     for t in tables {
-        let mut stmt = db.prepare(&format!("SELECT * FROM \"{t}\" ORDER BY rowid"))?;
+        // mashup_excluded is filled from a set in both stores (unspecified order), so it is ordered by content.
+        let order = if t == "mashup_excluded" { "mashup_id, problem_key" } else { "rowid" };
+        let mut stmt = db.prepare(&format!("SELECT * FROM \"{t}\" ORDER BY {order}"))?;
         let n = stmt.column_count();
         let rows: Vec<Value> = stmt
             .query_map([], |r| {
@@ -334,6 +482,35 @@ fn call(name: &str, a: &Value) -> Result<Value> {
             let items: Vec<(String, Option<Problem>)> = arr(&a[1]).iter().map(|e| (s(&e[0]).into(), oproblem(&e[1]))).collect();
             embeds(ea::stalk_pages(s(&a[0]), &items, i(&a[2]) as usize))?
         }
+        "embed.match" => {
+            let ratings = (!a[3].is_null()).then(|| pairs(&a[3]).into_iter().collect::<HashMap<i64, i64>>());
+            embed(&ea::match_embed(&ea::MatchView { r#match: match_row(&a[0]), players: arr(&a[1]).iter().map(match_player).collect(), problem: oproblem(&a[2]), ratings, note: os(&a[4]).map(Into::into) })?)
+        }
+        "embed.history_pages" => {
+            let records: Vec<_> = arr(&a[1]).iter().map(match_record).collect();
+            let mashups: Vec<_> = arr(&a[4]).iter().map(mashup_record).collect();
+            embeds(ea::history_pages(s(&a[0]), &records, i(&a[2]), &problem_map(&a[3]), &mashups))?
+        }
+        "embed.head_to_head" => {
+            let records: Vec<_> = arr(&a[1]).iter().map(match_record).collect();
+            embeds(ea::head_to_head_pages(s(&a[0]), &records, i(&a[2]), i(&a[3]), &problem_map(&a[4])))?
+        }
+        "embed.number_pages" => {
+            let pages = arr(&a[0]).iter().map(|p| EmbedData::new(s(&p[0]), None).description(s(&p[1]))).collect();
+            Value::Array(ea::number_pages(pages).iter().map(embed).collect())
+        }
+        // The only builder that sets a timestamp (no Python embed does): compares the wire format.
+        "embed.timestamp" => embed(&EmbedData { title: Some(s(&a[0]).into()), timestamp: Some(serenity::all::Timestamp::from_unix_timestamp(i(&a[1]))?), ..Default::default() }),
+        "mashup.start_message" => json!(eb::start_message(&mashup_view(&a[0]))),
+        "mashup.give_up_message" => json!(eb::give_up_message(&mashup_view(&a[0]), i(&a[1]))?),
+        "mashup.log_message" => {
+            let e = &a[1];
+            let entry = LogEntry { at: i(&e[0]), team: i(&e[1]), key: s(&e[2]).into(), rating: i(&e[3]), user: i(&e[4]), wrong: i(&e[5]) };
+            json!(eb::log_message(&mashup_view(&a[0]), &entry, &problem_map(&a[2]))?)
+        }
+        "mashup.log_board_embed" => embed(&eb::log_board_embed(&mashup_view(&a[0]))?),
+        "mashup.final_message" => json!(eb::final_message(&mashup_view(&a[0]))?),
+        "mashup.embed" => embed(&eb::mashup_embed(&mashup_view(&a[0]), &problem_map(&a[1]))?),
         "store.run" => store_run(&a[0])?,
         other => bail!("harness: unknown fn {other}"),
     })

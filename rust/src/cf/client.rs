@@ -225,9 +225,13 @@ impl CodeforcesClient {
         #[derive(Deserialize)]
         struct Row {
             party: Party,
-            rank: i64,
-            points: f64,
-            penalty: i64,
+            // Read only on matched rows, like Python: an unmatched row may lack them or hold anything.
+            #[serde(default)]
+            rank: Value,
+            #[serde(default)]
+            points: Value,
+            #[serde(default)]
+            penalty: Value,
         }
         #[derive(Deserialize)]
         struct Data {
@@ -235,17 +239,19 @@ impl CodeforcesClient {
         }
         let wanted: Vec<String> = handles.iter().map(|h| h.to_lowercase()).collect();
         let data: Data = self.call_object("contest.standings", vec![("contestId", contest_id.to_string())]).await?;
-        Ok(data
-            .rows
+        data.rows
             .into_iter()
             .filter(|r| r.party.members.iter().any(|m| wanted.contains(&m.handle.to_lowercase())))
-            .map(|r| Standing {
-                rank: r.rank,
-                handles: r.party.members.into_iter().map(|m| m.handle).collect(),
-                points: r.points,
-                penalty: r.penalty,
+            .map(|r| {
+                let bad = || anyhow::anyhow!("malformed standings row");
+                Ok(Standing {
+                    rank: r.rank.as_i64().ok_or_else(bad)?,
+                    handles: r.party.members.into_iter().map(|m| m.handle).collect(),
+                    points: r.points.as_f64().ok_or_else(bad)?,
+                    penalty: r.penalty.as_i64().ok_or_else(bad)?,
+                })
             })
-            .collect())
+            .collect()
     }
 
     pub async fn rating_history(&self, handle: &str) -> anyhow::Result<Vec<RatingChange>> {
@@ -503,6 +509,23 @@ mod tests {
         let got: Vec<_> = got.iter().map(|r| (r.rank, r.handles.clone(), r.points, r.penalty)).collect();
         assert_eq!(got, [(3, vec!["A".to_string(), "b".into()], 7.0, 0), (4, vec!["c".to_string()], 1500.0, 0)]);
         assert_eq!(params_of(&calls, 0), p(&[("contestId", "1700")]));
+    }
+
+    /// Python filters before reading rank, points or penalty, so an unmatched row may lack them.
+    #[tokio::test]
+    async fn standings_unmatched_row_may_lack_fields() {
+        let rows = json!({"rows": [
+            {"party": {"members": [{"handle": "x"}]}},
+            {"party": {"members": [{"handle": "x"}]}, "rank": "1", "points": null},
+            standing_row(2, &["a"], 3.0, 4),
+        ]});
+        let (c, _) = make_client(vec![ok(rows.clone()), ok(rows)]);
+        let got = c.standings(1, &["a".to_string()]).await.unwrap();
+        assert_eq!((got.len(), got[0].rank, got[0].points, got[0].penalty), (1, 2, 3.0, 4));
+        // A matched row still must have them.
+        let bad = json!({"rows": [{"party": {"members": [{"handle": "a"}]}}]});
+        let (c, _) = make_client(vec![ok(bad)]);
+        assert!(c.standings(1, &["a".to_string()]).await.is_err());
     }
 
     #[tokio::test]
