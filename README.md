@@ -6,8 +6,7 @@ Slash-command Discord bot for competitive programmers, modeled on [TLE](https://
 
 1. Create a bot at https://discord.com/developers/applications. Invite it with the `bot` and `applications.commands` scopes. No privileged intents needed.
 2. `cp .env.example .env` and set `BOT_TOKEN`.
-3. `uv sync`
-4. `uv run python -m src`
+3. `cargo run --release`
 
 ### Docker
 
@@ -58,6 +57,6 @@ A contest from `/host` opens a lobby with Join, Start and Leave buttons (the lob
 ## Development
 
 ```
-uv run pytest
-uv run ruff check . && uv run ruff format --check .
+cargo test
+cargo clippy --all-targets
 ```

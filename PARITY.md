@@ -3,7 +3,7 @@
 Status: APPROVED by user 2026-11-09. The user owns this file. A worker never decides that a
 difference is acceptable: it reports it as "gap" or "proposed intended". Edit in one place, with a dated line
 saying what changed and why. Source of the rules: `KNOWLEDGES/LightningCCP/DECISIONS.md`, 2026-11-09.
-Python references are file:line in the `src/` of this branch (HEAD at contract time).
+Python references are file:line in the `src/` of the Python original (deleted at the cut-over; see commit 89c84a2 or earlier on this branch).
 
 - End state: replacement. Standalone binary, no PyO3, original deleted at cut-over (rollback = old image tag).
   Same env vars (`BOT_TOKEN` required, `DB_PATH` default `data/bot.db`, src/config.py:15-19), same volume,

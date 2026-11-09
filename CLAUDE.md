@@ -10,26 +10,28 @@ Always ask the user before adding any new feature, command, option or behavior, 
 
 ## Commands
 
-Python is managed with `uv`. This is an application, not a package (`[tool.uv] package = false`), so there is no install step beyond `uv sync`.
+Rust (edition 2024, crate `lightningccp` at the repo root). The bot was ported from Python; the original is deleted.
 
 ```
-uv sync                                  # install deps
-uv run python -m src                     # run the bot (needs BOT_TOKEN in .env)
+cargo run --release                      # run the bot (needs BOT_TOKEN in .env)
 docker compose up -d --build            # run in Docker (needs .env; DB in the bot-data volume)
-uv run pytest                            # all tests
-uv run pytest tests/test_logic.py::test_name -v   # one test
-uv run ruff check . && uv run ruff format --check .   # lint (both must pass)
+cargo test                               # all tests
+cargo test --test logic_base name        # one test file, filtered by test name
+cargo clippy --all-targets               # lint
+cargo bench                              # criterion benches (benches/hot.rs); `lightningccp --bench` is the offline end-to-end bench (bench/gen_fixtures.py makes its fixtures)
 ```
 
 Config comes from `.env` (see `.env.example`): `BOT_TOKEN` (required), `DB_PATH` (default `data/bot.db`).
 
 ## Layout rules
 
-- All Python logic lives directly in `src/` (there is no `src/lightningccp/` package). Imports use the `src.` prefix, and `pytest` runs with `pythonpath = ["."]`. The repo root holds only config and docs.
+- All Rust code lives in `src/` (library `lightningccp` plus `main.rs`); integration tests are in `tests/` (frozen Python-derived expectations in `tests/fixtures/`, no Python needed to run them). `tools/gen_casefold.py` and `bench/gen_fixtures.py` are stdlib-only dev scripts (usage in their headers).
 - `docs/` is gitignored on purpose. Specs and plans live there locally; never `git add` anything under `docs/` or `.superpowers/`.
-- Ruff ignores E501 (the formatter owns wrapping). Target is Python 3.12, so PEP 695 syntax such as `def f[T]()` is fine.
+- The Docker image is `FROM scratch` (musl, no shell, no CA certificates), runs as 1000:1000 (the old Python image's uid, so the `bot-data` volume stays writable) and builds with thin LTO by default (`Dockerfile`).
 
 ## Architecture
+
+File and module names below (`src/*.py`, `tests/test_*.py`) are the Python original's, deleted at the cut-over; the Rust port keeps the same split (see the `Port of` header of each `src/**/*.rs`, and `PARITY.md`).
 
 Slash commands only. The bot uses `Intents.default()` (no `message_content`, no `members`) and `help_command=None`; do not add prefix commands.
 

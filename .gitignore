@@ -1,9 +1,7 @@
 docs/
 .env
-.venv/
-__pycache__/
+target/
 *.db
 data/
-.ruff_cache/
-.pytest_cache/
+bench/fixtures/
 .superpowers/
