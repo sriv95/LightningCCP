@@ -21,7 +21,7 @@ use crate::matches::{CfApi, CreateMatch, MatchService, MatchView, ProblemSource}
 use crate::services::Services;
 use crate::store::base::Store;
 use crate::ui::embeds::a::{
-    EmbedData, MashupRecord, MatchRecord, MemberProfile, esc, head_to_head_pages, history_pages, match_embed, member_profile_embed,
+    EmbedData, MashupRecord, MatchRecord, MemberProfile, esc, profile_link, head_to_head_pages, history_pages, match_embed, member_profile_embed,
     number_pages, stats_pages,
 };
 
@@ -469,7 +469,7 @@ pub async fn profile<E: MatchEnv, O: SlashOutput>(
                     Some(rating) => format!("{rating} ({})", user.rank.as_deref().unwrap_or("None")),
                     None => "unrated".into(),
                 };
-                format!("[{}](https://codeforces.com/profile/{}) {rated}", esc(&user.handle), user.handle)
+                format!("{} {rated}", profile_link(&user.handle))
             }
             // `except CodeforcesError`: only that error, other errors (an unknown handle) propagate
             Err(e) if matches!(e.downcast_ref::<BotError>(), Some(BotError::Codeforces(_))) => {

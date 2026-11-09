@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 
-use super::a::{EmbedData, GOLD, GREEN, BLURPLE, RED, esc};
+use super::a::{EmbedData, GOLD, GREEN, BLURPLE, RED, esc, profile_link};
 use crate::cf::models::Problem;
 use crate::logic::base::{BINGO_REPLACE_STEP, MASHUP_LOBBY_TTL_SECONDS, format_hm};
 use crate::logic::mashup::{BingoBoard, MashupRank, Solves, bingo_board, bingo_standings, mashup_standings, team_solves};
@@ -299,11 +299,11 @@ fn bingo_grid(view: &MashupView) -> Result<String> {
 /// The current board (a bingo's grid, a contest's standings) for the newest message of the solve log thread.
 pub fn log_board_embed(view: &MashupView) -> Result<EmbedData> {
     let text = if view.mashup.mode == "contest" {
-        standings_lines(view, &letters(view)?)?.join("\n")
+        standings_lines(view, &letters(view)?, false)?.join("\n")
     } else {
         let mut text = format!("```\n{}\n```", bingo_grid(view)?);
         if view.mashup.status == "finished" {
-            text += &format!("\n{}", bingo_standings_lines(view)?.join("\n"));
+            text += &format!("\n{}", bingo_standings_lines(view, false)?.join("\n"));
         }
         text
     };
@@ -337,10 +337,24 @@ pub fn final_message(view: &MashupView) -> Result<String> {
     Ok(format!("The {kind} is over. {verdict}{rated}"))
 }
 
+/// Discord's limit on an embed description, in characters.
+const DESCRIPTION_MAX: usize = 4096;
+
+/// A handle as a profile link, or as plain text when `linked` is false.
+fn handle_of(handle: &str, linked: bool) -> String {
+    if linked { profile_link(handle) } else { esc(handle) }
+}
+
+/// An unpaged description built with linked handles; built again with plain ones if it goes over Discord's limit.
+fn fit(build: impl Fn(bool) -> Result<String>) -> Result<String> {
+    let text = build(true)?;
+    if text.chars().count() > DESCRIPTION_MAX { build(false) } else { Ok(text) }
+}
+
 /// A standings row's name: the handle, plus the team's members in a team contest.
-fn who_of(view: &MashupView, r: &MashupRank) -> String {
+fn who_of(view: &MashupView, r: &MashupRank, linked: bool) -> String {
     if view.mashup.team_size == 1 {
-        return esc(&r.handle);
+        return handle_of(&r.handle, linked);
     }
     let members = view.players.iter().filter(|p| p.team == Some(r.user_id)).map(|p| format!("<@{}>", p.user_id)).collect::<Vec<_>>();
     format!("{} ({})", esc(&r.handle), members.join(", "))
@@ -358,10 +372,10 @@ fn gave_up(view: &MashupView, r: &MashupRank) -> Result<&'static str> {
     Ok("")
 }
 
-fn bingo_standings_lines(view: &MashupView) -> Result<Vec<String>> {
+fn bingo_standings_lines(view: &MashupView, linked: bool) -> Result<Vec<String>> {
     let mut lines = Vec::new();
     for r in view.standings()? {
-        let mut line = format!("{}. [{}] {} - {} squares, {} lines", r.rank, r.user_id, who_of(view, &r), r.solved, r.lines);
+        let mut line = format!("{}. [{}] {} - {} squares, {} lines", r.rank, r.user_id, who_of(view, &r, linked), r.solved, r.lines);
         line += gave_up(view, &r)?;
         if view.mashup.status == "finished"
             && let Some(change) = mashup_change(view, &r)
@@ -382,11 +396,10 @@ fn bingo_embed(view: &MashupView, by_key: &HashMap<String, Problem>) -> Result<E
     let m = &view.mashup;
     let finished = m.status == "finished";
     let grid = bingo_grid(view)?;
-    let mut lines = vec![format!("Host: <@{}> | {} | {}", m.host_id, setup(view), ends_line(m)), format!("```\n{grid}\n```")];
-    lines.push("**Standings** (the number in brackets is the team on the board)".into());
-    lines.extend(bingo_standings_lines(view)?);
+    let head = [format!("Host: <@{}> | {} | {}", m.host_id, setup(view), ends_line(m)), format!("```\n{grid}\n```"), "**Standings** (the number in brackets is the team on the board)".into()];
+    let description = fit(|linked| Ok(head.iter().cloned().chain(bingo_standings_lines(view, linked)?).collect::<Vec<_>>().join("\n")))?;
     let title = format!("{}{}", if m.team_size != 1 { "Team bingo" } else { "Bingo" }, if finished { " - final standings" } else { "" });
-    let mut embed = EmbedData::new(title, Some(if finished { GREEN } else { GOLD })).description(lines.join("\n"));
+    let mut embed = EmbedData::new(title, Some(if finished { GREEN } else { GOLD })).description(description);
     let log = bingo_log(view)?;
     if !log.is_empty() {
         embed = embed.field("Solve log", log, false);
@@ -411,7 +424,7 @@ fn bingo_embed(view: &MashupView, by_key: &HashMap<String, Problem>) -> Result<E
     Ok(embed)
 }
 
-fn standings_lines(view: &MashupView, letters: &HashMap<&str, char>) -> Result<Vec<String>> {
+fn standings_lines(view: &MashupView, letters: &HashMap<&str, char>, linked: bool) -> Result<Vec<String>> {
     let m = &view.mashup;
     let team_solves = view.team_solves()?;
     let mut lines = Vec::new();
@@ -427,7 +440,7 @@ fn standings_lines(view: &MashupView, letters: &HashMap<&str, char>) -> Result<V
             parts.push(format!("{l} {}m{}", t.div_euclid(60), if *w != 0 { format!(" ({w} wrong)") } else { String::new() }));
         }
         let detail = if parts.is_empty() { String::new() } else { format!(" ({})", parts.join(", ")) };
-        let mut line = format!("{}. {} - {} solved, {}{detail}", r.rank, who_of(view, &r), r.solved, format_hm(r.total_seconds));
+        let mut line = format!("{}. {} - {} solved, {}{detail}", r.rank, who_of(view, &r, linked), r.solved, format_hm(r.total_seconds));
         line += gave_up(view, &r)?;
         if m.status == "finished"
             && let Some(change) = mashup_change(view, &r)
@@ -448,27 +461,29 @@ pub fn mashup_embed(view: &MashupView, by_key: &HashMap<String, Problem>) -> Res
         return Ok(EmbedData::new(title, Some(RED)).description(format!("{note}\nHost: <@{}>", m.host_id)));
     }
     if m.status == "lobby" {
-        let user = |p: &MashupPlayer| format!("<@{}> ({})", p.user_id, esc(&p.handle));
-        let names = if m.team_size != 1 {
-            (1..=m.teams)
-                .filter(|t| view.players.iter().any(|p| p.team == Some(*t)))
-                .map(|t| {
-                    let members: Vec<String> = view.players.iter().filter(|p| p.team == Some(t)).map(user).collect();
-                    format!("Team {t}: {}", members.join(", "))
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else {
-            view.players.iter().map(user).collect::<Vec<_>>().join("\n")
-        };
         let title = format!("{}{} lobby", if m.team_size != 1 { "Team " } else { "" }, if m.mode != "contest" { "bingo" } else { "mashup" });
         let expires = m.created_at.checked_add(MASHUP_LOBBY_TTL_SECONDS).ok_or_else(overflow)?;
         let join = if m.team_size != 1 { format!("Join asks for a team number (1-{}). ", m.teams) } else { String::new() };
-        let description = format!(
-            "Host: <@{}>\n{}\n{players}:\n{names}\nExpires <t:{expires}:R>. {join}The host presses Start; nobody can join after that.",
-            m.host_id,
-            setup(view)
-        );
+        let description = fit(|linked| {
+            let user = |p: &MashupPlayer| format!("<@{}> ({})", p.user_id, handle_of(&p.handle, linked));
+            let names = if m.team_size != 1 {
+                (1..=m.teams)
+                    .filter(|t| view.players.iter().any(|p| p.team == Some(*t)))
+                    .map(|t| {
+                        let members: Vec<String> = view.players.iter().filter(|p| p.team == Some(t)).map(user).collect();
+                        format!("Team {t}: {}", members.join(", "))
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                view.players.iter().map(user).collect::<Vec<_>>().join("\n")
+            };
+            Ok(format!(
+                "Host: <@{}>\n{}\n{players}:\n{names}\nExpires <t:{expires}:R>. {join}The host presses Start; nobody can join after that.",
+                m.host_id,
+                setup(view)
+            ))
+        })?;
         // Python `str.capitalize()`: first letter upper, the rest lower; only "Team ..." / "bingo" / "mashup" occur
         let mut chars = title.chars();
         let title = chars.next().map(|c| c.to_uppercase().collect::<String>() + &chars.as_str().to_lowercase()).unwrap_or_default();
@@ -488,7 +503,7 @@ pub fn mashup_embed(view: &MashupView, by_key: &HashMap<String, Problem>) -> Res
         lines.push(format!("{}. {name} ({rating})", letters[key.as_str()]));
     }
     lines.extend(["".into(), "**Standings**".into()]);
-    lines.extend(standings_lines(view, &letters)?);
+    let description = fit(|linked| Ok(lines.iter().cloned().chain(standings_lines(view, &letters, linked)?).collect::<Vec<_>>().join("\n")))?;
     let title = format!("{}{}", if m.team_size == 1 { "Mashup contest" } else { "Team mashup" }, if finished { " - final standings" } else { "" });
-    Ok(EmbedData::new(title, Some(if finished { GREEN } else { GOLD })).description(lines.join("\n")))
+    Ok(EmbedData::new(title, Some(if finished { GREEN } else { GOLD })).description(description))
 }

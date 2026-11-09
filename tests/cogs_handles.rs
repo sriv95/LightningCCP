@@ -330,7 +330,7 @@ async fn list_sorts_by_rating_unrated_last_then_name() {
     assert_eq!(pages.len(), 1);
     assert_eq!(
         pages[0].description.as_deref(),
-        Some("1. <@4> (top) 2500 (master)\n2. <@2> (A) 1500 (specialist)\n3. <@1> (b) 1500 (specialist)\n4. <@3> (z) unrated")
+        Some("1. <@4> ([top](https://codeforces.com/profile/top)) 2500 (master)\n2. <@2> ([A](https://codeforces.com/profile/A)) 1500 (specialist)\n3. <@1> ([b](https://codeforces.com/profile/b)) 1500 (specialist)\n4. <@3> ([z](https://codeforces.com/profile/z)) unrated")
     );
     assert_eq!(pages[0].footer.as_deref(), Some("Page 1/1 - 4 linked members")); // the handle Codeforces dropped is skipped
 }

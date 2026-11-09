@@ -351,7 +351,7 @@ async fn finished_mashup_moves_match_ratings() {
     contests.sort();
     assert_eq!(contests, [(1, 800), (2, 849), (3, 751)]);
     let text = mashup_embed(&done, &HashMap::new()).unwrap().description.unwrap();
-    assert!(text.contains("1. h2 - 2 solved") && text.matches("rating +49").count() == 1);
+    assert!(text.contains("1. [h2](https://codeforces.com/profile/h2) - 2 solved") && text.matches("rating +49").count() == 1);
     e.set_time(e.t.load(SeqCst) + 5000);
     e.svc.tick().await.unwrap(); // a second tick must not apply the change again
     assert_eq!(e.store.rating(GUILD, 2).await.unwrap(), 849);
@@ -434,7 +434,7 @@ async fn give_up_deltas_and_no_read_after_giving_up() {
     let (d1, d2, d3) = (delta_of(&done, 1).unwrap(), delta_of(&done, 2).unwrap(), delta_of(&done, 3).unwrap());
     assert!(d2 > 0 && d1 < 0 && d3 < 0); // h2 still wins with 1 solve
     assert_eq!(e.store.rating(GUILD, 2).await.unwrap(), 800 + d2);
-    assert!(mashup_embed(&done, &HashMap::new()).unwrap().description.unwrap().contains("1. h2 - 1 solved"));
+    assert!(mashup_embed(&done, &HashMap::new()).unwrap().description.unwrap().contains("1. [h2](https://codeforces.com/profile/h2) - 1 solved"));
 }
 
 // ---- tests/test_bingo.py ----

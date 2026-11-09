@@ -309,7 +309,7 @@ async fn recap_posts_linked_members_once() {
     let e = post.embed.unwrap();
     assert_eq!(e.title.as_deref(), Some("Contest recap - Round"));
     assert_eq!(e.footer.as_deref(), Some("2 linked members took part"));
-    assert_eq!(e.description.unwrap().lines().next(), Some("1. <@10> (a) 3"));
+    assert_eq!(e.description.unwrap().lines().next(), Some("1. <@10> ([a](https://codeforces.com/profile/a)) 3"));
     assert!(post.content.is_none() && post.buttons.is_none() && !post.pings);
     assert_eq!(seen.recapped, HashSet::from([7])); // marked before the post
 }
@@ -394,7 +394,7 @@ async fn weekly_posts_once_per_week() {
     assert_eq!(seen.last_sent, Some(WEEK)); // marked before the post
     let e = w.chans.posts()[0].embed.clone().unwrap();
     assert_eq!(e.title.as_deref(), Some("Weekly leaderboard"));
-    assert!(e.description.unwrap().contains("<@10> (a) 805 (+5) new"));
+    assert!(e.description.unwrap().contains("<@10> ([a](https://codeforces.com/profile/a)) 805 (+5) new"));
 }
 
 #[tokio::test]

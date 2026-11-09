@@ -518,7 +518,7 @@ async fn embed_lobby_active_cancelled() {
     let view = e.lobby(CreateMashup { penalty_minutes: 20, ..cm(1) }).await;
     let lobby = serde_json::to_value(CreateEmbed::from(mashup_embed(&view, &by_key).unwrap())).unwrap();
     assert!(desc(&lobby).contains("3 problems rated 800-1200") && desc(&lobby).contains("20 min per wrong attempt"));
-    assert!(title(&lobby) == "Mashup lobby" && desc(&lobby).contains("<@1> (h1)"));
+    assert!(title(&lobby) == "Mashup lobby" && desc(&lobby).contains("<@1> ([h1](https://codeforces.com/profile/h1))"));
     e.svc.start(view.mashup.id, 1).await.unwrap();
     e.sub("h1", "1A", 1160);
     e.set_time(1200);
@@ -550,7 +550,7 @@ async fn team_contest_embeds_and_refresh_skips_finished_teams() {
     let id = e.lobby(CreateMashup { count: 1, min_rating: 800, max_rating: 800, ..team_cm(1, 2) }).await.mashup.id;
     e.svc.join(id, 2, Some(2)).await.unwrap();
     let text = serde_json::to_value(CreateEmbed::from(mashup_embed(&e.svc.view(id, None).await.unwrap(), &HashMap::new()).unwrap())).unwrap();
-    assert!(desc(&text).contains("Team 1: <@1> (h1)") && desc(&text).contains("Team 2: <@2> (h2)"));
+    assert!(desc(&text).contains("Team 1: <@1> ([h1](https://codeforces.com/profile/h1))") && desc(&text).contains("Team 2: <@2> ([h2](https://codeforces.com/profile/h2))"));
     assert!(desc(&text).contains("Join asks for a team number (1-2)") && desc(&text).contains("2 teams"));
     e.svc.join(id, 3, Some(1)).await.unwrap();
     e.svc.start(id, 1).await.unwrap();

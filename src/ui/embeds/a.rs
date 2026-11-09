@@ -128,6 +128,11 @@ pub fn esc(text: &str) -> String {
     escaped.replace('[', "\\[").replace(']', "\\]")
 }
 
+/// A Codeforces handle as a masked link to its profile.
+pub fn profile_link(handle: &str) -> String {
+    format!("[{}](https://codeforces.com/profile/{handle})", esc(handle))
+}
+
 /// Python `{x}` of an Optional int.
 fn opt(v: Option<i64>) -> String {
     v.map_or_else(|| "None".into(), |v| v.to_string())
@@ -339,7 +344,7 @@ pub fn match_embed(view: &MatchView) -> anyhow::Result<EmbedData> {
             .description(format!("{note}\nHost: <@{}> | {}", m.host_id, mode_label(m)?)));
     }
     if m.status == "lobby" {
-        let lines = players.iter().map(|p| format!("<@{}> ({})", p.user_id, esc(&p.handle))).collect::<Vec<_>>().join("\n");
+        let lines = players.iter().map(|p| format!("<@{}> ({})", p.user_id, profile_link(&p.handle))).collect::<Vec<_>>().join("\n");
         let mut desc = format!("Host: <@{}>\nPlayers {}/{}:\n{lines}", m.host_id, players.len(), m.max_players);
         if let Some(i) = m.invited_id {
             desc += &format!("\nInvited: <@{i}>");
@@ -411,7 +416,7 @@ pub fn weekly_embed(rows: &[WeeklyRow]) -> EmbedData {
     let text = rows
         .iter()
         .take(STATS_SIZE)
-        .map(|r| format!("{}. <@{}> ({}) {} ({:+}) {}", r.rank, r.user_id, esc(&r.handle), r.rating, r.gain, moved(r.moved)))
+        .map(|r| format!("{}. <@{}> ({}) {} ({:+}) {}", r.rank, r.user_id, profile_link(&r.handle), r.rating, r.gain, moved(r.moved)))
         .collect::<Vec<_>>()
         .join("\n");
     EmbedData::new("Weekly leaderboard", Some(GOLD))
@@ -456,7 +461,7 @@ pub fn stats_pages(
         None => format!("You have no finished {noun} yet."),
     };
     let line = |rank: usize, r: &(i64, String, i64, i64)| {
-        let mut text = format!("{rank}. <@{}> ({}) {} ({} {noun})", r.0, esc(&r.1), r.2, r.3);
+        let mut text = format!("{rank}. <@{}> ({}) {} ({} {noun})", r.0, profile_link(&r.1), r.2, r.3);
         if streak(r.0) != 0 {
             text += &format!(" \u{1f525}{}", streak(r.0));
         }
@@ -478,7 +483,7 @@ pub type RankEntry = (i64, i64, String, f64, i64);
 pub fn ranklist_pages(entries: &[RankEntry], title: &str, per_page: usize) -> Result<Vec<EmbedData>> {
     let line = |e: &RankEntry| {
         let extra = if e.4 != 0 { format!(", penalty {}", e.4) } else { String::new() };
-        format!("{}. <@{}> ({}) {}{extra}", e.0, e.1, esc(&e.2), fmt_g(e.3))
+        format!("{}. <@{}> ({}) {}{extra}", e.0, e.1, profile_link(&e.2), fmt_g(e.3))
     };
     let groups = chunked(entries, per_page)?;
     let n = groups.len();
@@ -500,7 +505,7 @@ pub fn handle_list_pages(entries: &[(i64, String, Option<i64>, Option<String>)],
             (Some(r), Some(rank)) => format!("{r} ({rank})"),
             _ => "unrated".into(),
         };
-        format!("{i}. <@{}> ({}) {info}", e.0, esc(&e.1))
+        format!("{i}. <@{}> ({}) {info}", e.0, profile_link(&e.1))
     };
     let groups = chunked(entries, per_page)?;
     let n = groups.len();

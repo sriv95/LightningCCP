@@ -276,7 +276,7 @@ async fn ranklist_sorts_entries_and_titles_with_the_contest_name() {
     {
         let p = f.pages.lock().unwrap();
         assert_eq!(p[0]["title"], "Ranklist - Round *5*"); // the title is not escaped, like Python
-        assert_eq!(p[0]["description"], "1. <@1> (alice) 100\n3. <@2> (BOB\\_X) 80, penalty 45");
+        assert_eq!(p[0]["description"], "1. <@1> ([alice](https://codeforces.com/profile/alice)) 100\n3. <@2> ([BOB\\_X](https://codeforces.com/profile/BOB_X)) 80, penalty 45");
     }
     let e = contests::entries(&f, 1, 5).await.unwrap();
     assert_eq!(e, [(1, 1, "alice".to_string(), 100.0, 0), (3, 2, "BOB_X".to_string(), 80.0, 45)]);
@@ -310,7 +310,7 @@ async fn ranklist_pages_like_python_test() {
     let p = f.pages.lock().unwrap();
     assert_eq!(p.iter().map(|x| x["footer"]["text"].as_str().unwrap()).collect::<Vec<_>>(), ["Page 1/2", "Page 2/2"]);
     let lines: Vec<_> = p[0]["description"].as_str().unwrap().lines().collect();
-    assert_eq!((lines[0], lines[1]), ("1. <@1> (h1) 99", "2. <@2> (h2) 90, penalty 45"));
+    assert_eq!((lines[0], lines[1]), ("1. <@1> ([h1](https://codeforces.com/profile/h1)) 99", "2. <@2> ([h2](https://codeforces.com/profile/h2)) 90, penalty 45"));
 }
 
 #[test]
