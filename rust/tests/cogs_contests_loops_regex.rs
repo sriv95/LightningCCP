@@ -577,3 +577,22 @@ fn translated_patterns_match_as_python_does() {
     let bad: Vec<_> = PYTHON_MATCHES.iter().filter(|(p, t, expected)| matches(p, t) != *expected).collect();
     assert!(bad.is_empty(), "differs from Python: {bad:?}");
 }
+
+/// Parity harness (regex-2094..): `not_excluded` raised in Python for a pattern `re.compile` rejects; it used to accept
+/// some (and panic on `(?(2)b|c)`). The error is not a BotError.
+#[test]
+fn not_excluded_rejects_what_python_re_compile_rejects() {
+    let c = Contest { id: 1, name: "ab".into(), kind: "CF".into(), phase: "FINISHED".into(), start_time: Some(1), duration: 1 };
+    for pattern in ["(?P<n>a)(?P<n>b)", "(?P<1>a)", "(?<=a+)b", "(?#", "(?(1)b)", "(?(2)b|c)", "[a", "[]"] {
+        let err = not_excluded(&[c.clone()], pattern, &HashSet::new()).unwrap_err();
+        assert!(err.downcast_ref::<BotError>().is_none(), "{pattern}");
+    }
+}
+
+/// Parity harness: a conditional on a group NAME tested the name as a lookahead (branches swapped).
+#[test]
+fn conditional_on_a_named_group_picks_the_branch_as_python_does() {
+    for (name, dropped) in [("ab", true), ("ac", false), ("c", false), ("xab", true)] {
+        assert_eq!(matches("(?P<n>a)(?(n)b|c)", name), dropped, "{name}");
+    }
+}

@@ -81,7 +81,12 @@ pub fn not_excluded(contests: &[Contest], pattern: &str, keep: &HashSet<i64>) ->
 }
 
 fn exclude_regex(pattern: &str) -> anyhow::Result<fancy_regex::Regex> {
-    Ok(delegate(&py_to_fancy::strip_noise(pattern)).case_insensitive(true).build()?)
+    let clean = py_to_fancy::strip_noise(pattern);
+    // Python's `re.compile` rejects these (re.error or OverflowError, neither a BotError); fancy-regex alone would accept some.
+    if py_re::check(&clean).is_err() {
+        anyhow::bail!("pattern does not compile in Python's re");
+    }
+    Ok(delegate(&clean).case_insensitive(true).build()?)
 }
 
 fn drop_matching(contests: &[Contest], rx: &fancy_regex::Regex, keep: &HashSet<i64>) -> Vec<Contest> {
@@ -1011,6 +1016,9 @@ mod py_to_fancy {
                     let start = self.i;
                     while self.next().is_some_and(|c| c != ')') {}
                     let text: String = self.s[start..self.i].iter().collect();
+                    // fancy-regex reads `(?(n)b|c)` as a lookahead condition `n`: a group name needs `(?(<n>)`
+                    let name = text.trim_matches(['(', ')']);
+                    let text = if name.is_empty() || name.bytes().all(|b| b.is_ascii_digit()) { text } else { format!("(<{name}>)") };
                     self.open(&format!("(?{text}"), false, f)
                 }
                 _ => {
