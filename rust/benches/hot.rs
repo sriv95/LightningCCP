@@ -65,10 +65,24 @@ fn hot(c: &mut Criterion) {
     c.bench_function("contest_ics", |b| b.iter(|| contest_ics(black_box(&ics), 1_699_000_000, 10).unwrap()));
 
     let keep: HashSet<i64> = [1000, 1001].into();
-    c.bench_function("check_regex + not_excluded (200 contests)", |b| {
+    // cold: validate and compile on every call (a /remind exclude command); the loop never does this
+    let pat = r"  div\. ?[12]|kotlin|^educational  ";
+    c.bench_function("regex cold: check_regex + not_excluded (200 contests)", |b| {
         b.iter(|| {
-            let p = check_regex(black_box(r"  div\. ?[12]|kotlin|^educational  ")).unwrap();
+            let p = check_regex(black_box(pat)).unwrap();
             not_excluded(black_box(&list), &p, &keep).unwrap()
+        })
+    });
+    // warm: the reminder loop compiles once (LoopState.excludes) and only matches names afterwards. The compiled
+    // regex type is private to cogs::contests, so build the same one here (the pattern needs no translation).
+    let rx = fancy_regex::RegexBuilder::new(pat.trim()).case_insensitive(true).build().unwrap();
+    assert_eq!(
+        list.iter().filter(|c| keep.contains(&c.id) || !rx.is_match(&c.name).unwrap_or(false)).map(|c| c.id).collect::<Vec<_>>(),
+        not_excluded(&list, pat.trim(), &keep).unwrap().iter().map(|c| c.id).collect::<Vec<_>>()
+    );
+    c.bench_function("regex warm: not_excluded, compiled once (200 contests)", |b| {
+        b.iter(|| {
+            black_box(&list).iter().filter(|c| keep.contains(&c.id) || !rx.is_match(&c.name).unwrap_or(false)).cloned().collect::<Vec<_>>()
         })
     });
 

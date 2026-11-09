@@ -486,13 +486,21 @@ pub fn py_int(part: &str) -> Option<i64> {
     Some(if neg { -v } else { v })
 }
 
-/// Python 3.12 `str.casefold`: `to_lowercase`, then the full folds `lower()` lacks (`ß` to `ss`, final `ς` to `σ`).
+/// Python 3.12 `str.casefold`: ASCII by `to_ascii_lowercase`, everything else by the generated table (Python's own
+/// Unicode data, not Rust's, which is newer). `ß` gives `ss`, and `Σ` always `σ` (no final-sigma rule).
 pub fn casefold(s: &str) -> String {
+    if s.is_ascii() {
+        return s.to_ascii_lowercase();
+    }
     let mut out = String::with_capacity(s.len());
-    for c in s.to_lowercase().chars() {
-        match super::casefold::CASEFOLD.binary_search_by_key(&c, |&(k, _)| k) {
-            Ok(i) => out.push_str(super::casefold::CASEFOLD[i].1),
-            Err(_) => out.push(c),
+    for c in s.chars() {
+        if c.is_ascii() {
+            out.push(c.to_ascii_lowercase());
+        } else {
+            match super::casefold::fold(c) {
+                Some(folded) => out.push_str(folded),
+                None => out.push(c),
+            }
         }
     }
     out

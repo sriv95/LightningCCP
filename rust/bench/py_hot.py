@@ -6,6 +6,7 @@ timeit autorange, best of 5 repeats. Keep the input builders in step with benche
 
 import asyncio
 import random
+import re
 import shutil
 import sys
 import tempfile
@@ -21,8 +22,8 @@ from src.logic import (  # noqa: E402
     bingo_board,
     contest_ics,
     filter_problems,
-    match_deltas,
     mashup_standings,
+    match_deltas,
 )
 from src.ui.embeds import contest_pages, esc, ranklist_pages  # noqa: E402
 
@@ -51,7 +52,10 @@ def contests(n):
             f"CodeTON Round {i}, Div. 1 + Div. 2; rated",
         )[i % 4]
 
-    return [Contest(1000 + i, name(i), "CF", "BEFORE", 1_700_000_000 + i * 86400, 7200) for i in range(n)]
+    return [
+        Contest(1000 + i, name(i), "CF", "BEFORE", 1_700_000_000 + i * 86400, 7200)
+        for i in range(n)
+    ]
 
 
 def solves(players, n_problems):
@@ -68,12 +72,21 @@ def solves(players, n_problems):
 typical = "Codeforces Round #900 (Div. 2) *bold* _under_ [x]"
 long = "Привет мир_ *звезда* `код` ~tilde~ https://example.com/a_b_c ‖ 日本語 " * 50
 lst = contests(200)
-ics = Contest(lst[3].id, "CodeTON Round 7, Div. 1 + Div. 2; rated", "CF", "BEFORE", lst[3].start_time, 7200)
+ics = Contest(
+    lst[3].id, "CodeTON Round 7, Div. 1 + Div. 2; rated", "CF", "BEFORE", lst[3].start_time, 7200
+)
 keep = {1000, 1001}
+PAT = r"  div\. ?[12]|kotlin|^educational  "
 text = "Straße ΣΊΣΥΦΟΣ ǅ Hello World ß İstanbul"
 pset = problems(10_000)
 solved = frozenset(p.key for p in pset[::20])
-kw = dict(min_rating=1200, max_rating=1600, tags=frozenset({"dp"}), exclude_tags=frozenset({"geometry"}), solved=solved)
+kw = dict(
+    min_rating=1200,
+    max_rating=1600,
+    tags=frozenset({"dp"}),
+    exclude_tags=frozenset({"geometry"}),
+    solved=solved,
+)
 rng = random.Random(7)
 entries = [(i + 1, 100 + i, f"user_{i}*", 1000.0 - i * 7.5, i % 4 * 10) for i in range(50)]
 players = [(u, f"player{u}", 1_000_000 + u) for u in range(1, 31)]
@@ -99,15 +112,22 @@ CASES = [
     ("esc long unicode", lambda: esc(long)),
     ("contest_ics", lambda: contest_ics(ics, 1_699_000_000, 10)),
     (
-        "check_regex + not_excluded (200 contests)",
-        lambda: _not_excluded(lst, _check_regex(r"  div\. ?[12]|kotlin|^educational  "), keep),
+        "regex cold: check_regex + not_excluded (200 contests)",
+        lambda: (re.purge(), _not_excluded(lst, _check_regex(PAT), keep)),
+    ),
+    (
+        "regex warm: not_excluded, compiled once (200 contests)",
+        lambda: _not_excluded(lst, PAT.strip(), keep),
     ),
     ("casefold", lambda: text.casefold()),
     ("filter_problems (10k)", lambda: filter_problems(pset, **kw)),
     ("gimme: filter + pick (10k)", lambda: rng.choice(filter_problems(pset, **kw))),
     ("contest_pages (50 contests)", lambda: contest_pages(lst[:50], "Upcoming", 10)),
     ("ranklist_pages (50 entries)", lambda: ranklist_pages(entries, "Ranklist", 10)),
-    ("mashup_standings (30 players, 8 problems)", lambda: mashup_standings(players, mash, 1_000_000, 5)),
+    (
+        "mashup_standings (30 players, 8 problems)",
+        lambda: mashup_standings(players, mash, 1_000_000, 5),
+    ),
     ("bingo_board (5x5, 6 teams)", lambda: bingo_board(5, "classic", "line", cells, bingo)),
     ("match_deltas (8 players)", lambda: match_deltas(groups, ratings, 1.5)),
     ("store link_handle + get_handle", lambda: loop.run_until_complete(store_op())),
