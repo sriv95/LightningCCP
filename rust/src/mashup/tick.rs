@@ -1,5 +1,5 @@
 //! Port of `src/mashup.py` lines 503-606: the tick body, the read of the stalest players within the budget,
-//! the dynamic interval and the match-rating changes. The cog-side loop that posts the returned views is s18.
+//! the dynamic interval and the match-rating changes. The cog-side loop that posts the returned views is `cogs::mashup::tick_loop_round`.
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::Ordering::SeqCst;
 

@@ -194,7 +194,7 @@ pub fn commands() -> Vec<Command> {
 }
 
 /// Python `dispatch` of persistent items (`add_dynamic_items`) and `cog_load` loops: components and modals go
-/// to the cog that owns the custom id; the loops start once the cache is ready (`wait_until_ready`).
+/// to the cog that owns the custom id; the loops start once, on CacheReady or on a Ready with no guilds (`wait_until_ready`).
 async fn on_event(
     framework: poise::FrameworkContext<'_, Arc<Services>, Error>,
     event: &serenity::FullEvent,
@@ -204,6 +204,8 @@ async fn on_event(
     let (ctx, services) = (framework.serenity_context, framework.user_data.as_ref());
     match event {
         FullEvent::CacheReady { .. } => start_loops(ctx, framework.user_data),
+        // serenity fires CacheReady only from a GuildCreate, so a bot in no guilds never gets it.
+        FullEvent::Ready { data_about_bot } if data_about_bot.guilds.is_empty() => start_loops(ctx, framework.user_data),
         FullEvent::InteractionCreate { interaction: Interaction::Component(press) } => {
             let _ = handles::on_component(ctx, press, services).await
                 || matches::on_component(ctx, press, services).await

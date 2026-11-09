@@ -309,13 +309,14 @@ pub struct MatchView {
     pub note: Option<String>,
 }
 
-fn mode_label(m: &MatchRow) -> String {
-    match m.mode.as_str() {
+/// Python `MODE_LABEL[m.mode]`: an unknown mode is a `KeyError`.
+fn mode_label(m: &MatchRow) -> anyhow::Result<String> {
+    Ok(match m.mode.as_str() {
         "custom" => format!("Custom ({} players max)", m.max_players),
         "solo" => "Solo".into(),
         "duel" => "Duel".into(),
-        _ => unreachable!("matches.mode is CHECKed to solo, duel or custom"),
-    }
+        other => anyhow::bail!("KeyError: {other:?}"),
+    })
 }
 
 fn player_status(p: &MatchPlayer) -> String {
@@ -330,12 +331,12 @@ fn first_solve(players: &[MatchPlayer]) -> Option<i64> {
     players.iter().filter_map(|p| p.solved_at).min()
 }
 
-pub fn match_embed(view: &MatchView) -> EmbedData {
+pub fn match_embed(view: &MatchView) -> anyhow::Result<EmbedData> {
     let (m, players) = (&view.r#match, &view.players);
     if m.status == "cancelled" {
         let note = view.note.as_deref().filter(|n| !n.is_empty()).unwrap_or("The match was cancelled.");
-        return EmbedData::new("Match cancelled", Some(RED))
-            .description(format!("{note}\nHost: <@{}> | {}", m.host_id, mode_label(m)));
+        return Ok(EmbedData::new("Match cancelled", Some(RED))
+            .description(format!("{note}\nHost: <@{}> | {}", m.host_id, mode_label(m)?)));
     }
     if m.status == "lobby" {
         let lines = players.iter().map(|p| format!("<@{}> ({})", p.user_id, esc(&p.handle))).collect::<Vec<_>>().join("\n");
@@ -350,16 +351,16 @@ pub fn match_embed(view: &MatchView) -> EmbedData {
             desc += &format!("\nExcluding: {}", m.exclude_tags.replace(',', ", "));
         }
         desc += &format!("\nExpires <t:{}:R>. The host presses Start.", m.created_at + LOBBY_TTL_SECONDS);
-        return EmbedData::new(format!("Match lobby - {}", mode_label(m)), Some(BLURPLE)).description(desc);
+        return Ok(EmbedData::new(format!("Match lobby - {}", mode_label(m)?), Some(BLURPLE)).description(desc));
     }
     let mut e = match &view.problem {
         Some(p) => problem_embed(p, None),
         None => EmbedData::new(format!("Problem {}", m.problem_key.as_deref().unwrap_or("None")), Some(BLUE)),
     };
-    e.author = Some(format!("{} match", mode_label(m)));
+    e.author = Some(format!("{} match", mode_label(m)?));
     if m.status == "active" {
         let status = players.iter().map(|p| format!("<@{}>: {}", p.user_id, player_status(p))).collect::<Vec<_>>().join("\n");
-        return e.field("Players", status, false).field("Ends", format!("<t:{}:R>", opt(m.expires_at)), false);
+        return Ok(e.field("Players", status, false).field("Ends", format!("<t:{}:R>", opt(m.expires_at)), false));
     }
     let empty = HashMap::new();
     let ratings = view.ratings.as_ref().unwrap_or(&empty);
@@ -394,7 +395,7 @@ pub fn match_embed(view: &MatchView) -> EmbedData {
     if let Some(n) = view.note.as_deref().filter(|n| !n.is_empty()) {
         e = e.footer(n);
     }
-    e
+    Ok(e)
 }
 
 pub const STATS_SIZE: usize = 10;

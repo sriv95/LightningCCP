@@ -48,6 +48,12 @@ struct FakeCf {
 }
 
 impl CfApi for FakeCf {
+    async fn user_info(&self, _: &str) -> anyhow::Result<lightningccp::cf::models::User> {
+        unreachable!()
+    }
+    async fn users_info(&self, _: &[String]) -> anyhow::Result<Vec<lightningccp::cf::models::User>> {
+        unreachable!()
+    }
     fn user_status(&self, handle: &str, _count: Option<i64>, _since: Option<i64>) -> impl Future<Output = Result<Vec<Submission>>> + Send {
         let handle = handle.to_string();
         async move {
@@ -64,6 +70,9 @@ impl CfApi for FakeCf {
 struct FakeProblems(Mutex<Arc<Vec<Problem>>>);
 
 impl ProblemSource for FakeProblems {
+    fn tags(&self) -> Arc<std::collections::HashSet<String>> {
+        Arc::default()
+    }
     fn problems(&self) -> Arc<Vec<Problem>> {
         self.0.lock().unwrap().clone()
     }
@@ -353,7 +362,7 @@ impl MashupEnv for FakeEnv {
 
 type Svc = MashupService<FakeCf, FakeProblems>;
 
-/// `MatchEnv` whose contest half is the cog's `forfeit_contest`, as s18b wires it.
+/// `MatchEnv` whose contest half is the cog's `forfeit_contest`, as `bot` wires it.
 struct FfEnv<'a> {
     svc: &'a Svc,
     out: &'a FakeOut,
@@ -853,4 +862,12 @@ async fn a_finished_bingo_posts_its_closing_message_once() {
     assert!(board.contains("1. [1]") && board.contains("rating +"));
     assert!(out.events().iter().all(|ev| !matches!(ev, Ev::Cleared { .. })));
     assert_eq!(e.store.get_mashup(mid).await.unwrap().unwrap().log_board_id, Some(104));
+}
+
+#[test]
+fn custom_id_takes_unicode_digits_like_python() {
+    use lightningccp::cogs::mashup::parse_custom_id;
+    assert_eq!(parse_custom_id("mashup:join:٣٤").map(|(_, id)| id), Some(34));
+    assert!(parse_custom_id("mashup:join:+4").is_none());
+    assert!(parse_custom_id("mashup:join:").is_none());
 }

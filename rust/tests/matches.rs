@@ -50,6 +50,12 @@ struct FakeCf {
 }
 
 impl CfApi for FakeCf {
+    async fn user_info(&self, _: &str) -> anyhow::Result<lightningccp::cf::models::User> {
+        unreachable!()
+    }
+    async fn users_info(&self, _: &[String]) -> anyhow::Result<Vec<lightningccp::cf::models::User>> {
+        unreachable!()
+    }
     fn user_status(
         &self,
         handle: &str,
@@ -91,6 +97,9 @@ impl FakeProblems {
 }
 
 impl ProblemSource for FakeProblems {
+    fn tags(&self) -> Arc<std::collections::HashSet<String>> {
+        Arc::default()
+    }
     fn problems(&self) -> Arc<Vec<Problem>> {
         self.0.lock().unwrap().clone()
     }

@@ -1,5 +1,5 @@
 //! Port of `tests/test_daily.py` (13 tests). The solo-win tests drive `Store::finish_match` with the one delta and bonus day
-//! that `MatchService.check` passes in Python (the match service itself is stage s11). Plus rng injection.
+//! that `MatchService.check` passes in Python (the match service itself is in `matches.rs`). Plus rng injection.
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, AtomicU32, Ordering};
@@ -35,7 +35,7 @@ impl CfApi for FakeCf {
     async fn users_info(&self, _: &[String]) -> anyhow::Result<Vec<User>> {
         unreachable!()
     }
-    async fn user_status(&self, _: &str, count: Option<i64>) -> anyhow::Result<Vec<Submission>> {
+    async fn user_status(&self, _: &str, count: Option<i64>, _since: Option<i64>) -> anyhow::Result<Vec<Submission>> {
         self.counts.lock().unwrap().push(count);
         Ok(self.subs.lock().unwrap().clone())
     }

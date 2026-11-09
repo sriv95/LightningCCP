@@ -293,7 +293,7 @@ async fn migration_2_drops_challenge_and_adds_match_tables() {
 
 #[tokio::test]
 async fn migration_3_resets_old_points() {
-    // Python also asserts Store.rating == 800 and stats; those methods belong to the match stage.
+    // Python also asserts Store.rating == 800 and stats; those methods are tested in `store_matches.rs`.
     let dir = TempDir::new();
     let path = old_db(
         &dir,
@@ -319,7 +319,7 @@ async fn weekly_channel_marks_each_week_once_and_lists_events() {
     assert!(s.mark_weekly(1, 2000).await.unwrap());
     assert!(!s.mark_weekly(1, 2000).await.unwrap());
     assert!(s.clear_weekly(1).await.unwrap() && !s.clear_weekly(1).await.unwrap());
-    // a finished solo match (raw rows; the match methods are not in this stage) and a lobby that is not counted
+    // a finished solo match (raw rows, not through the match methods) and a lobby that is not counted
     Connection::open(d.0.join("sub").join("t.db"))
         .unwrap()
         .execute_batch(

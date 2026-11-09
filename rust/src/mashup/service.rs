@@ -1,5 +1,5 @@
 //! Port of `src/mashup.py` lines 125-503: every contest and bingo state transition up to the read of one
-//! player (`tick`, the read budget, the interval and the ratings stay in `tick.rs`, stage s17). Each
+//! player (`tick`, the read budget, the interval and the ratings stay in `tick.rs`). Each
 //! transition is a guarded store call, so concurrent button presses cannot start or cancel twice.
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;

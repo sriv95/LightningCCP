@@ -9,6 +9,11 @@ use lightningccp::logic::base::WeeklyRow;
 use lightningccp::store::mashup::MashupRow;
 use lightningccp::store::matches::{DailyRow, MatchPlayer, MatchRow};
 use lightningccp::ui::embeds::a::*;
+
+/// `match_embed` for matches the fixtures build with a known mode.
+fn match_embed(v: &MatchView) -> EmbedData {
+    lightningccp::ui::embeds::a::match_embed(v).unwrap()
+}
 use serde_json::{Map, Value, json};
 use serenity::all::CreateEmbed;
 
@@ -565,4 +570,16 @@ fn create_embed_conversion_skips_empty_text() {
     let e = EmbedData::new("", Some(BLUE)).description("").footer("f").field("a", "b", false);
     let v = serde_json::to_value(CreateEmbed::from(e)).unwrap();
     assert_eq!(v, json!({"color": BLUE, "fields": [{"name": "a", "value": "b", "inline": false}], "footer": {"text": "f"}, "type": "rich"}));
+}
+
+#[test]
+fn unknown_match_mode_is_an_error_not_a_panic() {
+    for status in ["lobby", "cancelled", "active"] {
+        let m = mrow(|m| {
+            m.mode = s("weird");
+            m.status = s(status);
+        });
+        let err = lightningccp::ui::embeds::a::match_embed(&view(m, vec![], None, None, None)).unwrap_err();
+        assert!(err.to_string().starts_with("KeyError"), "{status}: {err}");
+    }
 }

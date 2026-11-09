@@ -21,7 +21,7 @@ use crate::cf::models::{Contest, Problem};
 use crate::cogs::matches::{ButtonOutput, Editor, PostOutput, Sent};
 use crate::errors::{BotError, Interaction, SendFailed, report_error};
 use crate::logic::base::{
-    BINGO_MAX_SIZE, BINGO_MIN_SIZE, MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAM_SIZE, MASHUP_MAX_TEAMS, contest_suggestions, tag_suggestions,
+    BINGO_MAX_SIZE, BINGO_MIN_SIZE, MASHUP_MAX_PROBLEMS, MASHUP_MAX_TEAM_SIZE, MASHUP_MAX_TEAMS, contest_suggestions, parse_digits, py_int, tag_suggestions,
 };
 use crate::mashup::service::{CreateMashup, MashupService, MashupView};
 use crate::matches::{CfApi, ProblemSource};
@@ -78,34 +78,12 @@ impl Action {
     }
 }
 
-/// Zero digit of every Unicode `Nd` block (Python 3.12, Unicode 15.0.0): each block is ten consecutive digits.
-/// Python's `\d` matches them and `int()` reads them.
-const ND_ZEROS: [u32; 68] = [
-    0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66, 0xde6, 0xe50, 0xed0, 0xf20,
-    0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90, 0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900,
-    0xa9d0, 0xa9f0, 0xaa50, 0xabf0, 0xff10, 0x104a0, 0x10d30, 0x11066, 0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450,
-    0x114d0, 0x11650, 0x116c0, 0x11730, 0x118e0, 0x11950, 0x11c50, 0x11d50, 0x11da0, 0x11f50, 0x16a60, 0x16ac0, 0x16b50,
-    0x1d7ce, 0x1d7d8, 0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e4f0, 0x1e950, 0x1fbf0,
-];
-
-fn decimal_digit(c: char) -> Option<u32> {
-    let c = c as u32;
-    ND_ZEROS.iter().find(|&&z| (z..z + 10).contains(&c)).map(|z| c - z)
-}
-
 /// `MashupButton.template` `mashup:(?P<action>join|start|leave|check|giveup|rematch):(?P<id>\d+)`, full match, then
 /// `int()`. An id past `i64` saturates: no contest has it, so the service answers "no longer exists".
 pub fn parse_custom_id(custom_id: &str) -> Option<(Action, i64)> {
     let (action, number) = custom_id.strip_prefix("mashup:")?.split_once(':')?;
     let action = ALL_ACTIONS.into_iter().find(|a| a.id() == action)?;
-    if number.is_empty() {
-        return None;
-    }
-    let mut value: i64 = 0;
-    for c in number.chars() {
-        value = value.saturating_mul(10).saturating_add(i64::from(decimal_digit(c)?));
-    }
-    Some((action, value))
+    Some((action, parse_digits(number)?))
 }
 
 pub fn mashup_button(action: Action, mashup_id: i64) -> CreateButton {
@@ -147,26 +125,6 @@ pub fn team_modal(mashup_id: i64, teams: i64) -> CreateModal {
         .min_length(1)
         .max_length(2);
     CreateModal::new(team_modal_id(mashup_id), "Join a team").components(vec![CreateActionRow::InputText(input)])
-}
-
-/// Python `int(text)` (3.12) for text already `strip()`ped: sign, Unicode decimal digits, single underscores
-/// between digits. Overflow saturates (`check_team` rejects it like any out-of-range team).
-fn py_int(text: &str) -> Option<i64> {
-    let s = text.trim_matches(char::is_whitespace);
-    let (neg, digits) = match s.strip_prefix('-') {
-        Some(d) => (true, d),
-        None => (false, s.strip_prefix('+').unwrap_or(s)),
-    };
-    if digits.starts_with('_') || digits.ends_with('_') || digits.contains("__") {
-        return None;
-    }
-    let mut value: i64 = 0;
-    let mut count = 0;
-    for c in digits.chars().filter(|&c| c != '_') {
-        value = value.saturating_mul(10).saturating_add(i64::from(decimal_digit(c)?));
-        count += 1;
-    }
-    (count > 0).then_some(if neg { -value } else { value })
 }
 
 /// Python `TeamModal.on_submit` (after the Join press opened the modal).
@@ -505,7 +463,7 @@ pub async fn press<C: CfApi, P: ProblemSource, O: PressOutput>(svc: &MashupServi
 
 /// The contest half of `/ff` (match.py:281): leave the lobby or give up the contest the user is in, refresh its message
 /// and the thread, and log the give-up. `Some(true)` for a lobby left, `Some(false)` for a give-up, `None` when the
-/// user is in no unfinished contest. s18b calls it from `MatchEnv::forfeit_contest`.
+/// user is in no unfinished contest. `MatchEnv::forfeit_contest` calls it.
 pub async fn forfeit_contest<C: CfApi, P: ProblemSource, T: Threads>(
     svc: &MashupService<C, P>,
     threads: &T,
@@ -755,7 +713,7 @@ impl Interaction for ComponentOut<'_> {
     }
 }
 
-/// The persistent mashup button handler, for s18b to call from the component branch of `FullEvent::InteractionCreate`
+/// The persistent mashup button handler, called from the component branch of `FullEvent::InteractionCreate`
 /// (Python `MashupButton`: the custom id alone carries the state, so it works after a restart). False when the custom
 /// id is not `mashup:<action>:<digits>` (not ours).
 pub async fn on_component(ctx: &serenity::Context, press_: &serenity::ComponentInteraction, services: &Services) -> bool {
@@ -765,7 +723,7 @@ pub async fn on_component(ctx: &serenity::Context, press_: &serenity::ComponentI
     true
 }
 
-/// The team modal submit, for s18b to call from the modal branch of `FullEvent::InteractionCreate`. False when the
+/// The team modal submit, called from the modal branch of `FullEvent::InteractionCreate`. False when the
 /// custom id is not `mashup_team:<id>`.
 pub async fn on_modal(ctx: &serenity::Context, modal: &serenity::ModalInteraction, services: &Services) -> bool {
     let Some(mashup_id) = parse_team_modal_id(&modal.data.custom_id) else { return false };
@@ -784,14 +742,14 @@ pub async fn on_modal(ctx: &serenity::Context, modal: &serenity::ModalInteractio
     true
 }
 
-/// One round of the mashup loop with the real Discord client. s18b runs it once the gateway is ready
+/// One round of the mashup loop with the real Discord client. `bot::mashup_loop` runs it once the loops start
 /// (Python `before_loop`: `wait_until_ready`), then again after each returned interval (60 s, `TICK_INTERVAL`, until the
 /// first success); `None` keeps the previous interval.
 pub async fn tick_loop_round(ctx: &serenity::Context, services: &Services) -> Option<Duration> {
     tick_round(mashup_service(services), ctx.http.as_ref()).await
 }
 
-/// The contest half of `/ff` with the real Discord client, for `MatchEnv::forfeit_contest` in s18b.
+/// The contest half of `/ff` with the real Discord client, for `MatchEnv::forfeit_contest`.
 pub async fn forfeit_contest_real(ctx: &serenity::Context, services: &Services, guild: i64, user: i64) -> anyhow::Result<Option<bool>> {
     forfeit_contest(mashup_service(services), ctx.http.as_ref(), guild, user).await
 }

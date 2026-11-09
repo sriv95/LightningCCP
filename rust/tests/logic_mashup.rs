@@ -1,4 +1,4 @@
-//! Port of tests/test_bingo.py (logic tests; the MashupService ones belong to the service stage) and the
+//! Port of tests/test_bingo.py (logic tests; the MashupService ones are in `mashup_service.rs`) and the
 //! mashup tests of tests/test_logic.py. Picks are checked for validity, not equality with Python's pick.
 //! Expected values of the extra cases come from `.venv/bin/python -I`.
 

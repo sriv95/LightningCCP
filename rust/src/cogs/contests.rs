@@ -1,5 +1,5 @@
-//! Port of src/cogs/contests.py. s14 (lines 1-260): the regex check, the persistent Add to calendar and
-//! Notify me buttons, `/contests upcoming|running|recent` and `/ranklist`. s15 adds the rest below the marker.
+//! Port of src/cogs/contests.py: the regex check, the persistent Add to calendar and Notify me buttons,
+//! `/contests upcoming|running|recent`, `/ranklist`, the channel group and the reminder, new-contest, recap and weekly loops.
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use crate::bot::{Context, DiscordOutput};
 use crate::cf::models::{Contest, Standing};
 use crate::errors::{BotError, Interaction, SendFailed, report_error};
 use crate::logic::base::{
-    NEW_CONTEST_SOON_SECONDS, contest_ics, new_contests, parse_minutes, recaps_due, reminders_due, select_contests,
+    NEW_CONTEST_SOON_SECONDS, contest_ics, new_contests, parse_digits, parse_minutes, recaps_due, reminders_due, select_contests,
     soon_contests, week_start, weekly_board,
 };
 use crate::services::Services;
@@ -1059,22 +1059,6 @@ impl Action {
     }
 }
 
-/// Zero digit of every Unicode `Nd` block (Python 3.12, Unicode 15.0.0): each block is ten consecutive digits.
-/// Python's `\d` matches them and `int()` reads them, so the custom id of a button accepts them too.
-const ND_ZEROS: [u32; 68] = [
-    0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66, 0xde6, 0xe50, 0xed0, 0xf20,
-    0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90, 0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900,
-    0xa9d0, 0xa9f0, 0xaa50, 0xabf0, 0xff10, 0x104a0, 0x10d30, 0x11066, 0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450,
-    0x114d0, 0x11650, 0x116c0, 0x11730, 0x118e0, 0x11950, 0x11c50, 0x11d50, 0x11da0, 0x11f50, 0x16a60, 0x16ac0, 0x16b50,
-    0x1d7ce, 0x1d7d8, 0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e4f0, 0x1e950, 0x1fbf0,
-];
-
-/// The value of a Unicode decimal digit (Python `\d`, `int()`), None for any other char.
-fn decimal_digit(c: char) -> Option<u32> {
-    let c = c as u32;
-    ND_ZEROS.iter().find(|&&z| (z..z + 10).contains(&c)).map(|z| c - z)
-}
-
 /// Python `ContestButton.template` `(?P<action>cal|notify):(?P<contest>\d+)`, full match, then `int()`. A number
 /// too big for `i64` saturates: no contest has that id, so the handler answers "not upcoming any more" like Python.
 pub fn parse_custom_id(custom_id: &str) -> Option<(Action, i64)> {
@@ -1084,14 +1068,7 @@ pub fn parse_custom_id(custom_id: &str) -> Option<(Action, i64)> {
         "notify" => Action::Notify,
         _ => return None,
     };
-    if number.is_empty() {
-        return None;
-    }
-    let mut value: i64 = 0;
-    for c in number.chars() {
-        value = value.saturating_mul(10).saturating_add(i64::from(decimal_digit(c)?));
-    }
-    Some((action, value))
+    Some((action, parse_digits(number)?))
 }
 
 pub fn contest_button(action: Action, contest_id: i64) -> CreateButton {
@@ -1263,8 +1240,8 @@ impl Interaction for ButtonOutput<'_> {
     }
 }
 
-/// Python `ContestButton.callback` (matched by `from_custom_id`): for the component interaction event handler
-/// of s18. True when the custom id is `cal:<id>` or `notify:<id>` and the press was handled, false to let the
+/// Python `ContestButton.callback` (matched by `from_custom_id`): for the component interaction event handler.
+/// True when the custom id is `cal:<id>` or `notify:<id>` and the press was handled, false to let the
 /// next handler look at it. Works after a restart: the id alone carries the state.
 pub async fn on_component(ctx: &serenity::Context, interaction: &ComponentInteraction, data: &Services) -> bool {
     let Some((action, contest_id)) = parse_custom_id(&interaction.data.custom_id) else { return false };
@@ -1387,8 +1364,6 @@ pub async fn contests_recent(ctx: Context<'_>) -> anyhow::Result<()> {
 pub async fn ranklist(ctx: Context<'_>, #[description = "Codeforces contest id"] contest_id: i64) -> anyhow::Result<()> {
     show_ranklist(ctx.data().as_ref(), &CtxOutput(ctx), guild(ctx)?, contest_id).await
 }
-
-// ---- s15: src/cogs/contests.py from line 260 (channel group, reminder/new-contest/recap/weekly loops) ----
 
 // ---- the channel commands -----------------------------------------------------------------------------
 
@@ -1905,7 +1880,7 @@ fn timer(period: Duration) -> tokio::time::Interval {
     t
 }
 
-/// `new_contest_loop`, for s18 to spawn once the bot is ready (Python `wait_until_ready`); runs until aborted.
+/// `new_contest_loop`, spawned by `bot::start_loops` once the bot is ready (Python `wait_until_ready`); runs until aborted.
 pub async fn run_new_contest_loop(services: Arc<Services>, chans: DiscordChannels) {
     let mut t = timer(NEW_CONTEST_INTERVAL);
     loop {
@@ -1914,7 +1889,7 @@ pub async fn run_new_contest_loop(services: Arc<Services>, chans: DiscordChannel
     }
 }
 
-/// `remind_loop`, for s18 to spawn once the bot is ready; runs until aborted.
+/// `remind_loop`, spawned by `bot::start_loops` once the bot is ready; runs until aborted.
 pub async fn run_remind_loop(services: Arc<Services>, chans: DiscordChannels) {
     let (mut t, mut state) = (timer(REMIND_INTERVAL), LoopState::default());
     loop {

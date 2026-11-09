@@ -44,7 +44,7 @@ impl CfApi for Fake {
     async fn users_info(&self, _: &[String]) -> anyhow::Result<Vec<User>> {
         unreachable!()
     }
-    async fn user_status(&self, _: &str, _: Option<i64>) -> anyhow::Result<Vec<Submission>> {
+    async fn user_status(&self, _: &str, _: Option<i64>, _since: Option<i64>) -> anyhow::Result<Vec<Submission>> {
         Ok(self.subs.lock().unwrap().clone())
     }
 }

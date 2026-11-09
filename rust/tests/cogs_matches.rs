@@ -29,6 +29,12 @@ struct FakeCf {
 }
 
 impl CfApi for FakeCf {
+    async fn user_info(&self, _: &str) -> anyhow::Result<lightningccp::cf::models::User> {
+        unreachable!()
+    }
+    async fn users_info(&self, _: &[String]) -> anyhow::Result<Vec<lightningccp::cf::models::User>> {
+        unreachable!()
+    }
     async fn user_status(&self, handle: &str, _count: Option<i64>, _since: Option<i64>) -> anyhow::Result<Vec<Submission>> {
         anyhow::ensure!(!self.fail.load(SeqCst), "boom");
         Ok(self.subs.lock().unwrap().get(handle).cloned().unwrap_or_default())
@@ -38,6 +44,9 @@ impl CfApi for FakeCf {
 struct FakeProblems(Vec<Problem>);
 
 impl ProblemSource for FakeProblems {
+    fn tags(&self) -> Arc<std::collections::HashSet<String>> {
+        Arc::default()
+    }
     fn problems(&self) -> Arc<Vec<Problem>> {
         Arc::new(self.0.clone())
     }
@@ -392,7 +401,7 @@ async fn new_match_is_posted_once_with_buttons_and_stored() {
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0], Call::Defer(false));
     // the posted embed is the stored match's embed, with the Check and Give Up buttons
-    assert_eq!(calls[1], Call::Post(embed_json(match_embed(&v).into()), row_json(match_components(&v))));
+    assert_eq!(calls[1], Call::Post(embed_json(match_embed(&v).unwrap().into()), row_json(match_components(&v))));
     assert_eq!(row_json(match_components(&v))["components"][0]["custom_id"], format!("match:check:{}", v.r#match.id));
     // a tag filter nothing satisfies is the service's error, after the defer
     let out = FakeOut::new(2);
@@ -461,7 +470,7 @@ async fn button_edits_the_original_with_the_new_buttons() {
     let out = FakeOut::new(2);
     on_button(&e.svc, &out, Action::Join, id).await.unwrap();
     let joined = e.svc.current(GUILD, 2).await.unwrap().unwrap();
-    let want = Call::EditOriginal(embed_json(match_embed(&joined).into()), row_json(match_components(&joined)));
+    let want = Call::EditOriginal(embed_json(match_embed(&joined).unwrap().into()), row_json(match_components(&joined)));
     assert_eq!(out.calls(), [Call::Defer(false), want]);
 }
 
@@ -652,4 +661,13 @@ async fn history_lists_a_finished_match() {
 fn tag_autocomplete_uses_the_problem_tags() {
     assert_eq!(tag_autocomplete(&FakeEnv::default(), "g"), ["graphs", "greedy"]);
     assert_eq!(tag_autocomplete(&FakeEnv::default(), "dp, g"), ["dp,graphs", "dp,greedy"]);
+}
+
+#[test]
+fn custom_id_takes_unicode_digits_like_python() {
+    use lightningccp::cogs::matches::parse_custom_id;
+    assert_eq!(parse_custom_id("match:join:٣٤").map(|(_, id)| id), Some(34));
+    assert_eq!(parse_custom_id("match:check:１２").map(|(_, id)| id), Some(12));
+    assert!(parse_custom_id("match:join:1a").is_none());
+    assert!(parse_custom_id("match:join:").is_none());
 }

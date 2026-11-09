@@ -13,7 +13,8 @@ use crate::cache::problems::ProblemCache;
 use crate::cf::client::CodeforcesClient;
 use crate::cf::models::{Contest, Problem};
 use crate::cogs::plot::Person;
-use crate::daily::{CfApi, DailyService, ProblemSource};
+use crate::daily::DailyService;
+use crate::matches::{CfApi, ProblemSource};
 use crate::errors::BotError;
 use crate::logic::base::{
     ProblemFilter, contest_suggestions, filter_problems, parse_tags, round_rating, solved_keys, tag_suggestions, unsolved_keys,
@@ -66,7 +67,7 @@ pub async fn gimme<C: CfApi, P: ProblemSource>(
     let linked = db.get_handle(guild, user_id as i64).await?;
     let mut solved = HashSet::new();
     if let Some(linked) = &linked {
-        solved = solved_keys(&cf.user_status(&linked.handle, None).await?);
+        solved = solved_keys(&cf.user_status(&linked.handle, None, None).await?);
     }
     let mut footer =
         if linked.is_some() { None } else { Some("Link your handle with /handle link to hide solved problems.".to_string()) };
@@ -154,7 +155,7 @@ pub async fn stalk<C: CfApi, P: ProblemSource>(
         }
         Some(h) => cf.user_info(h).await?.handle, // validates and fixes the casing
     };
-    let keys = unsolved_keys(&cf.user_status(&handle, None).await?);
+    let keys = unsolved_keys(&cf.user_status(&handle, None, None).await?);
     let all = problems.problems();
     let by_key: HashMap<String, &Problem> = all.iter().map(|p| (p.key(), p)).collect();
     let items: Vec<(String, Option<Problem>)> =

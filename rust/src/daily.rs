@@ -1,7 +1,5 @@
 //! Port of src/daily.py: the daily problem, one per user per UTC day, solved for double the solo rating change.
-//! Also the two read-only seams the problem cogs share: the Codeforces calls (`CfApi`) and the problem cache (`ProblemSource`).
-use std::collections::HashSet;
-use std::future::Future;
+//! Also re-exports the two read-only seams the problem cogs share (`CfApi`, `ProblemSource`, defined in `matches`).
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,9 +7,7 @@ use rand::rngs::StdRng;
 use rand::seq::IndexedRandom;
 use rand::SeedableRng;
 
-use crate::cache::problems::ProblemCache;
-use crate::cf::client::CodeforcesClient;
-use crate::cf::models::{Problem, Submission, User};
+use crate::cf::models::Problem;
 use crate::errors::BotError;
 use crate::logic::base::{
     DAILY_MULTIPLIER, ProblemFilter, daily_streak, earliest_solve, filter_problems, floor_rating, solo_delta, solved_keys,
@@ -21,46 +17,7 @@ use crate::store::base::Store;
 use crate::store::matches::{DailyRow, DailySolve};
 pub use crate::ui::embeds::a::DailyView;
 
-/// The Codeforces calls the problem cogs make. `CodeforcesClient` implements it; tests use a fake.
-pub trait CfApi: Send + Sync {
-    fn user_info(&self, handle: &str) -> impl Future<Output = anyhow::Result<User>> + Send;
-    /// Profiles of the given handles (Python `users_info`, default chunk 300); unknown handles are skipped.
-    fn users_info(&self, handles: &[String]) -> impl Future<Output = anyhow::Result<Vec<User>>> + Send;
-    fn user_status(&self, handle: &str, count: Option<i64>) -> impl Future<Output = anyhow::Result<Vec<Submission>>> + Send;
-}
-
-impl CfApi for CodeforcesClient {
-    async fn user_info(&self, handle: &str) -> anyhow::Result<User> {
-        CodeforcesClient::user_info(self, handle).await
-    }
-    async fn users_info(&self, handles: &[String]) -> anyhow::Result<Vec<User>> {
-        CodeforcesClient::users_info(self, handles, 300).await
-    }
-    async fn user_status(&self, handle: &str, count: Option<i64>) -> anyhow::Result<Vec<Submission>> {
-        CodeforcesClient::user_status(self, handle, count, None).await
-    }
-}
-
-/// What the cogs read from the problem cache (Python `problems.problems`, `.require()`, `.tags`).
-pub trait ProblemSource: Send + Sync {
-    /// The cached problems, empty before the first load (Python `.problems`).
-    fn problems(&self) -> Arc<Vec<Problem>>;
-    /// The cached problems; `CacheNotReady` while empty.
-    fn require(&self) -> Result<Arc<Vec<Problem>>, BotError>;
-    fn tags(&self) -> Arc<HashSet<String>>;
-}
-
-impl ProblemSource for ProblemCache {
-    fn problems(&self) -> Arc<Vec<Problem>> {
-        self.require().unwrap_or_default()
-    }
-    fn require(&self) -> Result<Arc<Vec<Problem>>, BotError> {
-        ProblemCache::require(self)
-    }
-    fn tags(&self) -> Arc<HashSet<String>> {
-        ProblemCache::tags(self)
-    }
-}
+pub use crate::matches::{CfApi, ProblemSource};
 
 /// Python `time.time`.
 pub fn system_clock() -> f64 {
@@ -121,7 +78,7 @@ impl<C: CfApi, P: ProblemSource> DailyService<C, P> {
         }
         let reroll = row.is_none() || rating.is_some_and(|r| Some(r) != row.as_ref().and_then(|r| r.rating));
         // A new problem needs every solved problem; a plain check only the recent submissions.
-        let subs = self.cf.user_status(&linked.handle, if reroll { None } else { Some(100) }).await?;
+        let subs = self.cf.user_status(&linked.handle, if reroll { None } else { Some(100) }, None).await?;
         if let Some(row) = row {
             if let (Some(key), Some(since)) = (row.problem_key.as_deref(), row.issued_at)
                 && let Some(solved_at) = earliest_solve(&subs, key, since)

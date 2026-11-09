@@ -1,6 +1,6 @@
 //! Port of the service-level tests of `tests/test_mashup.py` and `tests/test_bingo.py` (lobby, start, check,
 //! give up, rematch, history, wins, claims to log, bingo reads) over a fake Codeforces client and a real
-//! store on a temp file. Tests that need `tick`, embeds or the cog belong to s17 and later. Expected values
+//! store on a temp file. Tests that need `tick`, embeds or the cog are in their own files. Expected values
 //! come from the Python tests; random picks are checked for validity, not identity.
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -44,6 +44,12 @@ struct FakeCf {
 }
 
 impl CfApi for FakeCf {
+    async fn user_info(&self, _: &str) -> anyhow::Result<lightningccp::cf::models::User> {
+        unreachable!()
+    }
+    async fn users_info(&self, _: &[String]) -> anyhow::Result<Vec<lightningccp::cf::models::User>> {
+        unreachable!()
+    }
     fn user_status(&self, handle: &str, _count: Option<i64>, since: Option<i64>) -> impl Future<Output = Result<Vec<Submission>>> + Send {
         let handle = handle.to_string();
         async move {
@@ -61,6 +67,9 @@ impl CfApi for FakeCf {
 struct FakeProblems(Mutex<Arc<Vec<Problem>>>);
 
 impl ProblemSource for FakeProblems {
+    fn tags(&self) -> Arc<std::collections::HashSet<String>> {
+        Arc::default()
+    }
     fn problems(&self) -> Arc<Vec<Problem>> {
         self.0.lock().unwrap().clone()
     }
@@ -200,7 +209,7 @@ impl Env {
         }
         self.svc.start(id, 1).await.unwrap()
     }
-    /// Runs past the end and finishes the contest (the tick is s17; the store call is the same).
+    /// Runs past the end and finishes the contest (the tick lives in `tick.rs`; the store call is the same).
     async fn finish(&self, id: i64) {
         let ends = self.store.get_mashup(id).await.unwrap().unwrap().ends_at.unwrap();
         self.set_time(self.t.load(SeqCst).max(ends));
@@ -537,7 +546,7 @@ async fn team_virtual_contest_and_rematch() {
     assert_eq!(s.mashup.teams, 2);
     e.sub("h2", "500A", 1100);
     e.svc.check(s.mashup.id, 2).await.unwrap();
-    e.finish(s.mashup.id).await; // the deltas [-49, 49] come with the tick (s17)
+    e.finish(s.mashup.id).await; // the deltas [-49, 49] come with the tick
     let again = e.svc.rematch(s.mashup.id, 2, 5).await.unwrap();
     assert_eq!((again.mashup.contest_id, again.mashup.teams, again.mashup.team_size), (Some(500), 2, 2));
     assert_eq!(teams(&again), [(2, Some(1))]);

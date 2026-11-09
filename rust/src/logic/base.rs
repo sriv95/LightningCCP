@@ -465,7 +465,7 @@ fn decimal_digit(c: char) -> Option<u32> {
 /// Python 3.12 `int(part)`: surrounding whitespace (ASCII and Unicode, but not U+001C..U+001F), optional sign, Unicode decimal digits with single
 /// underscores between digits, at most 4300 digits (`ValueError` above, even for leading zeros). Overflow
 /// saturates, which is rejected as out of range exactly like a huge Python int.
-fn py_int(part: &str) -> Option<i64> {
+pub fn py_int(part: &str) -> Option<i64> {
     let s = part.trim_matches(char::is_whitespace); // not py_strip: int() does not strip U+001C..U+001F
     let (neg, digits) = match s.strip_prefix('-') {
         Some(d) => (true, d),
@@ -484,6 +484,26 @@ fn py_int(part: &str) -> Option<i64> {
         return None;
     }
     Some(if neg { -v } else { v })
+}
+
+/// Python 3.12 `str.casefold`: `to_lowercase`, then the full folds `lower()` lacks (`ß` to `ss`, final `ς` to `σ`).
+pub fn casefold(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.to_lowercase().chars() {
+        match super::casefold::CASEFOLD.binary_search_by_key(&c, |&(k, _)| k) {
+            Ok(i) => out.push_str(super::casefold::CASEFOLD[i].1),
+            Err(_) => out.push(c),
+        }
+    }
+    out
+}
+
+/// Python `\d+` full match then `int()` (custom ids): every char a Unicode decimal digit, no sign, spaces or underscores.
+pub fn parse_digits(s: &str) -> Option<i64> {
+    if s.is_empty() || !s.chars().all(|c| decimal_digit(c).is_some()) {
+        return None;
+    }
+    py_int(s)
 }
 
 pub fn parse_minutes(raw: &str) -> Result<Vec<i64>, BotError> {

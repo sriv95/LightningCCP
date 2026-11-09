@@ -11,7 +11,7 @@ use rand::seq::IndexedRandom;
 
 use crate::cache::problems::ProblemCache;
 use crate::cf::client::CodeforcesClient;
-use crate::cf::models::{Problem, Submission};
+use crate::cf::models::{Problem, Submission, User};
 use crate::errors::BotError;
 use crate::logic::base::{
     CUSTOM_SCALE, LOBBY_TTL_SECONDS, MATCH_TTL_SECONDS, ProblemFilter, earliest_solve, filter_problems, match_deltas,
@@ -22,8 +22,11 @@ use crate::store::matches::{MatchPlayer, MatchRow, NewMatch};
 
 pub use crate::ui::embeds::a::MatchView;
 
-/// What the service needs from the Codeforces client (a fake in tests).
+/// The Codeforces calls the cogs and services make. `CodeforcesClient` implements it; tests use a fake.
 pub trait CfApi: Send + Sync {
+    fn user_info(&self, handle: &str) -> impl Future<Output = Result<User>> + Send;
+    /// Profiles of the given handles (Python `users_info`, default chunk 300); unknown handles are skipped.
+    fn users_info(&self, handles: &[String]) -> impl Future<Output = Result<Vec<User>>> + Send;
     fn user_status(
         &self,
         handle: &str,
@@ -33,6 +36,12 @@ pub trait CfApi: Send + Sync {
 }
 
 impl CfApi for CodeforcesClient {
+    async fn user_info(&self, handle: &str) -> Result<User> {
+        CodeforcesClient::user_info(self, handle).await
+    }
+    async fn users_info(&self, handles: &[String]) -> Result<Vec<User>> {
+        CodeforcesClient::users_info(self, handles, 300).await
+    }
     fn user_status(
         &self,
         handle: &str,
@@ -43,12 +52,13 @@ impl CfApi for CodeforcesClient {
     }
 }
 
-/// What the service needs from the problem cache (a fake in tests).
+/// What the services and cogs read from the problem cache (Python `problems.problems`, `.require()`, `.tags`); a fake in tests.
 pub trait ProblemSource: Send + Sync {
     /// Python `.problems`: the cached problems, empty while the cache has none.
     fn problems(&self) -> Arc<Vec<Problem>>;
     /// `CacheNotReady` while empty.
     fn require(&self) -> Result<Arc<Vec<Problem>>, BotError>;
+    fn tags(&self) -> Arc<HashSet<String>>;
 }
 
 impl ProblemSource for ProblemCache {
@@ -58,6 +68,10 @@ impl ProblemSource for ProblemCache {
 
     fn require(&self) -> Result<Arc<Vec<Problem>>, BotError> {
         ProblemCache::require(self)
+    }
+
+    fn tags(&self) -> Arc<HashSet<String>> {
+        ProblemCache::tags(self)
     }
 }
 

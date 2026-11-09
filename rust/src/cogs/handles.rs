@@ -16,9 +16,9 @@ use serenity::{
 
 use crate::bot::Context;
 use crate::cogs::plot::Person;
-use crate::daily::{CfApi, ProblemSource};
+use crate::matches::{CfApi, ProblemSource};
 use crate::errors::{self, BotError, Interaction, SendFailed};
-use crate::logic::base::{LINK_MAX_RATING, LINK_WINDOW_SECONDS, ProblemFilter, filter_problems, has_compile_error, solved_keys};
+use crate::logic::base::{LINK_MAX_RATING, casefold, parse_digits, LINK_WINDOW_SECONDS, ProblemFilter, filter_problems, has_compile_error, solved_keys};
 use crate::services::Services;
 use crate::store::base::Store;
 use crate::ui::embeds::a::{EmbedData, esc, handle_list_pages, profile_embed};
@@ -35,15 +35,10 @@ pub fn verify_custom_id(user_id: u64) -> String {
     format!("{VERIFY_PREFIX}{user_id}")
 }
 
-/// Python `DynamicItem` template `verify:(?P<user>\d+)` with `fullmatch`: the user id of a Verify button.
-/// shortcut: ASCII digits only and u64 range (Python's `\d` also takes other Unicode digits and ints are unbounded);
-/// Discord ids are ASCII and below 2^64, and the bot only creates ids from real user ids.
+/// Python `DynamicItem` template `verify:(?P<user>\d+)` with `fullmatch`, then `int()`: the user id of a Verify
+/// button. A number past `i64` saturates (Discord ids are below 2^63), so the press gets no reply, like Python's for someone else's id.
 pub fn parse_verify_id(custom_id: &str) -> Option<u64> {
-    let digits = custom_id.strip_prefix(VERIFY_PREFIX)?;
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    digits.parse().ok()
+    u64::try_from(parse_digits(custom_id.strip_prefix(VERIFY_PREFIX)?)?).ok()
 }
 
 /// A followup that only carries text (what `verify` needs; a button press has no slash-command output).
@@ -86,7 +81,7 @@ pub async fn link<C: CfApi, P: ProblemSource>(
         return Err(BotError::HandleTaken(format!("{} is already linked to <@{owner}>.", esc(&user.handle))).into());
     }
     let problems = problems.require()?;
-    let solved = solved_keys(&cf.user_status(&user.handle, None).await?);
+    let solved = solved_keys(&cf.user_status(&user.handle, None, None).await?);
     let easy = ProblemFilter { max_rating: Some(LINK_MAX_RATING), ..Default::default() };
     let mut pool = filter_problems(&problems, &ProblemFilter { solved, ..easy.clone() });
     if pool.is_empty() {
@@ -117,7 +112,7 @@ pub async fn verify<C: CfApi>(db: &Store, cf: &C, out: &impl Reply, now: i64, gu
         db.delete_pending(guild, user_id).await?;
         return Err(plain("That link attempt expired. Run /handle link again."));
     }
-    let subs = cf.user_status(&pending.handle, Some(20)).await?;
+    let subs = cf.user_status(&pending.handle, Some(20), None).await?;
     if !has_compile_error(&subs, &pending.problem_key, pending.issued_at, LINK_WINDOW_SECONDS) {
         return Err(plain(format!(
             "No compile error found on {} yet. Submit one on Codeforces, then press Verify again.",
@@ -172,14 +167,14 @@ pub async fn list<C: CfApi>(db: &Store, cf: &C, out: &impl HandlesOutput, guild:
     if linked.is_empty() {
         return Err(plain("No member has linked a handle yet."));
     }
-    let owners: HashMap<String, i64> = linked.iter().map(|(uid, h)| (h.to_lowercase(), *uid)).collect();
+    let owners: HashMap<String, i64> = linked.iter().map(|(uid, h)| (casefold(h), *uid)).collect();
     let users = cf.users_info(&linked.iter().map(|(_, h)| h.clone()).collect::<Vec<_>>()).await?;
     let mut entries = Vec::new();
     for u in users {
-        let owner = *owners.get(&u.handle.to_lowercase()).ok_or_else(|| anyhow::anyhow!("KeyError: {}", u.handle))?;
+        let owner = *owners.get(&casefold(&u.handle)).ok_or_else(|| anyhow::anyhow!("KeyError: {}", u.handle))?;
         entries.push((owner, u.handle, u.rating, u.rank));
     }
-    entries.sort_by_key(|e| (e.2.is_none(), -e.2.unwrap_or(0), e.1.to_lowercase()));
+    entries.sort_by_key(|e| (e.2.is_none(), -e.2.unwrap_or(0), casefold(&e.1)));
     let pages = handle_list_pages(&entries, PER_PAGE)?;
     // Python `send_pages` with no page at all (every linked handle gone from Codeforces): IndexError, a generic error
     anyhow::ensure!(!pages.is_empty(), "list index out of range");
@@ -351,7 +346,7 @@ impl Interaction for ButtonOut<'_> {
     }
 }
 
-/// The persistent Verify button handler, for s18 to call from the `FullEvent::InteractionCreate` component branch
+/// The persistent Verify button handler, called from the `FullEvent::InteractionCreate` component branch
 /// (Python `VerifyButton`, registered with `bot.add_dynamic_items`, so it works after a restart). Returns false when the
 /// custom id is not `verify:<digits>` (not ours). A press by anyone but the user the id names gets no reply, like
 /// `interaction_check` returning False. Errors are reported here, privately, like `VerifyButton.callback`.

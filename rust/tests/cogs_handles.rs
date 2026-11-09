@@ -57,7 +57,7 @@ impl CfApi for Fake {
         let users = self.users.lock().unwrap();
         Ok(users.iter().filter(|u| handles.iter().any(|h| h.eq_ignore_ascii_case(&u.handle))).cloned().collect())
     }
-    async fn user_status(&self, _: &str, count: Option<i64>) -> anyhow::Result<Vec<Submission>> {
+    async fn user_status(&self, _: &str, count: Option<i64>, _since: Option<i64>) -> anyhow::Result<Vec<Submission>> {
         self.counts.lock().unwrap().push(count);
         Ok(self.subs.lock().unwrap().clone())
     }
@@ -178,7 +178,8 @@ async fn handles_group_commands() {
 fn verify_button_template_matches_custom_id() {
     assert_eq!(parse_verify_id("verify:12345"), Some(12345));
     assert_eq!(verify_custom_id(12345), "verify:12345");
-    assert_eq!(parse_verify_id(&verify_custom_id(u64::MAX)), Some(u64::MAX));
+    assert_eq!(parse_verify_id(&verify_custom_id(i64::MAX as u64)), Some(i64::MAX as u64));
+    assert_eq!(parse_verify_id("verify:99999999999999999999"), Some(i64::MAX as u64)); // saturates: no user has it
     for bad in ["verify:", "verify:12a", "xverify:1", "verify:1 ", "verify:-1", "match:start:1", "page:next", ""] {
         assert_eq!(parse_verify_id(bad), None, "{bad:?}");
     }
@@ -349,4 +350,13 @@ async fn unlink_removes_or_says_there_is_nothing() {
     handles::unlink(&e.db, &e.cf, G, 7).await.unwrap();
     assert_eq!(e.cf.sent(), [Sent::Respond("Unlinked.".into())]);
     assert!(e.db.get_handle(G, 7).await.unwrap().is_none());
+}
+
+#[test]
+fn verify_id_takes_unicode_digits_like_python() {
+    assert_eq!(parse_verify_id("verify:٣٤"), Some(34));
+    assert_eq!(parse_verify_id("verify:१२३"), Some(123));
+    assert_eq!(parse_verify_id("verify:12a"), None);
+    assert_eq!(parse_verify_id("verify:"), None);
+    assert_eq!(parse_verify_id("verify:+5"), None);
 }

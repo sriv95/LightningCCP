@@ -312,3 +312,11 @@ async fn ranklist_pages_like_python_test() {
     let lines: Vec<_> = p[0]["description"].as_str().unwrap().lines().collect();
     assert_eq!((lines[0], lines[1]), ("1. <@1> (h1) 99", "2. <@2> (h2) 90, penalty 45"));
 }
+
+#[test]
+fn custom_id_takes_unicode_digits_like_python() {
+    use lightningccp::cogs::contests::parse_custom_id;
+    assert_eq!(parse_custom_id("cal:१२३").map(|(_, id)| id), Some(123));
+    assert!(parse_custom_id("notify:1_0").is_none());
+    assert!(parse_custom_id("cal:").is_none());
+}

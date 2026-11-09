@@ -544,3 +544,27 @@ fn contest_ics_has_utc_times_alarm_and_escaped_text() {
         assert!(lines.contains(&want), "{want}");
     }
 }
+
+/// Expected values from Python 3.12 `str.casefold()`.
+#[test]
+fn casefold_matches_python() {
+    assert_eq!(casefold("ẞtraße"), "sstrasse");
+    assert_eq!(casefold("ΑΣ"), "ασ"); // lower() would give the final sigma "ας"
+    assert_eq!(casefold("ꭰ"), "Ꭰ"); // Cherokee folds to upper case
+    assert_eq!(casefold("İ"), "i\u{307}");
+    assert_eq!(casefold("ﬃ"), "ffi");
+    assert_eq!(casefold("ǅ"), "ǆ");
+    assert_eq!(casefold("Tourist_99"), "tourist_99");
+}
+
+/// Python `re.fullmatch(r"\d+", s)` then `int(s)`.
+#[test]
+fn parse_digits_matches_python() {
+    assert_eq!(parse_digits("٣٤"), Some(34));
+    assert_eq!(parse_digits("१२३"), Some(123));
+    assert_eq!(parse_digits("１２"), Some(12));
+    assert_eq!(parse_digits("9".repeat(30).as_str()), Some(i64::MAX)); // past i64: saturates
+    for bad in ["٣a", "", "+5", " 5", "5_0", "a"] {
+        assert_eq!(parse_digits(bad), None, "{bad:?}");
+    }
+}

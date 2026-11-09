@@ -1,7 +1,7 @@
 //! Port of the `tick` tests of `tests/test_mashup.py` and `tests/test_bingo.py` (reads, budget, interval,
 //! ending, expired lobbies, match ratings, bingo end conditions) over a fake Codeforces client that records
 //! its calls, and a real store on a temp file. Expected values come from the Python tests. The cog side of
-//! `a_finished_bingo_posts_its_closing_message_once` (sending to the thread) is s18; here the service parts
+//! `a_finished_bingo_posts_its_closing_message_once` (sending to the thread) is in `cogs_mashup.rs`; here the service parts
 //! (claims once, the final message once) are checked.
 use std::collections::HashMap;
 use std::future::Future;
@@ -43,6 +43,12 @@ struct FakeCf {
 }
 
 impl CfApi for FakeCf {
+    async fn user_info(&self, _: &str) -> anyhow::Result<lightningccp::cf::models::User> {
+        unreachable!()
+    }
+    async fn users_info(&self, _: &[String]) -> anyhow::Result<Vec<lightningccp::cf::models::User>> {
+        unreachable!()
+    }
     fn user_status(&self, handle: &str, _count: Option<i64>, _since: Option<i64>) -> impl Future<Output = Result<Vec<Submission>>> + Send {
         let handle = handle.to_string();
         async move {
@@ -59,6 +65,9 @@ impl CfApi for FakeCf {
 struct FakeProblems(Mutex<Arc<Vec<Problem>>>);
 
 impl ProblemSource for FakeProblems {
+    fn tags(&self) -> Arc<std::collections::HashSet<String>> {
+        Arc::default()
+    }
     fn problems(&self) -> Arc<Vec<Problem>> {
         self.0.lock().unwrap().clone()
     }
@@ -536,7 +545,7 @@ async fn a_finished_bingo_posts_its_closing_message_once() {
     e.svc.tick().await.unwrap();
     let done = e.svc.view(mid, None).await.unwrap();
     assert_eq!(done.mashup.status, "finished");
-    // the cog's `_log`: claims once, then the final message once (sending is s18)
+    // the cog's `_log`: claims once, then the final message once (sending is the cog's)
     assert_eq!(e.svc.claims_to_log(&done).await.unwrap().len(), 3);
     assert!(e.svc.final_due(&done).await.unwrap());
     assert!(e.svc.claims_to_log(&done).await.unwrap().is_empty()); // nothing twice

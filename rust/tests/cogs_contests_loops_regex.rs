@@ -1,4 +1,4 @@
-//! `_check_regex` parity (s15, task 2): every pattern Python 3.12 `re.compile` rejects is rejected, and the
+//! `_check_regex` parity: every pattern Python 3.12 `re.compile` rejects is rejected, and the
 //! "Invalid regex: " prefix stays exact. The verdict table comes from running Python
 //! (`.venv/bin/python -I`, `re.compile(pattern)`); fancy-regex is the engine, so the other direction (Python
 //! accepts, fancy-regex cannot) is pinned in `PYTHON_ONLY_ACCEPTED` as a known gap.

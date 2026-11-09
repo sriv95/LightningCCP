@@ -1,7 +1,7 @@
 //! Port of src/cogs/match.py: `/match solo|duel|custom|history`, `/ff`, `/leaderboard`, `/profile`, the persistent
 //! `match:<action>:<id>` buttons and the 60 s expiry loop. Each command is a function over the real store, the
-//! `MatchService`, `MatchEnv` (what is not ported yet: problem cache, mashups, Codeforces profile) and a narrow
-//! output trait (a fake in tests). The poise commands at the bottom are thin; s18 registers them.
+//! `MatchService`, `MatchEnv` (the problem cache, mashups and Codeforces profile) and a narrow
+//! output trait (a fake in tests). The poise commands at the bottom are thin wrappers over these functions.
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use crate::cache::problems::ProblemCache;
 use crate::cf::client::CodeforcesClient;
 use crate::cf::models::{Problem, User};
 use crate::errors::{BotError, Interaction, SendFailed, report_error};
-use crate::logic::base::{daily_streak, rating_series, tag_suggestions, utc_day};
+use crate::logic::base::{daily_streak, parse_digits, rating_series, tag_suggestions, utc_day};
 use crate::matches::{CfApi, CreateMatch, MatchService, MatchView, ProblemSource};
 use crate::services::Services;
 use crate::store::base::Store;
@@ -91,10 +91,7 @@ pub fn parse_custom_id(custom_id: &str) -> Option<(Action, i64)> {
     let action = [Action::Join, Action::Start, Action::Leave, Action::Check, Action::GiveUp, Action::Rematch]
         .into_iter()
         .find(|a| a.id() == action)?;
-    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    Some((action, number.parse().unwrap_or(i64::MAX)))
+    Some((action, parse_digits(number)?))
 }
 
 pub fn match_button(action: Action, match_id: i64) -> CreateButton {
@@ -200,17 +197,20 @@ pub trait ButtonOutput: PostOutput + Interaction {
 // ---- the match flow ----------------------------------------------------------------------------------
 
 /// Python `_edit_stored_message`: a message that cannot be edited is logged, never an error.
-pub async fn edit_stored_message<E: Editor>(editor: &E, view: &MatchView) {
+/// An embed that cannot be built (unknown mode, Python `KeyError`) is an error, like Python.
+pub async fn edit_stored_message<E: Editor>(editor: &E, view: &MatchView) -> anyhow::Result<()> {
     let m = &view.r#match;
-    let Some(message) = m.message_id else { return };
-    if let Err(e) = editor.edit_message(m.channel_id, message, match_embed(view).into(), match_components(view)).await {
+    let Some(message) = m.message_id else { return Ok(()) };
+    let embed = match_embed(view)?;
+    if let Err(e) = editor.edit_message(m.channel_id, message, embed.into(), match_components(view)).await {
         tracing::warn!("Could not edit match message {message}: {e:?}");
     }
+    Ok(())
 }
 
 /// Python `_post`: send the match as a new message and remember it; retire the old one on a re-post.
 async fn post<C: CfApi, P: ProblemSource, O: PostOutput>(svc: &MatchService<C, P>, out: &O, view: &MatchView) -> anyhow::Result<()> {
-    let sent = out.post(match_embed(view).into(), match_components(view)).await?;
+    let sent = out.post(match_embed(view)?.into(), match_components(view)).await?;
     let old = &view.r#match;
     svc.set_message(old.id, out.channel_id(), sent.id).await?;
     if let Some(old_message) = old.message_id.filter(|&m| m != sent.id) {
@@ -403,7 +403,7 @@ pub async fn forfeit<C: CfApi, P: ProblemSource, E: MatchEnv, O: SlashOutput>(
         let lobby = current.r#match.status == "lobby";
         let id = current.r#match.id;
         let view = if lobby { svc.leave(id, user).await? } else { svc.give_up(id, user).await? };
-        edit_stored_message(out, &view).await;
+        edit_stored_message(out, &view).await?;
         (lobby, "match")
     } else if let Some(lobby) = env.forfeit_contest(guild, user).await? {
         (lobby, "contest")
@@ -517,7 +517,7 @@ pub async fn on_button<C: CfApi, P: ProblemSource, O: ButtonOutput>(
         Action::GiveUp => svc.give_up(match_id, user).await?,
         Action::Rematch => unreachable!("handled above"),
     };
-    out.edit_original(match_embed(&view).into(), match_components(&view)).await?;
+    out.edit_original(match_embed(&view)?.into(), match_components(&view)).await?;
     if action == Action::Check && view.r#match.status == "active" {
         out.followup_text(check_note(&view, user)).await?;
     }
@@ -551,7 +551,10 @@ pub async fn expire_tick<C: CfApi, P: ProblemSource, E: Editor>(svc: &MatchServi
         }
     };
     for view in views {
-        edit_stored_message(editor, &view).await;
+        if let Err(e) = edit_stored_message(editor, &view).await {
+            tracing::error!("Match expiry failed: {e:?}");
+            return;
+        }
     }
 }
 
@@ -727,7 +730,7 @@ impl Interaction for ButtonOut<'_> {
     }
 }
 
-/// The persistent match button handler, for s18 to call from the component branch of `FullEvent::InteractionCreate`
+/// The persistent match button handler, called from the component branch of `FullEvent::InteractionCreate`
 /// (Python `MatchButton`, registered with `bot.add_dynamic_items`, so it works after a restart: the custom id alone
 /// carries the state). False when the custom id is not `match:<action>:<digits>` (not ours).
 pub async fn on_component(ctx: &serenity::Context, press_: &serenity::ComponentInteraction, services: &Services) -> bool {
@@ -737,8 +740,8 @@ pub async fn on_component(ctx: &serenity::Context, press_: &serenity::ComponentI
     true
 }
 
-/// One round of the expiry loop with the real Discord client; s18 calls it every `EXPIRE_INTERVAL` once the
-/// gateway is ready (Python `before_loop`: `wait_until_ready`; `tasks.loop` runs the first round at once).
+/// One round of the expiry loop with the real Discord client; `bot::expire_loop` calls it every `EXPIRE_INTERVAL` once the
+/// loops start (Python `before_loop`: `wait_until_ready`; `tasks.loop` runs the first round at once).
 pub async fn expire_round(ctx: &serenity::Context, services: &Services) {
     expire_tick(match_service(services), ctx.http.as_ref()).await;
 }
