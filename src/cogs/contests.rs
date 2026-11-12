@@ -15,7 +15,9 @@ use serenity::{
 };
 
 use crate::bot::{Context, DiscordOutput};
-use crate::cf::models::{Contest, Standing};
+use crate::cf::client::CodeforcesClient;
+use crate::cf::models::{Contest, ContestResult, Standing};
+use crate::logic::schedule::{STEP_END, STEP_FINISHED};
 use crate::errors::{BotError, Interaction, SendFailed, report_error};
 use crate::logic::base::{
     NEW_CONTEST_SOON_SECONDS, contest_ics, new_contests, parse_digits, parse_minutes, recaps_due, reminders_due, select_contests,
@@ -24,7 +26,7 @@ use crate::logic::base::{
 use crate::services::Services;
 use crate::store::base::{Reminder, Store};
 use crate::ui::embeds::a::{
-    EmbedData, RankEntry, contest_pages, esc, new_contest_embed, ranklist_pages, recap_embed, weekly_embed,
+    EmbedData, RankEntry, RanklistMode, RanklistRow, contest_pages, esc, new_contest_embed, ranklist_embeds, recap_embed, weekly_embed,
 };
 
 pub const MAX_EXCLUDE_LENGTH: usize = 100;
@@ -1108,9 +1110,13 @@ pub trait ContestData: Sync {
     fn add_contest_remind(&self, guild: i64, contest: i64, user: i64) -> impl Future<Output = anyhow::Result<bool>> + Send;
     fn linked_handles(&self, guild: i64) -> impl Future<Output = anyhow::Result<Vec<(i64, String)>>> + Send;
     fn standings(&self, contest: i64, handles: &[String]) -> impl Future<Output = anyhow::Result<Vec<Standing>>> + Send;
-    /// (real rank, ICPC (solved, penalty)) of a member the capped standings omit; `None` when unrated.
-    fn member_result(&self, _contest: i64, _handle: &str, _icpc: bool) -> impl Future<Output = anyhow::Result<Option<(i64, Option<(i64, i64)>)>>> + Send {
-        async { Ok(None) }
+    /// Whether the contest-end results are saved (`/ranklist` then reads the store only).
+    fn results_saved(&self, _contest: i64) -> impl Future<Output = anyhow::Result<bool>> + Send {
+        async { Ok(false) }
+    }
+    /// Rows, mode and fetched-at of `/ranklist` for this guild from the given source.
+    fn ranklist_rows(&self, _guild: i64, _contest: i64, _source: RanklistSource) -> impl Future<Output = anyhow::Result<RanklistData>> + Send {
+        async { Ok((vec![], RanklistMode::Running, 0)) }
     }
 }
 
@@ -1130,8 +1136,11 @@ impl ContestData for Services {
     async fn standings(&self, contest: i64, handles: &[String]) -> anyhow::Result<Vec<Standing>> {
         self.cf.standings(contest, handles).await
     }
-    async fn member_result(&self, contest: i64, handle: &str, icpc: bool) -> anyhow::Result<Option<(i64, Option<(i64, i64)>)>> {
-        self.cf.member_result(contest, handle, icpc).await
+    async fn results_saved(&self, contest: i64) -> anyhow::Result<bool> {
+        self.db.results_saved(contest).await
+    }
+    async fn ranklist_rows(&self, guild: i64, contest: i64, source: RanklistSource) -> anyhow::Result<RanklistData> {
+        ranklist_data(&self.db, &self.cf, &self.ranklist_cache, guild, contest, source).await
     }
 }
 
@@ -1291,44 +1300,20 @@ pub async fn list<D: ContestData, O: PagesOutput>(data: &D, out: &O, kind: &str)
     out.send_pages(pages.into_iter().map(CreateEmbed::from).collect()).await
 }
 
-/// Adds a member the standings omit: real rank, and NaN points when the contest gives no ICPC score.
-fn push_missing(out: &mut Vec<RankEntry>, user: i64, handle: &str, result: (i64, Option<(i64, i64)>)) {
-    let (rank, score) = result;
-    let (points, penalty) = score.map_or((f64::NAN, 0), |(p, pen)| (p as f64, pen));
-    out.push((rank, user, handle.to_string(), points, penalty));
-}
-
 /// Python `_entries`: (rank, user id, handle, points, penalty) of this server's linked members, best first.
 pub async fn entries<D: ContestData>(data: &D, guild: i64, contest_id: i64) -> anyhow::Result<Vec<RankEntry>> {
-    entries_with(data, guild, contest_id, false).await
-}
-
-/// `entries`, plus (when `rated_fallback`, /ranklist only) linked members missing from the standings.
-async fn entries_with<D: ContestData>(data: &D, guild: i64, contest_id: i64, rated_fallback: bool) -> anyhow::Result<Vec<RankEntry>> {
     let linked = data.linked_handles(guild).await?;
     if linked.is_empty() {
         return Ok(vec![]);
     }
     // like the Python dict, a later row with the same lowercase handle wins
-    let owners: std::collections::HashMap<String, i64> = linked.iter().map(|(user, h)| (h.to_lowercase(), *user)).collect();
+    let owners: HashMap<String, i64> = linked.iter().map(|(user, h)| (h.to_lowercase(), *user)).collect();
     let handles: Vec<String> = linked.iter().map(|(_, h)| h.clone()).collect();
     let mut out = vec![];
     for row in data.standings(contest_id, &handles).await? {
         // A team row counts for the first member who is linked here.
         if let Some(h) = row.handles.iter().find(|h| owners.contains_key(&h.to_lowercase())) {
             out.push((row.rank, owners[&h.to_lowercase()], h.clone(), row.points, row.penalty));
-        }
-    }
-    // Standings stop at row 8192: look the missing linked members up one by one (best effort, errors skip).
-    if rated_fallback {
-        let in_standings: std::collections::HashSet<i64> = out.iter().map(|e| e.1).collect();
-        let icpc = data.contests().iter().find(|c| c.id == contest_id).is_some_and(|c| c.kind == "ICPC");
-        for (user, h) in &linked {
-            if !in_standings.contains(user) {
-                if let Ok(Some(r)) = data.member_result(contest_id, h, icpc).await {
-                    push_missing(&mut out, *user, h, r);
-                }
-            }
         }
     }
     // chunked Codeforces calls arrive in separate rank order; Python sorts the tuples
@@ -1338,19 +1323,111 @@ async fn entries_with<D: ContestData>(data: &D, guild: i64, contest_id: i64, rat
     Ok(out)
 }
 
+/// Where `/ranklist` gets its data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RanklistSource {
+    NotStarted,
+    /// Saved results and ranks, no API call.
+    Saved,
+    /// Running contest: standings only, 1-minute cache.
+    Live,
+    /// Finished but not saved yet: fetch and save now.
+    OnDemand,
+}
+
+/// The source by phase (not by computed time) and whether the results are saved.
+pub fn ranklist_source(phase: &str, saved: bool) -> RanklistSource {
+    match (phase, saved) {
+        ("BEFORE", _) => RanklistSource::NotStarted,
+        (_, true) => RanklistSource::Saved,
+        ("FINISHED", false) => RanklistSource::OnDemand,
+        _ => RanklistSource::Live,
+    }
+}
+
+pub type RanklistData = (Vec<RanklistRow>, RanklistMode, i64);
+/// contest id -> (fetched at, results of every linked handle).
+pub type RanklistCache = std::sync::Mutex<HashMap<i64, (i64, Vec<ContestResult>)>>;
+const LIVE_CACHE_SECS: i64 = 60;
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
+}
+
+/// This guild's linked members with their result and saved rank (matched by lowercase handle).
+fn ranklist_rows_of(linked: &[(i64, String)], results: &[ContestResult], ranks: &[(String, i64)]) -> Vec<RanklistRow> {
+    let by_handle = |h: &str| h.to_lowercase();
+    linked
+        .iter()
+        .map(|(user, h)| RanklistRow {
+            user_id: *user,
+            handle: h.clone(),
+            result: results.iter().find(|r| by_handle(&r.handle) == by_handle(h)).cloned(),
+            rank: ranks.iter().find(|(rh, _)| by_handle(rh) == by_handle(h)).map(|r| r.1),
+        })
+        .collect()
+}
+
+/// The saved path: store reads only. Rated when any rank is saved for the contest.
+pub async fn saved_ranklist(db: &Store, guild: i64, contest_id: i64) -> anyhow::Result<RanklistData> {
+    let (linked, results, ranks) = (db.linked_handles(guild).await?, db.contest_results(contest_id).await?, db.contest_ranks(contest_id).await?);
+    let mode = if ranks.is_empty() { RanklistMode::FinishedNoRatings } else { RanklistMode::FinishedRated };
+    Ok((ranklist_rows_of(&linked, &results, &ranks), mode, db.contest_fetched_at(contest_id).await?.unwrap_or(0)))
+}
+
+pub async fn ranklist_data(
+    db: &Store, cf: &CodeforcesClient, cache: &RanklistCache, guild: i64, contest_id: i64, source: RanklistSource,
+) -> anyhow::Result<RanklistData> {
+    let now = unix_now();
+    match source {
+        RanklistSource::NotStarted | RanklistSource::Saved => saved_ranklist(db, guild, contest_id).await,
+        RanklistSource::OnDemand => {
+            crate::prefetch::fetch_and_save_results(cf, db, contest_id, now).await?;
+            for (_, h) in db.linked_handles(guild).await? {
+                if let Err(e) = crate::prefetch::fetch_and_save_ranks(cf, db, &h, now).await {
+                    tracing::warn!("Ranklist ranks {h} failed: {e:#}");
+                }
+            }
+            let mut st = db.prefetch_state(contest_id).await?;
+            st.results_done |= STEP_END | STEP_FINISHED;
+            db.set_prefetch_state(contest_id, st).await?;
+            saved_ranklist(db, guild, contest_id).await
+        }
+        RanklistSource::Live => {
+            let hit = cache.lock().unwrap().get(&contest_id).filter(|(t, _)| now - t < LIVE_CACHE_SECS).cloned();
+            let (at, results) = match hit {
+                Some(h) => h,
+                None => {
+                    // all guilds' handles, so one entry serves every guild
+                    let results = cf.standings_results(contest_id, &db.all_linked_handles().await?).await?;
+                    cache.lock().unwrap().insert(contest_id, (now, results.clone()));
+                    (now, results)
+                }
+            };
+            Ok((ranklist_rows_of(&db.linked_handles(guild).await?, &results, &[]), RanklistMode::Running, at))
+        }
+    }
+}
+
 /// Python `ranklist`.
 pub async fn show_ranklist<D: ContestData, O: PagesOutput>(data: &D, out: &O, guild: i64, contest_id: i64) -> anyhow::Result<()> {
     out.defer().await?;
-    let contest = data.contests().iter().find(|c| c.id == contest_id).cloned();
-    if contest.as_ref().is_some_and(|c| c.phase == "BEFORE") {
+    let known = data.contests().iter().find(|c| c.id == contest_id).cloned();
+    // an unknown contest is an old one outside the cache: treat it as finished
+    let contest = known.unwrap_or_else(|| Contest {
+        id: contest_id,
+        name: format!("contest {contest_id}"),
+        kind: "CF".into(),
+        phase: "FINISHED".into(),
+        start_time: None,
+        duration: 0,
+    });
+    let source = ranklist_source(&contest.phase, data.results_saved(contest_id).await?);
+    if source == RanklistSource::NotStarted {
         return Err(plain("That contest has not started yet."));
     }
-    let entries = entries_with(data, guild, contest_id, true).await?;
-    let title = match &contest {
-        Some(c) => format!("Ranklist - {}", c.name),
-        None => format!("Ranklist - contest {contest_id}"),
-    };
-    let pages = ranklist_pages(&entries, &title, PAGE_SIZE)?;
+    let (rows, mode, fetched_at) = data.ranklist_rows(guild, contest_id, source).await?;
+    let pages = ranklist_embeds(&contest, &rows, mode, fetched_at, PAGE_SIZE)?;
     if pages.is_empty() {
         return Err(plain("No linked member took part in that contest."));
     }
@@ -1938,43 +2015,3 @@ pub async fn run_remind_loop(services: Arc<Services>, chans: DiscordChannels) {
     }
 }
 
-#[cfg(test)]
-mod rated_tests {
-    use super::*;
-    use std::collections::HashMap;
-
-    /// Fake data: handle -> member_result; linked alice (1) and sriv95 (2), standings hold alice only.
-    struct Fake(HashMap<&'static str, Option<(i64, Option<(i64, i64)>)>>);
-    impl ContestData for Fake {
-        fn contests(&self) -> Arc<Vec<Contest>> { Arc::new(vec![]) }
-        fn reminder(&self, _: i64) -> impl Future<Output = anyhow::Result<Option<Reminder>>> + Send { async { Ok(None) } }
-        fn add_contest_remind(&self, _: i64, _: i64, _: i64) -> impl Future<Output = anyhow::Result<bool>> + Send { async { Ok(true) } }
-        fn linked_handles(&self, _: i64) -> impl Future<Output = anyhow::Result<Vec<(i64, String)>>> + Send {
-            async { Ok(vec![(1, "alice".into()), (2, "sriv95".into()), (3, "unrated".into())]) }
-        }
-        fn standings(&self, _: i64, _: &[String]) -> impl Future<Output = anyhow::Result<Vec<Standing>>> + Send {
-            async { Ok(vec![Standing { rank: 9000, handles: vec!["alice".into()], points: 3.0, penalty: 10 }]) }
-        }
-        fn member_result(&self, _: i64, h: &str, _: bool) -> impl Future<Output = anyhow::Result<Option<(i64, Option<(i64, i64)>)>>> + Send {
-            let r = self.0.get(h).copied().flatten();
-            async move { Ok(r) }
-        }
-    }
-
-    #[tokio::test]
-    async fn fallback_rows_merge_by_real_rank_and_unrated_is_left_out() {
-        let f = Fake([("sriv95", Some((8249, Some((4, 268))))), ("unrated", None)].into());
-        let e = entries_with(&f, 1, 5, true).await.unwrap();
-        assert_eq!(e, vec![(8249, 2, "sriv95".to_string(), 4.0, 268), (9000, 1, "alice".to_string(), 3.0, 10)]);
-        // before-the-cap member ranks first: real rank 100 sorts above the standings row
-        let f = Fake([("sriv95", Some((100, None)))].into());
-        let e = entries_with(&f, 1, 5, true).await.unwrap();
-        assert_eq!((e[0].0, e[0].1, e[0].3.is_nan()), (100, 2, true));
-    }
-
-    #[tokio::test]
-    async fn recap_never_looks_up_missing_members() {
-        let f = Fake([("sriv95", Some((8249, None)))].into());
-        assert_eq!(entries(&f, 1, 5).await.unwrap().len(), 1);
-    }
-}

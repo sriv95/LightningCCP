@@ -269,48 +269,58 @@ fn ranked() -> Fake {
 }
 
 #[tokio::test]
-async fn ranklist_sorts_entries_and_titles_with_the_contest_name() {
+async fn entries_sort_and_a_team_row_counts_for_its_first_linked_member() {
     let f = ranked();
-    contests::show_ranklist(&f, &f, 1, 5).await.unwrap();
-    assert_eq!(*f.events.lock().unwrap(), ["defer", "pages"]);
-    {
-        let p = f.pages.lock().unwrap();
-        assert_eq!(p[0]["title"], "Ranklist - Round *5*"); // the title is not escaped, like Python
-        assert_eq!(p[0]["description"], "1. <@1> ([alice](https://codeforces.com/profile/alice)) 100\n3. <@2> ([BOB\\_X](https://codeforces.com/profile/BOB_X)) 80, penalty 45");
-    }
     let e = contests::entries(&f, 1, 5).await.unwrap();
     assert_eq!(e, [(1, 1, "alice".to_string(), 100.0, 0), (3, 2, "BOB_X".to_string(), 80.0, 45)]);
 }
 
 #[tokio::test]
-async fn ranklist_unknown_contest_title_and_errors_after_the_defer() {
-    let f = ranked();
-    contests::show_ranklist(&f, &f, 1, 77).await.unwrap();
-    assert_eq!(f.pages.lock().unwrap()[0]["title"], "Ranklist - contest 77");
-
+async fn ranklist_before_start_errors_after_the_defer() {
     let f = ranked();
     let e = contests::show_ranklist(&f, &f, 1, 6).await.unwrap_err();
     assert_eq!(msg(e), "That contest has not started yet.");
     assert_eq!(*f.events.lock().unwrap(), ["defer"]); // Python defers first
+}
 
-    let f = Fake { rows: vec![row(1, &["stranger"], 1.0, 0)], ..ranked() };
-    assert_eq!(msg(contests::show_ranklist(&f, &f, 1, 5).await.unwrap_err()), "No linked member took part in that contest.");
-    let f = Fake { linked: vec![], ..ranked() };
-    assert_eq!(msg(contests::show_ranklist(&f, &f, 1, 5).await.unwrap_err()), "No linked member took part in that contest.");
+#[test]
+fn ranklist_source_by_phase_and_saved() {
+    use contests::{RanklistSource::*, ranklist_source as src};
+    assert_eq!(src("BEFORE", false), NotStarted);
+    assert_eq!(src("BEFORE", true), NotStarted);
+    for p in ["CODING", "PENDING_SYSTEM_TEST", "SYSTEM_TEST"] {
+        assert_eq!(src(p, false), Live);
+        assert_eq!(src(p, true), Saved);
+    }
+    assert_eq!(src("FINISHED", false), OnDemand);
+    assert_eq!(src("FINISHED", true), Saved);
 }
 
 #[tokio::test]
-async fn ranklist_pages_like_python_test() {
-    let mut f = Fake { contests: vec![contest(5, "R", "FINISHED", Some(1))], ..Default::default() };
-    let owners: HashMap<i64, String> = (1..=12).map(|i| (i, format!("h{i}"))).collect();
-    f.linked = (1..=12).map(|i| (i, owners[&i].clone())).collect();
-    f.rows = (1..=12).rev().map(|i| row(i, &[owners[&i].as_str()], 100.0 - i as f64, if i == 2 { 45 } else { 0 })).collect();
-    f.rows[10].points = 90.0; // rank 2
-    contests::show_ranklist(&f, &f, 1, 5).await.unwrap();
-    let p = f.pages.lock().unwrap();
-    assert_eq!(p.iter().map(|x| x["footer"]["text"].as_str().unwrap()).collect::<Vec<_>>(), ["Page 1/2", "Page 2/2"]);
-    let lines: Vec<_> = p[0]["description"].as_str().unwrap().lines().collect();
-    assert_eq!((lines[0], lines[1]), ("1. <@1> ([h1](https://codeforces.com/profile/h1)) 99", "2. <@2> ([h2](https://codeforces.com/profile/h2)) 90, penalty 45"));
+async fn saved_ranklist_reads_the_store_only() {
+    use lightningccp::cf::models::ContestResult;
+    use lightningccp::store::base::Store;
+    use lightningccp::ui::embeds::a::RanklistMode;
+    let dir = std::env::temp_dir().join(format!("lccp-ranklist-{}", std::process::id()));
+    let s = Store::connect(dir.join("t.db")).await.unwrap();
+    s.link_handle(1, 10, "Ann", None).await.unwrap();
+    s.link_handle(1, 20, "bob", None).await.unwrap();
+    s.link_handle(2, 30, "other_guild", None).await.unwrap();
+    let res = |h: &str, solved| ContestResult { handle: h.into(), points: 0.0, penalty: 0, solved, last_ac: Some(5), participant_type: "CONTESTANT".into() };
+    s.upsert_contest_results(5, vec![res("ann", 2), res("bob", 3), res("other_guild", 1)], 100).await.unwrap();
+
+    let (rows, mode, at) = contests::saved_ranklist(&s, 1, 5).await.unwrap();
+    assert_eq!((mode, at, rows.len()), (RanklistMode::FinishedNoRatings, 100, 2));
+    assert!(rows.iter().all(|r| r.result.is_some() && r.rank.is_none()));
+
+    s.upsert_contest_ranks(vec![(5, "bob".into(), 7)], 200).await.unwrap();
+    let (rows, mode, at) = contests::saved_ranklist(&s, 1, 5).await.unwrap();
+    assert_eq!((mode, at), (RanklistMode::FinishedRated, 200));
+    let bob = rows.iter().find(|r| r.user_id == 20).unwrap();
+    assert_eq!((bob.rank, rows.iter().find(|r| r.user_id == 10).unwrap().rank), (Some(7), None));
+    assert_eq!(rows.iter().map(|r| r.user_id).collect::<Vec<_>>(), [10, 20]); // this guild only
+    drop(s);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

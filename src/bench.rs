@@ -117,6 +117,7 @@ struct Data {
     db: Arc<Store>,
     cf: Arc<CodeforcesClient>,
     contests: Arc<ContestCache>,
+    cache: crate::cogs::contests::RanklistCache,
 }
 
 impl ContestData for Data {
@@ -134,6 +135,12 @@ impl ContestData for Data {
     }
     async fn standings(&self, contest: i64, handles: &[String]) -> anyhow::Result<Vec<Standing>> {
         self.cf.standings(contest, handles).await
+    }
+    async fn results_saved(&self, contest: i64) -> anyhow::Result<bool> {
+        self.db.results_saved(contest).await
+    }
+    async fn ranklist_rows(&self, guild: i64, contest: i64, source: crate::cogs::contests::RanklistSource) -> anyhow::Result<crate::cogs::contests::RanklistData> {
+        crate::cogs::contests::ranklist_data(&self.db, &self.cf, &self.cache, guild, contest, source).await
     }
 }
 
@@ -289,7 +296,7 @@ pub async fn run(args: &[String]) -> anyhow::Result<()> {
     }
     mashups.start(mashup, host).await?;
 
-    let data = Data { db: store.clone(), cf: cf.clone(), contests: contests.clone() };
+    let data = Data { db: store.clone(), cf: cf.clone(), contests: contests.clone(), cache: Default::default() };
     let all = data.contests();
     let ids = |phase: &str| -> Vec<i64> {
         let mut v: Vec<i64> = all.iter().filter(|c| c.phase == phase).map(|c| c.id).collect();

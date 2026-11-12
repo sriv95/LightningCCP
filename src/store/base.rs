@@ -630,6 +630,18 @@ impl Store {
         .await
     }
 
+    /// Latest fetched_at among the contest's saved results and ranks.
+    pub async fn contest_fetched_at(&self, contest_id: i64) -> anyhow::Result<Option<i64>> {
+        self.run(move |c| {
+            Ok(c.query_row(
+                "SELECT MAX(t) FROM (SELECT MAX(fetched_at) t FROM contest_result WHERE contest_id = ?1 UNION ALL SELECT MAX(fetched_at) FROM contest_rank WHERE contest_id = ?1)",
+                [contest_id],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+    }
+
     pub async fn prefetch_state(&self, contest_id: i64) -> anyhow::Result<PrefetchState> {
         self.run(move |c| {
             Ok(c.query_row(

@@ -296,25 +296,6 @@ impl CodeforcesClient {
         self.call_object("contest.standings", vec![("contestId", contest_id.to_string())], parse).await
     }
 
-    /// A member missing from the capped standings: (real rank from `user.rating`, ICPC (solved, penalty) from
-    /// `contest.status` when `icpc`). `None` when the member has no rating entry for the contest.
-    pub async fn member_result(&self, contest_id: i64, handle: &str, icpc: bool) -> anyhow::Result<Option<(i64, Option<(i64, i64)>)>> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Entry {
-            contest_id: i64,
-            rank: i64,
-        }
-        let history: Vec<Entry> = self.call("user.rating", vec![("handle", handle.into())]).await?;
-        let Some(rank) = history.iter().find(|e| e.contest_id == contest_id).map(|e| e.rank) else { return Ok(None) };
-        if !icpc {
-            return Ok(Some((rank, None)));
-        }
-        let params = vec![("contestId", contest_id.to_string()), ("handle", handle.into())];
-        let subs: Vec<IcpcSub> = self.call("contest.status", params).await?;
-        Ok(Some((rank, Some(icpc_score(subs)))))
-    }
-
     /// Results of the given handles from `contest.standings` (bare call, filtered here; team rows give one per member).
     pub async fn standings_results(&self, contest_id: i64, handles: &[String]) -> anyhow::Result<Vec<ContestResult>> {
         let wanted: Vec<String> = handles.iter().map(|h| h.to_lowercase()).collect();

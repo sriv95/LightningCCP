@@ -482,10 +482,6 @@ pub type RankEntry = (i64, i64, String, f64, i64);
 
 pub fn ranklist_pages(entries: &[RankEntry], title: &str, per_page: usize) -> Result<Vec<EmbedData>> {
     let line = |e: &RankEntry| {
-        if e.3.is_nan() {
-            // fallback row of a points-scored contest: the real rank only
-            return format!("{}. <@{}> ({}) points unavailable", e.0, e.1, profile_link(&e.2));
-        }
         let extra = if e.4 != 0 { format!(", penalty {}", e.4) } else { String::new() };
         format!("{}. <@{}> ({}) {}{extra}", e.0, e.1, profile_link(&e.2), fmt_g(e.3))
     };
@@ -571,7 +567,7 @@ pub fn ranklist_embeds(contest: &Contest, rows: &[RanklistRow], mode: RanklistMo
         .enumerate()
         .map(|(i, text)| {
             let footer = note.map_or(format!("Page {}/{n}", i + 1), |m| format!("Page {}/{n} | {m}", i + 1));
-            EmbedData { timestamp: ts, ..EmbedData::new(&contest.name, Some(TEAL)).description(text).footer(footer) }
+            EmbedData { timestamp: ts, ..EmbedData::new(format!("Ranklist - {}", contest.name), Some(TEAL)).description(text).footer(footer) }
         })
         .collect())
 }

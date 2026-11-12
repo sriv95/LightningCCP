@@ -26,6 +26,8 @@ pub struct Services {
     /// The cog loops (`cog_load`), started once the gateway cache is ready; `close` aborts them.
     pub loops: Mutex<Vec<JoinHandle<()>>>,
     pub loops_started: AtomicBool,
+    /// `/ranklist` of a running contest (1-minute cache, shared by every guild).
+    pub ranklist_cache: crate::cogs::contests::RanklistCache,
 }
 
 impl Services {
@@ -39,7 +41,7 @@ impl Services {
         let matches = MatchService::new(db.clone(), cf.clone(), problems.clone());
         let mashups = MashupService::new(db.clone(), cf.clone(), problems.clone());
         let daily = DailyService::new(db.clone(), cf.clone(), problems.clone());
-        Ok(Self { cf, db, problems, contests, matches, mashups, daily, loops: Mutex::default(), loops_started: AtomicBool::new(false) })
+        Ok(Self { cf, db, problems, contests, matches, mashups, daily, loops: Mutex::default(), loops_started: AtomicBool::new(false), ranklist_cache: Mutex::default() })
     }
 
     /// `problems.start()` then `contests.start()`: load from the DB, then the refresh loop's first tick.
