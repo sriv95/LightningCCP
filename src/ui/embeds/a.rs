@@ -7,7 +7,7 @@ use anyhow::{Result, anyhow};
 use fancy_regex::{Captures, Regex};
 use serenity::all::{CreateEmbed, CreateEmbedAuthor, CreateEmbedFooter, Timestamp};
 
-use crate::cf::models::{Contest, Problem, User};
+use crate::cf::models::{Contest, ContestResult, Problem, User};
 use crate::logic::base::{DAY_SECONDS, LOBBY_TTL_SECONDS, WeeklyRow, ordinal, placement};
 use crate::logic::mashup::chunked;
 use crate::store::mashup::MashupRow;
@@ -498,6 +498,80 @@ pub fn ranklist_pages(entries: &[RankEntry], title: &str, per_page: usize) -> Re
             EmbedData::new(title, Some(TEAL))
                 .description(g.iter().map(line).collect::<Vec<_>>().join("\n"))
                 .footer(format!("Page {}/{n}", i + 1))
+        })
+        .collect())
+}
+
+/// Where the contest is for `ranklist_embeds`: `Running` is any phase except BEFORE and FINISHED.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RanklistMode {
+    Running,
+    FinishedNoRatings,
+    FinishedRated,
+}
+
+/// One linked member. `rank` is the saved Codeforces rank from the rating change (never computed here).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RanklistRow {
+    pub user_id: i64,
+    pub handle: String,
+    pub result: Option<ContestResult>,
+    pub rank: Option<i64>,
+}
+
+/// The /ranklist pages. Ranks are Codeforces' own: `?` until ratings are published. Out-of-competition members (and,
+/// once rated, members without a rating entry) go to an "Unrated" section after the main list.
+pub fn ranklist_embeds(contest: &Contest, rows: &[RanklistRow], mode: RanklistMode, fetched_at: i64, per_page: usize) -> Result<Vec<EmbedData>> {
+    let icpc = contest.kind == "ICPC";
+    let rated = mode == RanklistMode::FinishedRated;
+    let ooc = |r: &RanklistRow| r.result.as_ref().is_some_and(|x| x.participant_type == "OUT_OF_COMPETITION");
+    let mut main: Vec<&RanklistRow> = rows.iter().filter(|r| !ooc(r) && if rated { r.rank.is_some() } else { r.result.is_some() }).collect();
+    let unrated: Vec<&RanklistRow> = rows.iter().filter(|r| r.result.is_some() && !main.iter().any(|m| std::ptr::eq(*m, *r))).collect();
+    if rated {
+        main.sort_by_key(|r| r.rank);
+    } else {
+        main.sort_by(|a, b| {
+            let (a, b) = (a.result.as_ref().unwrap(), b.result.as_ref().unwrap());
+            if icpc {
+                b.points.total_cmp(&a.points).then(a.penalty.cmp(&b.penalty))
+            } else {
+                // no last AC (0 solved) sorts last among equals
+                b.solved.cmp(&a.solved).then(a.last_ac.unwrap_or(i64::MAX).cmp(&b.last_ac.unwrap_or(i64::MAX)))
+            }
+        });
+    }
+    let line = |r: &RanklistRow, show_rank: bool| {
+        let rank = if show_rank { r.rank.map_or("?".into(), |x| x.to_string()) } else { "?".into() };
+        let score = match &r.result {
+            None => String::new(),
+            Some(x) if icpc => {
+                let pen = if x.penalty != 0 { format!(", penalty {}", x.penalty) } else { String::new() };
+                format!(" {}{pen}", fmt_g(x.points))
+            }
+            Some(x) => format!(" {} solved", x.solved),
+        };
+        format!("{rank}. <@{}> ({}){score}", r.user_id, profile_link(&r.handle))
+    };
+    let mut pages: Vec<String> = Vec::new();
+    for g in chunked(&main, per_page)? {
+        pages.push(g.iter().map(|r| line(r, rated)).collect::<Vec<_>>().join("\n"));
+    }
+    for g in chunked(&unrated, per_page)? {
+        pages.push(format!("**Unrated**\n{}", g.iter().map(|r| line(r, false)).collect::<Vec<_>>().join("\n")));
+    }
+    let note = match mode {
+        RanklistMode::Running => Some("During Running Contest: Codeforces shows only part of the trusted participants"),
+        RanklistMode::FinishedNoRatings => Some("Codeforces not published ranks yet"),
+        RanklistMode::FinishedRated => None,
+    };
+    let n = pages.len();
+    let ts = Timestamp::from_unix_timestamp(fetched_at).ok();
+    Ok(pages
+        .into_iter()
+        .enumerate()
+        .map(|(i, text)| {
+            let footer = note.map_or(format!("Page {}/{n}", i + 1), |m| format!("Page {}/{n} | {m}", i + 1));
+            EmbedData { timestamp: ts, ..EmbedData::new(&contest.name, Some(TEAL)).description(text).footer(footer) }
         })
         .collect())
 }
