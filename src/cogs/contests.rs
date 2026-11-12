@@ -1930,10 +1930,11 @@ pub async fn run_new_contest_loop(services: Arc<Services>, chans: DiscordChannel
 
 /// `remind_loop`, spawned by `bot::start_loops` once the bot is ready; runs until aborted.
 pub async fn run_remind_loop(services: Arc<Services>, chans: DiscordChannels) {
-    let (mut t, mut state) = (timer(REMIND_INTERVAL), LoopState::default());
+    let (mut t, mut state, busy) = (timer(REMIND_INTERVAL), LoopState::default(), Arc::new(AtomicBool::new(false)));
     loop {
         t.tick().await;
         remind_tick(&services.db, services.as_ref(), &chans, &mut state, now()).await;
+        crate::prefetch::spawn_round(services.clone(), busy.clone(), now());
     }
 }
 

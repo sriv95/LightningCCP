@@ -9,6 +9,7 @@ pub mod errors;
 pub mod logic;
 pub mod mashup;
 pub mod matches;
+pub mod prefetch;
 pub mod services;
 pub mod store;
 pub mod ui;
