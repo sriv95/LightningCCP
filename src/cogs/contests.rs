@@ -1108,6 +1108,10 @@ pub trait ContestData: Sync {
     fn add_contest_remind(&self, guild: i64, contest: i64, user: i64) -> impl Future<Output = anyhow::Result<bool>> + Send;
     fn linked_handles(&self, guild: i64) -> impl Future<Output = anyhow::Result<Vec<(i64, String)>>> + Send;
     fn standings(&self, contest: i64, handles: &[String]) -> impl Future<Output = anyhow::Result<Vec<Standing>>> + Send;
+    /// (handle, rank, rating change) from `contest.ratingChanges`: standings omit ranks past row 8192.
+    fn contest_ranks(&self, _contest: i64) -> impl Future<Output = anyhow::Result<Vec<(String, i64, i64)>>> + Send {
+        async { Ok(vec![]) }
+    }
 }
 
 impl ContestData for Services {
@@ -1125,6 +1129,9 @@ impl ContestData for Services {
     }
     async fn standings(&self, contest: i64, handles: &[String]) -> anyhow::Result<Vec<Standing>> {
         self.cf.standings(contest, handles).await
+    }
+    async fn contest_ranks(&self, contest: i64) -> anyhow::Result<Vec<(String, i64, i64)>> {
+        self.cf.contest_ranks(contest).await
     }
 }
 
@@ -1284,8 +1291,25 @@ pub async fn list<D: ContestData, O: PagesOutput>(data: &D, out: &O, kind: &str)
     out.send_pages(pages.into_iter().map(CreateEmbed::from).collect()).await
 }
 
+/// Adds linked members found only in `ranks` (handle, rank, rating change): NaN points, the change rides in the penalty slot.
+fn merge_rated(out: &mut Vec<RankEntry>, owners: &std::collections::HashMap<String, i64>, ranks: &[(String, i64, i64)]) {
+    for (handle, rank, delta) in ranks {
+        let low = handle.to_lowercase();
+        if let Some(&user) = owners.get(&low) {
+            if !out.iter().any(|e| e.1 == user) {
+                out.push((*rank, user, handle.clone(), f64::NAN, *delta));
+            }
+        }
+    }
+}
+
 /// Python `_entries`: (rank, user id, handle, points, penalty) of this server's linked members, best first.
 pub async fn entries<D: ContestData>(data: &D, guild: i64, contest_id: i64) -> anyhow::Result<Vec<RankEntry>> {
+    entries_with(data, guild, contest_id, false).await
+}
+
+/// `entries`, plus (when `rated_fallback`, /ranklist only) linked members missing from the standings.
+async fn entries_with<D: ContestData>(data: &D, guild: i64, contest_id: i64, rated_fallback: bool) -> anyhow::Result<Vec<RankEntry>> {
     let linked = data.linked_handles(guild).await?;
     if linked.is_empty() {
         return Ok(vec![]);
@@ -1299,6 +1323,12 @@ pub async fn entries<D: ContestData>(data: &D, guild: i64, contest_id: i64) -> a
         if let Some(h) = row.handles.iter().find(|h| owners.contains_key(&h.to_lowercase())) {
             out.push((row.rank, owners[&h.to_lowercase()], h.clone(), row.points, row.penalty));
         }
+    }
+    // Standings stop at row 8192: look up the missing linked members by rating changes (best effort).
+    let in_standings: std::collections::HashSet<String> = out.iter().map(|e| e.2.to_lowercase()).collect();
+    if rated_fallback && handles.iter().any(|h| !in_standings.contains(&h.to_lowercase())) {
+        let ranks = data.contest_ranks(contest_id).await.unwrap_or_default();
+        merge_rated(&mut out, &owners, &ranks);
     }
     // chunked Codeforces calls arrive in separate rank order; Python sorts the tuples
     out.sort_by(|a, b| {
@@ -1314,7 +1344,7 @@ pub async fn show_ranklist<D: ContestData, O: PagesOutput>(data: &D, out: &O, gu
     if contest.as_ref().is_some_and(|c| c.phase == "BEFORE") {
         return Err(plain("That contest has not started yet."));
     }
-    let entries = entries(data, guild, contest_id).await?;
+    let entries = entries_with(data, guild, contest_id, true).await?;
     let title = match &contest {
         Some(c) => format!("Ranklist - {}", c.name),
         None => format!("Ranklist - contest {contest_id}"),
@@ -1903,5 +1933,59 @@ pub async fn run_remind_loop(services: Arc<Services>, chans: DiscordChannels) {
     loop {
         t.tick().await;
         remind_tick(&services.db, services.as_ref(), &chans, &mut state, now()).await;
+    }
+}
+
+#[cfg(test)]
+mod rated_tests {
+    use super::*;
+
+    fn owners() -> std::collections::HashMap<String, i64> {
+        [("alice".to_string(), 1), ("sriv95".to_string(), 2)].into()
+    }
+
+    #[test]
+    fn merge_rated_adds_missing_linked_handle_in_rank_order() {
+        let mut out: Vec<RankEntry> = vec![(7877, 1, "Alice".into(), 3.0, 10)];
+        merge_rated(&mut out, &owners(), &[("Alice".into(), 7877, 5), ("SRIV95".into(), 8249, -12), ("other".into(), 9000, 1)]);
+        out.sort_by_key(|e| e.0);
+        assert_eq!(out.len(), 2);
+        assert_eq!((out[1].0, out[1].1), (8249, 2));
+        assert!(out[1].3.is_nan());
+        assert_eq!(out[1].4, -12);
+    }
+
+    #[test]
+    fn merge_rated_with_failed_or_empty_ratings_keeps_standings_only() {
+        let mut out: Vec<RankEntry> = vec![(5, 1, "alice".into(), 3.0, 0)];
+        merge_rated(&mut out, &owners(), &[]);
+        assert_eq!(out, vec![(5, 1, "alice".to_string(), 3.0, 0)]);
+    }
+
+    struct Fake(anyhow::Result<Vec<(String, i64, i64)>>);
+    impl ContestData for Fake {
+        fn contests(&self) -> Arc<Vec<Contest>> { Arc::new(vec![]) }
+        fn reminder(&self, _: i64) -> impl Future<Output = anyhow::Result<Option<Reminder>>> + Send { async { Ok(None) } }
+        fn add_contest_remind(&self, _: i64, _: i64, _: i64) -> impl Future<Output = anyhow::Result<bool>> + Send { async { Ok(true) } }
+        fn linked_handles(&self, _: i64) -> impl Future<Output = anyhow::Result<Vec<(i64, String)>>> + Send {
+            async { Ok(vec![(1, "alice".into()), (2, "sriv95".into())]) }
+        }
+        fn standings(&self, _: i64, handles: &[String]) -> impl Future<Output = anyhow::Result<Vec<Standing>>> + Send {
+            let _ = handles;
+            async { Ok(vec![]) }
+        }
+        fn contest_ranks(&self, _: i64) -> impl Future<Output = anyhow::Result<Vec<(String, i64, i64)>>> + Send {
+            let r = match &self.0 { Ok(v) => Ok(v.clone()), Err(e) => Err(anyhow::anyhow!("{e}")) };
+            async { r }
+        }
+    }
+
+    #[tokio::test]
+    async fn ratingchanges_error_gives_standings_only_and_recap_never_calls_it() {
+        let f = Fake(Err(anyhow::anyhow!("boom")));
+        assert!(entries_with(&f, 1, 5, true).await.unwrap().is_empty());
+        let ok = Fake(Ok(vec![("sriv95".into(), 8249, 7)]));
+        assert_eq!(entries_with(&ok, 1, 5, true).await.unwrap().len(), 1);
+        assert!(entries(&ok, 1, 5).await.unwrap().is_empty());
     }
 }

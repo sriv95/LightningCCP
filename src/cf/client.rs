@@ -296,6 +296,20 @@ impl CodeforcesClient {
         self.call_object("contest.standings", vec![("contestId", contest_id.to_string())], parse).await
     }
 
+    /// (handle, rank, rating change) of every rated participant of a contest, from `contest.ratingChanges`.
+    pub async fn contest_ranks(&self, contest_id: i64) -> anyhow::Result<Vec<(String, i64, i64)>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Change {
+            handle: String,
+            rank: i64,
+            old_rating: i64,
+            new_rating: i64,
+        }
+        let rows: Vec<Change> = self.call("contest.ratingChanges", vec![("contestId", contest_id.to_string())]).await?;
+        Ok(rows.into_iter().map(|c| (c.handle, c.rank, c.new_rating - c.old_rating)).collect())
+    }
+
     pub async fn rating_history(&self, handle: &str) -> anyhow::Result<Vec<RatingChange>> {
         self.call("user.rating", vec![("handle", handle.into())]).await
     }
