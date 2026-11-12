@@ -472,7 +472,7 @@ async fn ranklist_prefetch_round_trips() {
     assert_eq!(ranks, vec![("ann".to_string(), 8), ("bob".to_string(), 20)]);
 
     assert_eq!(s.prefetch_state(1).await.unwrap(), PrefetchState::default());
-    let st = PrefetchState { last_fetch_at: Some(5), final_done: true, ratings_found: false, last_rating_sweep_at: Some(9) };
+    let st = PrefetchState { results_done: 5, ratings_found: false, last_rating_sweep_at: Some(9) };
     s.set_prefetch_state(1, st).await.unwrap();
     assert_eq!(s.prefetch_state(1).await.unwrap(), st);
     s.set_prefetch_state(1, PrefetchState { ratings_found: true, ..st }).await.unwrap();
@@ -488,4 +488,14 @@ async fn all_linked_handles_distinct_across_guilds() {
     let mut got: Vec<String> = s.all_linked_handles().await.unwrap().into_iter().map(|h| h.to_lowercase()).collect();
     got.sort();
     assert_eq!(got, vec!["petr", "tourist"]);
+}
+
+#[tokio::test]
+async fn results_saved_follows_end_step() {
+    let (_d, s) = store().await;
+    assert!(!s.results_saved(1).await.unwrap());
+    s.set_prefetch_state(1, PrefetchState { results_done: 2, ..Default::default() }).await.unwrap();
+    assert!(!s.results_saved(1).await.unwrap());
+    s.set_prefetch_state(1, PrefetchState { results_done: 3, ..Default::default() }).await.unwrap();
+    assert!(s.results_saved(1).await.unwrap());
 }

@@ -4,9 +4,29 @@ pub const WINDOW: i64 = 7 * 86400;
 const FAST: i64 = 30 * 60;
 const DAY: i64 = 86400;
 
-/// Standings are fetched once, when the contest is FINISHED, not done yet, and ended within the last 7 days.
-pub fn prefetch_due(now: i64, end: i64, phase: &str, done: bool) -> bool {
-    phase == "FINISHED" && !done && now - end <= WINDOW
+/// Results-fetch steps (bits of the persisted `results_done` mask).
+pub const STEP_END: i64 = 1;
+pub const STEP_FINISHED: i64 = 2;
+pub const STEP_RATINGS: i64 = 4;
+pub const STEP_DAY3: i64 = 8;
+
+/// Steps due now (0 = no fetch): at the end, when FINISHED, when ratings are first found, and at day 3 if they never were.
+/// One fetch covers every due step, so the caller ORs the result into `results_done`. Only contests ended within the window.
+pub fn results_steps_due(now: i64, end: i64, phase: &str, ratings_found: bool, done: i64) -> i64 {
+    let age = now - end;
+    if !(0..=WINDOW).contains(&age) {
+        return 0;
+    }
+    let mut due = STEP_END;
+    if phase == "FINISHED" {
+        due |= STEP_FINISHED;
+    }
+    if ratings_found {
+        due |= STEP_RATINGS;
+    } else if age >= 3 * DAY {
+        due |= STEP_DAY3;
+    }
+    due & !done
 }
 
 /// Rating sweep: every 30 min from `end` until found or day 3, then daily until day 7, then never.
@@ -26,15 +46,30 @@ mod tests {
     const END: i64 = 1_000_000;
 
     #[test]
-    fn prefetch_rules() {
-        assert!(prefetch_due(END + 60, END, "FINISHED", false));
-        assert!(!prefetch_due(END + 60, END, "FINISHED", true));
-        for p in ["CODING", "PENDING_SYSTEM_TEST", "SYSTEM_TEST", "BEFORE"] {
-            assert!(!prefetch_due(END + 60, END, p, false), "{p}");
-        }
-        // finished long before the bot started, but inside the window: due on the first tick
-        assert!(prefetch_due(END + 6 * DAY, END, "FINISHED", false));
-        assert!(!prefetch_due(END + 7 * DAY + 1, END, "FINISHED", false));
+    fn results_step_rules() {
+        let due = |dt: i64, ph: &str, rf: bool, done: i64| results_steps_due(END + dt, END, ph, rf, done);
+        assert_eq!(due(-1, "CODING", false, 0), 0); // before end (also a rescheduled contest)
+        assert_eq!(due(0, "CODING", false, 0), STEP_END);
+        assert_eq!(due(60, "SYSTEM_TEST", false, STEP_END), 0);
+        // end and FINISHED in one tick: one fetch marks both
+        assert_eq!(due(0, "FINISHED", false, 0), STEP_END | STEP_FINISHED);
+        assert_eq!(due(60, "FINISHED", false, STEP_END | STEP_FINISHED), 0);
+        // FINISHED later: second fetch
+        assert_eq!(due(3600, "FINISHED", false, STEP_END), STEP_FINISHED);
+        // restart catch-up: FINISHED at startup, nothing done -> one fetch, all due steps
+        assert_eq!(due(DAY, "FINISHED", false, 0), STEP_END | STEP_FINISHED);
+        assert_eq!(due(4 * DAY, "FINISHED", false, 0), STEP_END | STEP_FINISHED | STEP_DAY3);
+        // ratings found: once
+        assert_eq!(due(3600, "FINISHED", true, STEP_END | STEP_FINISHED), STEP_RATINGS);
+        assert_eq!(due(3700, "FINISHED", true, STEP_END | STEP_FINISHED | STEP_RATINGS), 0);
+        // day 3 only without ratings, once
+        assert_eq!(due(3 * DAY - 1, "FINISHED", false, STEP_END | STEP_FINISHED), 0);
+        assert_eq!(due(3 * DAY, "FINISHED", false, STEP_END | STEP_FINISHED), STEP_DAY3);
+        assert_eq!(due(3 * DAY + 60, "FINISHED", false, 15), 0);
+        assert_eq!(due(3 * DAY, "FINISHED", true, STEP_END | STEP_FINISHED | STEP_RATINGS), 0);
+        // outside the 7-day window
+        assert_eq!(due(7 * DAY + 1, "FINISHED", false, 0), 0);
+        assert_eq!(due(7 * DAY, "FINISHED", false, 0), STEP_END | STEP_FINISHED | STEP_DAY3);
     }
 
     #[test]

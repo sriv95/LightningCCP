@@ -346,8 +346,7 @@ pub static MIGRATIONS: [&str; 25] = [
     );
     CREATE TABLE contest_prefetch (
         contest_id INTEGER PRIMARY KEY,
-        last_fetch_at INTEGER,
-        final_done INTEGER NOT NULL DEFAULT 0,
+        results_done INTEGER NOT NULL DEFAULT 0,
         ratings_found INTEGER NOT NULL DEFAULT 0,
         last_rating_sweep_at INTEGER
     );
@@ -454,8 +453,8 @@ pub fn is_constraint_violation(error: &anyhow::Error) -> bool {
 /// [`Store::tx`] is one serialized transaction (the role of Python's `_tx` lock).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PrefetchState {
-    pub last_fetch_at: Option<i64>,
-    pub final_done: bool,
+    /// Bitmask of the results-fetch steps done (`logic::schedule::STEP_*`).
+    pub results_done: i64,
     pub ratings_found: bool,
     pub last_rating_sweep_at: Option<i64>,
 }
@@ -634,9 +633,9 @@ impl Store {
     pub async fn prefetch_state(&self, contest_id: i64) -> anyhow::Result<PrefetchState> {
         self.run(move |c| {
             Ok(c.query_row(
-                "SELECT last_fetch_at, final_done, ratings_found, last_rating_sweep_at FROM contest_prefetch WHERE contest_id = ?",
+                "SELECT results_done, ratings_found, last_rating_sweep_at FROM contest_prefetch WHERE contest_id = ?",
                 [contest_id],
-                |r| Ok(PrefetchState { last_fetch_at: r.get(0)?, final_done: r.get(1)?, ratings_found: r.get(2)?, last_rating_sweep_at: r.get(3)? }),
+                |r| Ok(PrefetchState { results_done: r.get(0)?, ratings_found: r.get(1)?, last_rating_sweep_at: r.get(2)? }),
             )
             .optional()?
             .unwrap_or_default())
@@ -646,11 +645,16 @@ impl Store {
 
     pub async fn set_prefetch_state(&self, contest_id: i64, s: PrefetchState) -> anyhow::Result<()> {
         self.write(
-            "INSERT OR REPLACE INTO contest_prefetch (contest_id, last_fetch_at, final_done, ratings_found, last_rating_sweep_at) VALUES (?, ?, ?, ?, ?)",
-            (contest_id, s.last_fetch_at, s.final_done, s.ratings_found, s.last_rating_sweep_at),
+            "INSERT OR REPLACE INTO contest_prefetch (contest_id, results_done, ratings_found, last_rating_sweep_at) VALUES (?, ?, ?, ?)",
+            (contest_id, s.results_done, s.ratings_found, s.last_rating_sweep_at),
         )
         .await
         .map(|_| ())
+    }
+
+    /// Whether the contest-end results fetch has run (results are saved for the contest).
+    pub async fn results_saved(&self, contest_id: i64) -> anyhow::Result<bool> {
+        Ok(self.prefetch_state(contest_id).await?.results_done & crate::logic::schedule::STEP_END != 0)
     }
 
     pub async fn user_for_handle(&self, guild_id: i64, handle: &str) -> anyhow::Result<Option<i64>> {

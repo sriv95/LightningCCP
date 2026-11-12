@@ -1,17 +1,17 @@
-//! Ranklist prefetch: contest results once a contest is FINISHED, real ranks by a rating sweep (rules in `logic::schedule`).
+//! Ranklist prefetch: contest results at fixed steps, real ranks by a rating sweep (rules in `logic::schedule`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::cf::client::CodeforcesClient;
-use crate::logic::schedule::{WINDOW, prefetch_due, rating_sweep_due};
+use crate::logic::schedule::{WINDOW, rating_sweep_due, results_steps_due};
 use crate::services::Services;
 use crate::store::base::Store;
 
 /// Fetches and saves the contest's results for every linked handle (all guilds): the standings rows, then
 /// `contest.status` for each linked handle the standings lack. A failing status lookup is logged and skipped.
-/// Returns the number of results saved. Does not touch the done marker.
+/// Returns the number of results saved. Does not touch the step markers.
 pub async fn fetch_and_save_results(cf: &CodeforcesClient, db: &Store, contest_id: i64, now: i64) -> anyhow::Result<usize> {
     let handles = db.all_linked_handles().await?;
     if handles.is_empty() {
@@ -52,10 +52,11 @@ pub async fn run_round(s: &Services, now: i64) {
                 continue;
             }
         };
-        if prefetch_due(now, end, &c.phase, st.final_done) {
+        let due = results_steps_due(now, end, &c.phase, st.ratings_found, st.results_done);
+        if due != 0 {
             match fetch_and_save_results(&s.cf, &s.db, c.id, now).await {
                 Ok(_) => {
-                    let st = crate::store::base::PrefetchState { final_done: true, last_fetch_at: Some(now), ..st.clone() };
+                    let st = crate::store::base::PrefetchState { results_done: st.results_done | due, ..st.clone() };
                     if let Err(e) = s.db.set_prefetch_state(c.id, st).await {
                         tracing::error!("Prefetch marker {} failed: {e:#}", c.id);
                     }
