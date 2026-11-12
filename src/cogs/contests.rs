@@ -1108,9 +1108,9 @@ pub trait ContestData: Sync {
     fn add_contest_remind(&self, guild: i64, contest: i64, user: i64) -> impl Future<Output = anyhow::Result<bool>> + Send;
     fn linked_handles(&self, guild: i64) -> impl Future<Output = anyhow::Result<Vec<(i64, String)>>> + Send;
     fn standings(&self, contest: i64, handles: &[String]) -> impl Future<Output = anyhow::Result<Vec<Standing>>> + Send;
-    /// (handle, rank, rating change) from `contest.ratingChanges`: standings omit ranks past row 8192.
-    fn contest_ranks(&self, _contest: i64) -> impl Future<Output = anyhow::Result<Vec<(String, i64, i64)>>> + Send {
-        async { Ok(vec![]) }
+    /// (real rank, ICPC (solved, penalty)) of a member the capped standings omit; `None` when unrated.
+    fn member_result(&self, _contest: i64, _handle: &str, _icpc: bool) -> impl Future<Output = anyhow::Result<Option<(i64, Option<(i64, i64)>)>>> + Send {
+        async { Ok(None) }
     }
 }
 
@@ -1130,8 +1130,8 @@ impl ContestData for Services {
     async fn standings(&self, contest: i64, handles: &[String]) -> anyhow::Result<Vec<Standing>> {
         self.cf.standings(contest, handles).await
     }
-    async fn contest_ranks(&self, contest: i64) -> anyhow::Result<Vec<(String, i64, i64)>> {
-        self.cf.contest_ranks(contest).await
+    async fn member_result(&self, contest: i64, handle: &str, icpc: bool) -> anyhow::Result<Option<(i64, Option<(i64, i64)>)>> {
+        self.cf.member_result(contest, handle, icpc).await
     }
 }
 
@@ -1291,16 +1291,11 @@ pub async fn list<D: ContestData, O: PagesOutput>(data: &D, out: &O, kind: &str)
     out.send_pages(pages.into_iter().map(CreateEmbed::from).collect()).await
 }
 
-/// Adds linked members found only in `ranks` (handle, rank, rating change): NaN points, the change rides in the penalty slot.
-fn merge_rated(out: &mut Vec<RankEntry>, owners: &std::collections::HashMap<String, i64>, ranks: &[(String, i64, i64)]) {
-    for (handle, rank, delta) in ranks {
-        let low = handle.to_lowercase();
-        if let Some(&user) = owners.get(&low) {
-            if !out.iter().any(|e| e.1 == user) {
-                out.push((*rank, user, handle.clone(), f64::NAN, *delta));
-            }
-        }
-    }
+/// Adds a member the standings omit: real rank, and NaN points when the contest gives no ICPC score.
+fn push_missing(out: &mut Vec<RankEntry>, user: i64, handle: &str, result: (i64, Option<(i64, i64)>)) {
+    let (rank, score) = result;
+    let (points, penalty) = score.map_or((f64::NAN, 0), |(p, pen)| (p as f64, pen));
+    out.push((rank, user, handle.to_string(), points, penalty));
 }
 
 /// Python `_entries`: (rank, user id, handle, points, penalty) of this server's linked members, best first.
@@ -1316,7 +1311,7 @@ async fn entries_with<D: ContestData>(data: &D, guild: i64, contest_id: i64, rat
     }
     // like the Python dict, a later row with the same lowercase handle wins
     let owners: std::collections::HashMap<String, i64> = linked.iter().map(|(user, h)| (h.to_lowercase(), *user)).collect();
-    let handles: Vec<String> = linked.into_iter().map(|(_, h)| h).collect();
+    let handles: Vec<String> = linked.iter().map(|(_, h)| h.clone()).collect();
     let mut out = vec![];
     for row in data.standings(contest_id, &handles).await? {
         // A team row counts for the first member who is linked here.
@@ -1324,11 +1319,17 @@ async fn entries_with<D: ContestData>(data: &D, guild: i64, contest_id: i64, rat
             out.push((row.rank, owners[&h.to_lowercase()], h.clone(), row.points, row.penalty));
         }
     }
-    // Standings stop at row 8192: look up the missing linked members by rating changes (best effort).
-    let in_standings: std::collections::HashSet<String> = out.iter().map(|e| e.2.to_lowercase()).collect();
-    if rated_fallback && handles.iter().any(|h| !in_standings.contains(&h.to_lowercase())) {
-        let ranks = data.contest_ranks(contest_id).await.unwrap_or_default();
-        merge_rated(&mut out, &owners, &ranks);
+    // Standings stop at row 8192: look the missing linked members up one by one (best effort, errors skip).
+    if rated_fallback {
+        let in_standings: std::collections::HashSet<i64> = out.iter().map(|e| e.1).collect();
+        let icpc = data.contests().iter().find(|c| c.id == contest_id).is_some_and(|c| c.kind == "ICPC");
+        for (user, h) in &linked {
+            if !in_standings.contains(user) {
+                if let Ok(Some(r)) = data.member_result(contest_id, h, icpc).await {
+                    push_missing(&mut out, *user, h, r);
+                }
+            }
+        }
     }
     // chunked Codeforces calls arrive in separate rank order; Python sorts the tuples
     out.sort_by(|a, b| {
@@ -1939,53 +1940,40 @@ pub async fn run_remind_loop(services: Arc<Services>, chans: DiscordChannels) {
 #[cfg(test)]
 mod rated_tests {
     use super::*;
+    use std::collections::HashMap;
 
-    fn owners() -> std::collections::HashMap<String, i64> {
-        [("alice".to_string(), 1), ("sriv95".to_string(), 2)].into()
-    }
-
-    #[test]
-    fn merge_rated_adds_missing_linked_handle_in_rank_order() {
-        let mut out: Vec<RankEntry> = vec![(7877, 1, "Alice".into(), 3.0, 10)];
-        merge_rated(&mut out, &owners(), &[("Alice".into(), 7877, 5), ("SRIV95".into(), 8249, -12), ("other".into(), 9000, 1)]);
-        out.sort_by_key(|e| e.0);
-        assert_eq!(out.len(), 2);
-        assert_eq!((out[1].0, out[1].1), (8249, 2));
-        assert!(out[1].3.is_nan());
-        assert_eq!(out[1].4, -12);
-    }
-
-    #[test]
-    fn merge_rated_with_failed_or_empty_ratings_keeps_standings_only() {
-        let mut out: Vec<RankEntry> = vec![(5, 1, "alice".into(), 3.0, 0)];
-        merge_rated(&mut out, &owners(), &[]);
-        assert_eq!(out, vec![(5, 1, "alice".to_string(), 3.0, 0)]);
-    }
-
-    struct Fake(anyhow::Result<Vec<(String, i64, i64)>>);
+    /// Fake data: handle -> member_result; linked alice (1) and sriv95 (2), standings hold alice only.
+    struct Fake(HashMap<&'static str, Option<(i64, Option<(i64, i64)>)>>);
     impl ContestData for Fake {
         fn contests(&self) -> Arc<Vec<Contest>> { Arc::new(vec![]) }
         fn reminder(&self, _: i64) -> impl Future<Output = anyhow::Result<Option<Reminder>>> + Send { async { Ok(None) } }
         fn add_contest_remind(&self, _: i64, _: i64, _: i64) -> impl Future<Output = anyhow::Result<bool>> + Send { async { Ok(true) } }
         fn linked_handles(&self, _: i64) -> impl Future<Output = anyhow::Result<Vec<(i64, String)>>> + Send {
-            async { Ok(vec![(1, "alice".into()), (2, "sriv95".into())]) }
+            async { Ok(vec![(1, "alice".into()), (2, "sriv95".into()), (3, "unrated".into())]) }
         }
-        fn standings(&self, _: i64, handles: &[String]) -> impl Future<Output = anyhow::Result<Vec<Standing>>> + Send {
-            let _ = handles;
-            async { Ok(vec![]) }
+        fn standings(&self, _: i64, _: &[String]) -> impl Future<Output = anyhow::Result<Vec<Standing>>> + Send {
+            async { Ok(vec![Standing { rank: 9000, handles: vec!["alice".into()], points: 3.0, penalty: 10 }]) }
         }
-        fn contest_ranks(&self, _: i64) -> impl Future<Output = anyhow::Result<Vec<(String, i64, i64)>>> + Send {
-            let r = match &self.0 { Ok(v) => Ok(v.clone()), Err(e) => Err(anyhow::anyhow!("{e}")) };
-            async { r }
+        fn member_result(&self, _: i64, h: &str, _: bool) -> impl Future<Output = anyhow::Result<Option<(i64, Option<(i64, i64)>)>>> + Send {
+            let r = self.0.get(h).copied().flatten();
+            async move { Ok(r) }
         }
     }
 
     #[tokio::test]
-    async fn ratingchanges_error_gives_standings_only_and_recap_never_calls_it() {
-        let f = Fake(Err(anyhow::anyhow!("boom")));
-        assert!(entries_with(&f, 1, 5, true).await.unwrap().is_empty());
-        let ok = Fake(Ok(vec![("sriv95".into(), 8249, 7)]));
-        assert_eq!(entries_with(&ok, 1, 5, true).await.unwrap().len(), 1);
-        assert!(entries(&ok, 1, 5).await.unwrap().is_empty());
+    async fn fallback_rows_merge_by_real_rank_and_unrated_is_left_out() {
+        let f = Fake([("sriv95", Some((8249, Some((4, 268))))), ("unrated", None)].into());
+        let e = entries_with(&f, 1, 5, true).await.unwrap();
+        assert_eq!(e, vec![(8249, 2, "sriv95".to_string(), 4.0, 268), (9000, 1, "alice".to_string(), 3.0, 10)]);
+        // before-the-cap member ranks first: real rank 100 sorts above the standings row
+        let f = Fake([("sriv95", Some((100, None)))].into());
+        let e = entries_with(&f, 1, 5, true).await.unwrap();
+        assert_eq!((e[0].0, e[0].1, e[0].3.is_nan()), (100, 2, true));
+    }
+
+    #[tokio::test]
+    async fn recap_never_looks_up_missing_members() {
+        let f = Fake([("sriv95", Some((8249, None)))].into());
+        assert_eq!(entries(&f, 1, 5).await.unwrap().len(), 1);
     }
 }

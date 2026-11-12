@@ -296,23 +296,76 @@ impl CodeforcesClient {
         self.call_object("contest.standings", vec![("contestId", contest_id.to_string())], parse).await
     }
 
-    /// (handle, rank, rating change) of every rated participant of a contest, from `contest.ratingChanges`.
-    pub async fn contest_ranks(&self, contest_id: i64) -> anyhow::Result<Vec<(String, i64, i64)>> {
+    /// A member missing from the capped standings: (real rank from `user.rating`, ICPC (solved, penalty) from
+    /// `contest.status` when `icpc`). `None` when the member has no rating entry for the contest.
+    pub async fn member_result(&self, contest_id: i64, handle: &str, icpc: bool) -> anyhow::Result<Option<(i64, Option<(i64, i64)>)>> {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
-        struct Change {
-            handle: String,
+        struct Entry {
+            contest_id: i64,
             rank: i64,
-            old_rating: i64,
-            new_rating: i64,
         }
-        let rows: Vec<Change> = self.call("contest.ratingChanges", vec![("contestId", contest_id.to_string())]).await?;
-        Ok(rows.into_iter().map(|c| (c.handle, c.rank, c.new_rating - c.old_rating)).collect())
+        let history: Vec<Entry> = self.call("user.rating", vec![("handle", handle.into())]).await?;
+        let Some(rank) = history.iter().find(|e| e.contest_id == contest_id).map(|e| e.rank) else { return Ok(None) };
+        if !icpc {
+            return Ok(Some((rank, None)));
+        }
+        let params = vec![("contestId", contest_id.to_string()), ("handle", handle.into())];
+        let subs: Vec<IcpcSub> = self.call("contest.status", params).await?;
+        Ok(Some((rank, Some(icpc_score(subs)))))
     }
 
     pub async fn rating_history(&self, handle: &str) -> anyhow::Result<Vec<RatingChange>> {
         self.call("user.rating", vec![("handle", handle.into())]).await
     }
+}
+
+/// One `contest.status` submission, as far as the ICPC score needs.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IcpcSub {
+    creation_time_seconds: i64,
+    relative_time_seconds: i64,
+    verdict: Option<String>,
+    #[serde(default)]
+    passed_test_count: i64,
+    problem: IcpcProblem,
+    author: IcpcAuthor,
+}
+#[derive(Deserialize)]
+struct IcpcProblem {
+    index: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IcpcAuthor {
+    participant_type: String,
+}
+
+/// (solved, penalty minutes) like the official ICPC standings: only CONTESTANT submissions; per problem the
+/// first OK solves it, costing its minute plus 10 per earlier rejected attempt (not compile errors, not
+/// attempts that passed 0 tests); later attempts are ignored.
+pub fn icpc_score(mut subs: Vec<IcpcSub>) -> (i64, i64) {
+    subs.retain(|s| s.author.participant_type == "CONTESTANT");
+    subs.sort_by_key(|s| s.creation_time_seconds);
+    let mut rejected: std::collections::HashMap<String, i64> = Default::default();
+    let mut solved: std::collections::HashSet<String> = Default::default();
+    let mut penalty = 0;
+    for s in &subs {
+        if solved.contains(&s.problem.index) {
+            continue;
+        }
+        match s.verdict.as_deref() {
+            Some("OK") => {
+                penalty += s.relative_time_seconds / 60 + 10 * rejected.get(&s.problem.index).copied().unwrap_or(0);
+                solved.insert(s.problem.index.clone());
+            }
+            Some("COMPILATION_ERROR") | None => {}
+            Some(_) if s.passed_test_count == 0 => {}
+            Some(_) => *rejected.entry(s.problem.index.clone()).or_default() += 1,
+        }
+    }
+    (solved.len() as i64, penalty)
 }
 
 #[cfg(test)]
@@ -371,6 +424,27 @@ mod tests {
 
     fn is_cf_error(e: &anyhow::Error) -> bool {
         matches!(e.downcast_ref::<BotError>(), Some(BotError::Codeforces(_)))
+    }
+
+    fn sub(t: i64, rel: i64, v: &str, passed: i64, idx: &str, who: &str) -> IcpcSub {
+        serde_json::from_value(json!({"creationTimeSeconds": t, "relativeTimeSeconds": rel, "verdict": v,
+            "passedTestCount": passed, "problem": {"index": idx}, "author": {"participantType": who}}))
+        .unwrap()
+    }
+
+    #[test]
+    fn icpc_score_rules() {
+        let subs = vec![
+            sub(5, 3000, "OK", 9, "A", "CONTESTANT"),             // 50 min, 2 rejected before: +20
+            sub(1, 600, "WRONG_ANSWER", 3, "A", "CONTESTANT"),    // counts
+            sub(2, 900, "COMPILATION_ERROR", 0, "A", "CONTESTANT"), // not penalized
+            sub(3, 1200, "WRONG_ANSWER", 0, "A", "CONTESTANT"),   // passed 0: not penalized
+            sub(4, 1500, "TIME_LIMIT_EXCEEDED", 7, "A", "CONTESTANT"), // counts
+            sub(6, 3600, "WRONG_ANSWER", 1, "A", "CONTESTANT"),   // after AC: ignored
+            sub(7, 100, "OK", 9, "B", "PRACTICE"),                // not a contestant
+            sub(8, 120, "OK", 9, "C", "VIRTUAL"),
+        ];
+        assert_eq!(icpc_score(subs), (1, 50 + 20));
     }
 
     #[tokio::test]
