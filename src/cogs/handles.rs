@@ -359,7 +359,17 @@ pub async fn on_component(ctx: &serenity::Context, press: &ComponentInteraction,
     let result = async {
         let guild: GuildId = press.guild_id.ok_or_else(|| anyhow::anyhow!("guild only"))?;
         out.defer().await?;
-        verify(&services.db, services.cf.as_ref(), &out, now(), guild.get() as i64, owner).await
+        verify(&services.db, services.cf.as_ref(), &out, now(), guild.get() as i64, owner).await?;
+        // newly linked: save this handle's real ranks once (background, failure only logged)
+        if let Some(h) = services.db.get_handle(guild.get() as i64, owner as i64).await? {
+            let (cf, db, handle) = (services.cf.clone(), services.db.clone(), h.handle);
+            tokio::spawn(async move {
+                if let Err(e) = crate::prefetch::fetch_and_save_ranks(&cf, &db, &handle, now()).await {
+                    tracing::warn!("Rank fetch for new handle {handle} failed: {e:#}");
+                }
+            });
+        }
+        Ok(())
     }
     .await;
     if let Err(e) = result {
