@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use lightningccp::cf::models::{Contest, Problem};
+use lightningccp::cf::models::{Contest, ContestResult, Problem};
 use lightningccp::errors::BotError;
-use lightningccp::store::base::{MIGRATIONS, Store, is_constraint_violation};
+use lightningccp::store::base::{MIGRATIONS, PrefetchState, Store, is_constraint_violation};
 use rusqlite::Connection;
 
 struct TempDir(PathBuf);
@@ -65,7 +65,7 @@ async fn migrations_idempotent_on_reconnect() {
     let s2 = Store::connect(&path).await.unwrap();
     assert_eq!(s2.get_handle(1, 2).await.unwrap().unwrap().handle, "Tourist");
     s2.close().await.unwrap();
-    assert_eq!(query::<i64>(&path, "PRAGMA user_version"), vec![24]);
+    assert_eq!(query::<i64>(&path, "PRAGMA user_version"), vec![25]);
 }
 
 #[tokio::test]
@@ -451,4 +451,41 @@ async fn contest_reminders_keep_first_seen_contest_order() {
     }
     // expected order from Python: list((await store.contest_reminders(1)).items()) on the same rows
     assert_eq!(s.contest_reminders(1).await.unwrap(), vec![(30, vec![1, 3]), (20, vec![2, 5]), (10, vec![4])]);
+}
+
+#[tokio::test]
+async fn ranklist_prefetch_round_trips() {
+    let (_d, s) = store().await;
+    let res = |h: &str, solved| ContestResult { handle: h.into(), points: 2.5, penalty: 7, solved, last_ac: Some(90), participant_type: "CONTESTANT".into() };
+    s.upsert_contest_results(1, vec![res("Ann", 2), res("bob", 0)], 100).await.unwrap();
+    s.upsert_contest_results(1, vec![ContestResult { last_ac: None, ..res("ANN", 3) }], 200).await.unwrap(); // same handle, any case
+    let mut got = s.contest_results(1).await.unwrap();
+    got.sort_by(|a, b| a.handle.cmp(&b.handle));
+    assert_eq!(got.len(), 2);
+    assert_eq!((got[0].solved, got[0].last_ac, got[0].points, got[0].penalty), (3, None, 2.5, 7));
+    assert!(s.contest_results(2).await.unwrap().is_empty());
+
+    s.upsert_contest_ranks(vec![(1, "Ann".into(), 10)], 100).await.unwrap();
+    s.upsert_contest_ranks(vec![(1, "ann".into(), 8), (1, "bob".into(), 20)], 200).await.unwrap();
+    let mut ranks = s.contest_ranks(1).await.unwrap();
+    ranks.sort_by_key(|r| r.1);
+    assert_eq!(ranks, vec![("ann".to_string(), 8), ("bob".to_string(), 20)]);
+
+    assert_eq!(s.prefetch_state(1).await.unwrap(), PrefetchState::default());
+    let st = PrefetchState { last_fetch_at: Some(5), final_done: true, ratings_found: false, last_rating_sweep_at: Some(9) };
+    s.set_prefetch_state(1, st).await.unwrap();
+    assert_eq!(s.prefetch_state(1).await.unwrap(), st);
+    s.set_prefetch_state(1, PrefetchState { ratings_found: true, ..st }).await.unwrap();
+    assert!(s.prefetch_state(1).await.unwrap().ratings_found);
+}
+
+#[tokio::test]
+async fn all_linked_handles_distinct_across_guilds() {
+    let (_d, s) = store().await;
+    s.link_handle(1, 10, "Tourist", None).await.unwrap();
+    s.link_handle(2, 11, "tourist", None).await.unwrap();
+    s.link_handle(2, 12, "Petr", None).await.unwrap();
+    let mut got: Vec<String> = s.all_linked_handles().await.unwrap().into_iter().map(|h| h.to_lowercase()).collect();
+    got.sort();
+    assert_eq!(got, vec!["petr", "tourist"]);
 }

@@ -3,9 +3,9 @@
 //! live in `matches.rs` and `mashup.rs` as further `impl Store` blocks and reach the connection through
 //! [`Store::run`] and [`Store::tx`].
 
-/// The 24 schema scripts, copied verbatim from `src/db/store.py` `MIGRATIONS` (whitespace is part of `sqlite_master.sql`).
+/// The 25 schema scripts, copied verbatim from `src/db/store.py` `MIGRATIONS` (whitespace is part of `sqlite_master.sql`).
 /// Append only; never edit an old one.
-pub static MIGRATIONS: [&str; 24] = [
+pub static MIGRATIONS: [&str; 25] = [
     r#"
     CREATE TABLE user_handle (
         guild_id INTEGER NOT NULL,
@@ -324,6 +324,34 @@ pub static MIGRATIONS: [&str; 24] = [
     "#,
     // soon = 1 once the "starts within 48 hours" post of the contest went out
     r#"ALTER TABLE newcontest_sent ADD COLUMN soon INTEGER NOT NULL DEFAULT 0;"#,
+    // Ranklist prefetch (Rust-only): saved results, real ranks from user.rating, per-contest prefetch state.
+    r#"
+    CREATE TABLE contest_result (
+        contest_id INTEGER NOT NULL,
+        handle TEXT NOT NULL COLLATE NOCASE,
+        points REAL NOT NULL,
+        penalty INTEGER NOT NULL,
+        solved INTEGER NOT NULL,
+        last_ac_time INTEGER,
+        participant_type TEXT NOT NULL,
+        fetched_at INTEGER NOT NULL,
+        PRIMARY KEY (contest_id, handle)
+    );
+    CREATE TABLE contest_rank (
+        contest_id INTEGER NOT NULL,
+        handle TEXT NOT NULL COLLATE NOCASE,
+        rank INTEGER NOT NULL,
+        fetched_at INTEGER NOT NULL,
+        PRIMARY KEY (contest_id, handle)
+    );
+    CREATE TABLE contest_prefetch (
+        contest_id INTEGER PRIMARY KEY,
+        last_fetch_at INTEGER,
+        final_done INTEGER NOT NULL DEFAULT 0,
+        ratings_found INTEGER NOT NULL DEFAULT 0,
+        last_rating_sweep_at INTEGER
+    );
+    "#,
 ];
 
 use std::collections::HashSet;
@@ -331,7 +359,7 @@ use std::path::Path;
 
 use rusqlite::{OptionalExtension, Transaction, params};
 
-use crate::cf::models::{Contest, Problem};
+use crate::cf::models::{Contest, ContestResult, Problem};
 use crate::errors::BotError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -424,6 +452,14 @@ pub fn is_constraint_violation(error: &anyhow::Error) -> bool {
 
 /// One SQLite connection on its own thread: every call runs to completion in order, so a closure given to
 /// [`Store::tx`] is one serialized transaction (the role of Python's `_tx` lock).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PrefetchState {
+    pub last_fetch_at: Option<i64>,
+    pub final_done: bool,
+    pub ratings_found: bool,
+    pub last_rating_sweep_at: Option<i64>,
+}
+
 pub struct Store {
     pub(crate) conn: tokio_rusqlite::Connection,
 }
@@ -535,6 +571,86 @@ impl Store {
             Ok(rows.collect::<Result<_, _>>()?)
         })
         .await
+    }
+
+    /// Distinct linked handles across all guilds (case-insensitive).
+    pub async fn all_linked_handles(&self) -> anyhow::Result<Vec<String>> {
+        self.run(|c| {
+            let mut stmt = c.prepare("SELECT MIN(handle) FROM user_handle GROUP BY handle COLLATE NOCASE")?;
+            Ok(stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?)
+        })
+        .await
+    }
+
+    // --- ranklist prefetch ---
+    pub async fn upsert_contest_results(&self, contest_id: i64, results: Vec<ContestResult>, fetched_at: i64) -> anyhow::Result<()> {
+        self.tx(move |tx| {
+            let mut stmt = tx.prepare(
+                "INSERT OR REPLACE INTO contest_result (contest_id, handle, points, penalty, solved, last_ac_time, participant_type, fetched_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )?;
+            for r in &results {
+                stmt.execute(params![contest_id, r.handle, r.points, r.penalty, r.solved, r.last_ac, r.participant_type, fetched_at])?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn contest_results(&self, contest_id: i64) -> anyhow::Result<Vec<ContestResult>> {
+        self.run(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT handle, points, penalty, solved, last_ac_time, participant_type FROM contest_result WHERE contest_id = ?",
+            )?;
+            let rows = stmt.query_map([contest_id], |r| {
+                Ok(ContestResult { handle: r.get(0)?, points: r.get(1)?, penalty: r.get(2)?, solved: r.get(3)?, last_ac: r.get(4)?, participant_type: r.get(5)? })
+            })?;
+            Ok(rows.collect::<Result<_, _>>()?)
+        })
+        .await
+    }
+
+    /// Overwrites the saved real rank of each (contest_id, handle, rank).
+    pub async fn upsert_contest_ranks(&self, ranks: Vec<(i64, String, i64)>, fetched_at: i64) -> anyhow::Result<()> {
+        self.tx(move |tx| {
+            let mut stmt = tx.prepare("INSERT OR REPLACE INTO contest_rank (contest_id, handle, rank, fetched_at) VALUES (?, ?, ?, ?)")?;
+            for (contest_id, handle, rank) in &ranks {
+                stmt.execute(params![contest_id, handle, rank, fetched_at])?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// (handle, rank) saved for the contest.
+    pub async fn contest_ranks(&self, contest_id: i64) -> anyhow::Result<Vec<(String, i64)>> {
+        self.run(move |c| {
+            let mut stmt = c.prepare("SELECT handle, rank FROM contest_rank WHERE contest_id = ?")?;
+            Ok(stmt.query_map([contest_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?)
+        })
+        .await
+    }
+
+    pub async fn prefetch_state(&self, contest_id: i64) -> anyhow::Result<PrefetchState> {
+        self.run(move |c| {
+            Ok(c.query_row(
+                "SELECT last_fetch_at, final_done, ratings_found, last_rating_sweep_at FROM contest_prefetch WHERE contest_id = ?",
+                [contest_id],
+                |r| Ok(PrefetchState { last_fetch_at: r.get(0)?, final_done: r.get(1)?, ratings_found: r.get(2)?, last_rating_sweep_at: r.get(3)? }),
+            )
+            .optional()?
+            .unwrap_or_default())
+        })
+        .await
+    }
+
+    pub async fn set_prefetch_state(&self, contest_id: i64, s: PrefetchState) -> anyhow::Result<()> {
+        self.write(
+            "INSERT OR REPLACE INTO contest_prefetch (contest_id, last_fetch_at, final_done, ratings_found, last_rating_sweep_at) VALUES (?, ?, ?, ?, ?)",
+            (contest_id, s.last_fetch_at, s.final_done, s.ratings_found, s.last_rating_sweep_at),
+        )
+        .await
+        .map(|_| ())
     }
 
     pub async fn user_for_handle(&self, guild_id: i64, handle: &str) -> anyhow::Result<Option<i64>> {

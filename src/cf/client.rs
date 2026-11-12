@@ -11,7 +11,7 @@ use serde_json::value::RawValue;
 use tokio::sync::Mutex;
 use tokio::time::{Instant, sleep};
 
-use super::models::{Contest, Problem, RatingChange, Standing, Submission, User};
+use super::models::{Contest, ContestResult, Problem, RatingChange, Standing, Submission, User};
 use crate::errors::BotError;
 
 pub const BASE_URL: &str = "https://codeforces.com/api/";
@@ -315,6 +315,64 @@ impl CodeforcesClient {
         Ok(Some((rank, Some(icpc_score(subs)))))
     }
 
+    /// Results of the given handles from `contest.standings` (bare call, filtered here; team rows give one per member).
+    pub async fn standings_results(&self, contest_id: i64, handles: &[String]) -> anyhow::Result<Vec<ContestResult>> {
+        let wanted: Vec<String> = handles.iter().map(|h| h.to_lowercase()).collect();
+        let parse = |result: &str| {
+            #[derive(Deserialize)]
+            struct Data<'a> {
+                #[serde(borrow)]
+                rows: Vec<&'a RawValue>,
+            }
+            let data: Data = serde_json::from_str(result)?;
+            let mut out = Vec::new();
+            for raw in data.rows {
+                // Cheap pre-filter: only matched rows are parsed in full, like `standings`.
+                #[derive(Deserialize)]
+                struct Probe<'a> {
+                    #[serde(borrow)]
+                    party: PartyProbe<'a>,
+                }
+                #[derive(Deserialize)]
+                struct PartyProbe<'a> {
+                    #[serde(borrow)]
+                    members: Vec<MemberProbe<'a>>,
+                }
+                #[derive(Deserialize)]
+                struct MemberProbe<'a> {
+                    #[serde(borrow)]
+                    handle: Cow<'a, str>,
+                }
+                let probe: Probe = serde_json::from_str(raw.get())?;
+                if probe.party.members.iter().any(|m| wanted.contains(&m.handle.to_lowercase())) {
+                    let row: StandingsRow = serde_json::from_str(raw.get())?;
+                    out.extend(standing_results(row).into_iter().filter(|r| wanted.contains(&r.handle.to_lowercase())));
+                }
+            }
+            Ok(out)
+        };
+        self.call_object("contest.standings", vec![("contestId", contest_id.to_string())], parse).await
+    }
+
+    /// One handle's result from `contest.status`; `None` when it has no CONTESTANT/OUT_OF_COMPETITION submission.
+    pub async fn status_result(&self, contest_id: i64, handle: &str) -> anyhow::Result<Option<ContestResult>> {
+        let params = vec![("contestId", contest_id.to_string()), ("handle", handle.into())];
+        let subs: Vec<IcpcSub> = self.call("contest.status", params).await?;
+        Ok(submissions_result(handle, subs))
+    }
+
+    /// (contest_id, real rank) for each entry of `user.rating`.
+    pub async fn contest_ranks(&self, handle: &str) -> anyhow::Result<Vec<(i64, i64)>> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Entry {
+            contest_id: i64,
+            rank: i64,
+        }
+        let history: Vec<Entry> = self.call("user.rating", vec![("handle", handle.into())]).await?;
+        Ok(history.into_iter().map(|e| (e.contest_id, e.rank)).collect())
+    }
+
     pub async fn rating_history(&self, handle: &str) -> anyhow::Result<Vec<RatingChange>> {
         self.call("user.rating", vec![("handle", handle.into())]).await
     }
@@ -345,12 +403,19 @@ struct IcpcAuthor {
 /// (solved, penalty minutes) like the official ICPC standings: only CONTESTANT submissions; per problem the
 /// first OK solves it, costing its minute plus 10 per earlier rejected attempt (not compile errors, not
 /// attempts that passed 0 tests); later attempts are ignored.
-pub fn icpc_score(mut subs: Vec<IcpcSub>) -> (i64, i64) {
-    subs.retain(|s| s.author.participant_type == "CONTESTANT");
+pub fn icpc_score(subs: Vec<IcpcSub>) -> (i64, i64) {
+    let (solved, penalty, _) = score(subs, &["CONTESTANT"]);
+    (solved, penalty)
+}
+
+/// (solved, penalty, contest-relative seconds of the last accepted) over submissions by the `types` participants.
+fn score(mut subs: Vec<IcpcSub>, types: &[&str]) -> (i64, i64, Option<i64>) {
+    subs.retain(|s| types.contains(&s.author.participant_type.as_str()));
     subs.sort_by_key(|s| s.creation_time_seconds);
     let mut rejected: std::collections::HashMap<String, i64> = Default::default();
     let mut solved: std::collections::HashSet<String> = Default::default();
     let mut penalty = 0;
+    let mut last_ac: Option<i64> = None;
     for s in &subs {
         if solved.contains(&s.problem.index) {
             continue;
@@ -359,13 +424,76 @@ pub fn icpc_score(mut subs: Vec<IcpcSub>) -> (i64, i64) {
             Some("OK") => {
                 penalty += s.relative_time_seconds / 60 + 10 * rejected.get(&s.problem.index).copied().unwrap_or(0);
                 solved.insert(s.problem.index.clone());
+                last_ac = last_ac.max(Some(s.relative_time_seconds));
             }
             Some("COMPILATION_ERROR") | None => {}
             Some(_) if s.passed_test_count == 0 => {}
             Some(_) => *rejected.entry(s.problem.index.clone()).or_default() += 1,
         }
     }
-    (solved.len() as i64, penalty)
+    (solved.len() as i64, penalty, last_ac)
+}
+
+/// A handle's result from its `contest.status` submissions (CONTESTANT and OUT_OF_COMPETITION only, the ICPC
+/// penalty rule of [`icpc_score`]). `points` is the solved count: the status feed has no CF points.
+/// `None` when no such submission exists. Type is CONTESTANT if any submission is one, else OUT_OF_COMPETITION.
+pub fn submissions_result(handle: &str, subs: Vec<IcpcSub>) -> Option<ContestResult> {
+    let any = |t: &str| subs.iter().any(|s| s.author.participant_type == t);
+    let participant_type = if any("CONTESTANT") {
+        "CONTESTANT"
+    } else if any("OUT_OF_COMPETITION") {
+        "OUT_OF_COMPETITION"
+    } else {
+        return None;
+    };
+    let (solved, penalty, last_ac) = score(subs, &["CONTESTANT", "OUT_OF_COMPETITION"]);
+    Some(ContestResult { handle: handle.into(), points: solved as f64, penalty, solved, last_ac, participant_type: participant_type.into() })
+}
+
+/// One `contest.standings` row, as far as [`standing_results`] needs.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StandingsRow {
+    party: RowParty,
+    points: f64,
+    penalty: i64,
+    #[serde(default)]
+    problem_results: Vec<ProblemResult>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RowParty {
+    members: Vec<RowMember>,
+    participant_type: String,
+}
+#[derive(Deserialize)]
+struct RowMember {
+    handle: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProblemResult {
+    points: f64,
+    best_submission_time_seconds: Option<i64>,
+}
+
+/// One result per party member: solved = problems with points > 0, last AC = latest best submission time of those.
+pub fn standing_results(row: StandingsRow) -> Vec<ContestResult> {
+    let solved_rows = || row.problem_results.iter().filter(|p| p.points > 0.0);
+    let solved = solved_rows().count() as i64;
+    let last_ac = solved_rows().filter_map(|p| p.best_submission_time_seconds).max();
+    row.party
+        .members
+        .iter()
+        .map(|m| ContestResult {
+            handle: m.handle.clone(),
+            points: row.points,
+            penalty: row.penalty,
+            solved,
+            last_ac,
+            participant_type: row.party.participant_type.clone(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -445,6 +573,54 @@ mod tests {
             sub(8, 120, "OK", 9, "C", "VIRTUAL"),
         ];
         assert_eq!(icpc_score(subs), (1, 50 + 20));
+    }
+
+    #[test]
+    fn submissions_result_solved_and_last_ac() {
+        let subs = vec![
+            sub(1, 600, "WRONG_ANSWER", 3, "A", "CONTESTANT"),
+            sub(5, 3000, "OK", 9, "A", "CONTESTANT"), // A: 50 + 10
+            sub(2, 900, "COMPILATION_ERROR", 0, "B", "CONTESTANT"),
+            sub(3, 1200, "WRONG_ANSWER", 0, "B", "CONTESTANT"), // not penalized
+            sub(4, 1500, "OK", 9, "B", "CONTESTANT"),           // B: 25
+            sub(6, 4000, "WRONG_ANSWER", 2, "A", "CONTESTANT"), // after AC
+            sub(7, 100, "OK", 9, "C", "PRACTICE"),
+        ];
+        let r = submissions_result("Bob", subs).unwrap();
+        assert_eq!((r.solved, r.penalty, r.last_ac, r.participant_type.as_str()), (2, 85, Some(3000), "CONTESTANT"));
+        assert_eq!(r.points, 2.0);
+        let ooc = submissions_result("Bob", vec![sub(1, 60, "OK", 9, "A", "OUT_OF_COMPETITION")]).unwrap();
+        assert_eq!((ooc.solved, ooc.penalty, ooc.participant_type.as_str()), (1, 1, "OUT_OF_COMPETITION"));
+        assert!(submissions_result("Bob", vec![sub(1, 60, "OK", 9, "A", "VIRTUAL")]).is_none());
+        let none = submissions_result("Bob", vec![sub(1, 60, "WRONG_ANSWER", 4, "A", "CONTESTANT")]).unwrap();
+        assert_eq!((none.solved, none.last_ac), (0, None));
+    }
+
+    #[tokio::test]
+    async fn standings_results_parse_rows() {
+        let row = |h: &[&str], pts: f64, pen: i64, kind: &str, probs: Value| {
+            json!({"party": {"members": h.iter().map(|x| json!({"handle": x})).collect::<Vec<_>>(), "participantType": kind},
+                   "rank": 1, "points": pts, "penalty": pen, "problemResults": probs})
+        };
+        let rows = json!({"rows": [
+            row(&["Ann"], 1500.0, 0, "CONTESTANT", json!([
+                {"points": 500.0, "bestSubmissionTimeSeconds": 600},
+                {"points": 0.0, "rejectedAttemptCount": 2},
+                {"points": 1000.0, "bestSubmissionTimeSeconds": 4000}])),
+            row(&["bob"], 0.0, 0, "OUT_OF_COMPETITION", json!([{"points": 0.0}])),
+            row(&["Zed"], 9.0, 0, "CONTESTANT", json!([])),
+        ]});
+        let (client, _) = make_client(vec![ok(rows)]);
+        let got = client.standings_results(1, &["ann".into(), "BOB".into()]).await.unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!((got[0].handle.as_str(), got[0].solved, got[0].last_ac, got[0].points), ("Ann", 2, Some(4000), 1500.0));
+        assert_eq!((got[1].solved, got[1].last_ac, got[1].participant_type.as_str()), (0, None, "OUT_OF_COMPETITION"));
+    }
+
+    #[tokio::test]
+    async fn contest_ranks_reads_user_rating() {
+        let (client, _) = make_client(vec![ok(json!([{"contestId": 5, "rank": 12, "newRating": 1500, "ratingUpdateTimeSeconds": 1}]))]);
+        assert_eq!(client.contest_ranks("x").await.unwrap(), vec![(5, 12)]);
     }
 
     #[tokio::test]

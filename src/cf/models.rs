@@ -66,6 +66,17 @@ pub struct Standing {
     pub penalty: i64,
 }
 
+/// One member's contest result, from a standings row or from `contest.status`. `last_ac` is contest-relative seconds.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContestResult {
+    pub handle: String,
+    pub points: f64,
+    pub penalty: i64,
+    pub solved: i64,
+    pub last_ac: Option<i64>,
+    pub participant_type: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Submission {
     pub id: i64,
