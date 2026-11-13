@@ -21,6 +21,8 @@ cargo clippy --all-targets               # lint
 cargo bench                              # criterion benches (benches/hot.rs); `lightningccp --bench` is the offline end-to-end bench (bench/gen_fixtures.py makes its fixtures)
 ```
 
+Embed text change: run `UPDATE_VECTORS=1 cargo test`, review the vector diff, then run check.sh.
+
 Config comes from `.env` (see `.env.example`): `BOT_TOKEN` (required), `DB_PATH` (default `data/bot.db`).
 
 ## Layout rules
