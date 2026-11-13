@@ -375,7 +375,7 @@ fn gave_up(view: &MashupView, r: &MashupRank) -> Result<&'static str> {
 fn bingo_standings_lines(view: &MashupView, linked: bool) -> Result<Vec<String>> {
     let mut lines = Vec::new();
     for r in view.standings()? {
-        let mut line = format!("{}. [{}] {} - {} squares, {} lines", r.rank, r.user_id, who_of(view, &r, linked), r.solved, r.lines);
+        let mut line = format!("{}\\. [{}] {} - {} squares, {} lines", r.rank, r.user_id, who_of(view, &r, linked), r.solved, r.lines);
         line += gave_up(view, &r)?;
         if view.mashup.status == "finished"
             && let Some(change) = mashup_change(view, &r)
@@ -440,7 +440,7 @@ fn standings_lines(view: &MashupView, letters: &HashMap<&str, char>, linked: boo
             parts.push(format!("{l} {}m{}", t.div_euclid(60), if *w != 0 { format!(" ({w} wrong)") } else { String::new() }));
         }
         let detail = if parts.is_empty() { String::new() } else { format!(" ({})", parts.join(", ")) };
-        let mut line = format!("{}. {} - {} solved, {}{detail}", r.rank, who_of(view, &r, linked), r.solved, format_hm(r.total_seconds));
+        let mut line = format!("{}\\. {} - {} solved, {}{detail}", r.rank, who_of(view, &r, linked), r.solved, format_hm(r.total_seconds));
         line += gave_up(view, &r)?;
         if m.status == "finished"
             && let Some(change) = mashup_change(view, &r)

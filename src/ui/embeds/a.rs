@@ -416,7 +416,7 @@ pub fn weekly_embed(rows: &[WeeklyRow]) -> EmbedData {
     let text = rows
         .iter()
         .take(STATS_SIZE)
-        .map(|r| format!("{}. <@{}> ({}) {} ({:+}) {}", r.rank, r.user_id, profile_link(&r.handle), r.rating, r.gain, moved(r.moved)))
+        .map(|r| format!("{}\\. <@{}> ({}) {} ({:+}) {}", r.rank, r.user_id, profile_link(&r.handle), r.rating, r.gain, moved(r.moved)))
         .collect::<Vec<_>>()
         .join("\n");
     EmbedData::new("Weekly leaderboard", Some(GOLD))
@@ -483,7 +483,7 @@ pub type RankEntry = (i64, i64, String, f64, i64);
 pub fn ranklist_pages(entries: &[RankEntry], title: &str, per_page: usize) -> Result<Vec<EmbedData>> {
     let line = |e: &RankEntry| {
         let extra = if e.4 != 0 { format!(", penalty {}", e.4) } else { String::new() };
-        format!("{}. <@{}> ({}) {}{extra}", e.0, e.1, profile_link(&e.2), fmt_g(e.3))
+        format!("{}\\. <@{}> ({}) {}{extra}", e.0, e.1, profile_link(&e.2), fmt_g(e.3))
     };
     let groups = chunked(entries, per_page)?;
     let n = groups.len();
@@ -546,7 +546,7 @@ pub fn ranklist_embeds(contest: &Contest, rows: &[RanklistRow], mode: RanklistMo
             }
             Some(x) => format!(" {} solved", x.solved),
         };
-        format!("{rank}. <@{}> ({}){score}", r.user_id, profile_link(&r.handle))
+        format!("{rank}\\. <@{}> ({}){score}", r.user_id, profile_link(&r.handle))
     };
     let mut pages: Vec<String> = Vec::new();
     for g in chunked(&main, per_page)? {

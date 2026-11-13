@@ -563,7 +563,7 @@ async fn team_contest_embeds_and_refresh_skips_finished_teams() {
     assert_eq!(e.calls(), ["h2"]); // team 1 solved everything: neither h1 nor teammate h3 is read
     let embed = serde_json::to_value(CreateEmbed::from(mashup_embed(&e.svc.view(id, None).await.unwrap(), &HashMap::new()).unwrap())).unwrap();
     assert_eq!(title(&embed), "Team mashup");
-    assert!(desc(&embed).contains("1. Team 1 (<@1>, <@3>) - 1 solved"));
+    assert!(desc(&embed).contains("1\\. Team 1 (<@1>, <@3>) - 1 solved"));
 }
 
 #[tokio::test]
@@ -859,7 +859,7 @@ async fn a_finished_bingo_posts_its_closing_message_once() {
     assert!(sent[2].1.is_none()); // the claims before it carry no board
     assert_eq!(sent[3].0, "The bingo is over. Winner: <@1>. Ratings changed.");
     let board = desc(sent[3].1.as_ref().unwrap());
-    assert!(board.contains("1. [1]") && board.contains("rating +"));
+    assert!(board.contains("1\\. [1]") && board.contains("rating +"));
     assert!(out.events().iter().all(|ev| !matches!(ev, Ev::Cleared { .. })));
     assert_eq!(e.store.get_mashup(mid).await.unwrap().unwrap().log_board_id, Some(104));
 }
